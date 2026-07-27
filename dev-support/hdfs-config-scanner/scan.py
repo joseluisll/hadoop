@@ -35,7 +35,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from hdfsconfscan import (  # noqa: E402
     assess, callsites, context, dossier, e1_configkeys, e2_literals, e3_xml,
-    e4_deprecations, e5_skiplists, inventory, oracle, pipeline, report,
+    e4_deprecations, e5_skiplists, inventory, mvntest, oracle, pipeline, report,
 )
 from hdfsconfscan.registry import (  # noqa: E402
     DEPRECATION_SOURCES, MODULES, MODULES_BY_KEY, OTHER_XML_FILES,
@@ -359,6 +359,37 @@ def cmd_inventory(args) -> int:
     return 1 if inv.literal_regressions else 0
 
 
+def cmd_mvntest(args) -> int:
+    """Run Hadoop's real comparison tests through Maven."""
+    ctx = context.build(args.repo)
+    problem = mvntest.toolchain_problem()
+    if problem:
+        print(f"Cannot run the tests: {problem}")
+        print("The oracle only predicts these tests; without a toolchain that "
+              "prediction stays unverified.")
+        return 1
+    specs = [s for s in MODULES if s.has_comparison_test]
+    if args.module:
+        specs = [s for s in specs if s.key == args.module]
+    failures = 0
+    extra = mvntest.extra_args(java_only=args.java_only,
+                               skip_native_win=args.skip_native_win,
+                               mvn_arg=args.mvn_arg)
+    for outcome in mvntest.run(ctx.repo, specs, build_deps=args.build_deps,
+                               timeout=args.timeout, verbose=args.verbose,
+                               extra_args=extra):
+        print(f"{outcome.test_class}")
+        print(f"    {outcome.summary}")
+        for line in outcome.detail:
+            print(f"        {line}")
+        if not outcome.ok:
+            failures += 1
+    print()
+    print("All comparison tests passed." if not failures
+          else f"{failures} test class(es) did not pass.")
+    return 1 if failures else 0
+
+
 def cmd_step(args) -> int:
     """Run one step of the process, using the very same code the runner uses."""
     ctx = context.build(args.repo)
@@ -372,9 +403,15 @@ def cmd_step(args) -> int:
     elif args.name == "M3":
         inv = pipeline.stage_m2(ctx, out_dir).payload
         stages = [pipeline.stage_m3(ctx, inv, out_dir)]
-    else:
+    elif args.name == "M4":
         inv = pipeline.stage_m2(ctx, out_dir).payload
         stages = [pipeline.stage_m4(ctx, inv, args.apply)]
+    else:
+        stages = [pipeline.stage_m5(
+            ctx, build_deps=args.build_deps, timeout=args.timeout,
+            extra_args=mvntest.extra_args(java_only=args.java_only,
+                                          skip_native_win=args.skip_native_win,
+                                          mvn_arg=args.mvn_arg))]
     return _render_stages(stages, applied=args.apply)
 
 
@@ -401,8 +438,10 @@ def _render_stages(results, applied: bool) -> int:
             print(f"    - {item}")
         print()
     if not applied:
-        print("Analysis only - nothing was written to the repo. Re-run with --apply "
-              "to write the batches marked READY.")
+        # Deliberately not "nothing was written": M5 runs Maven, which fills
+        # target/ directories.  No *source* file is touched without --apply.
+        print("No source files were changed. Re-run with --apply to write the "
+              "batches marked READY.")
     if failed:
         print(f"Stages failed: {', '.join(failed)}")
         return 1
@@ -412,8 +451,13 @@ def _render_stages(results, applied: bool) -> int:
 def cmd_pipeline(args) -> int:
     ctx = context.build(args.repo)
     out_dir = args.out or os.path.join(os.path.dirname(os.path.abspath(__file__)), "out")
-    results = pipeline.run(ctx, out_dir, apply_changes=args.apply,
-                           stop_after=args.stop_after)
+    results = pipeline.run(
+        ctx, out_dir, apply_changes=args.apply, stop_after=args.stop_after,
+        maven=not args.skip_maven, build_deps=args.build_deps,
+        mvn_timeout=args.mvn_timeout,
+        mvn_args=mvntest.extra_args(java_only=args.java_only,
+                                    skip_native_win=args.skip_native_win,
+                                    mvn_arg=args.mvn_arg))
     return _render_stages(results, applied=args.apply)
 
 
@@ -501,15 +545,55 @@ def main(argv=None) -> int:
     p_inv.set_defaults(func=cmd_inventory)
 
     p_step = sub.add_parser(parents=[common], name="step", help="run one step (M1..M4) of the process")
-    p_step.add_argument("name", choices=["M1", "M2", "M3", "M4"])
+    p_step.add_argument("name", choices=["M1", "M2", "M3", "M4", "M5"])
     p_step.add_argument("--apply", action="store_true", help="M4 only: write to the repo")
+    p_step.add_argument("--build-deps", action="store_true",
+                        help="M5 only: also build dependency modules (mvn -am); slow")
+    p_step.add_argument("--timeout", type=int, default=3600,
+                        help="M5 only: seconds to allow maven (default 3600)")
+    p_step.add_argument("--java-only", action="store_true",
+                        help="M5 only: skip Hadoop's native and shell-test builds")
+    p_step.add_argument("--skip-native-win", action="store_true",
+                        help="M5 only: skip just the winutils build")
+    p_step.add_argument("--mvn-arg", action="append",
+                        help="M5 only: extra argument passed to maven; repeatable")
     p_step.add_argument("--out", help="output directory (default: ./out)")
     p_step.set_defaults(func=cmd_step)
+
+    p_mvn = sub.add_parser(parents=[common], name="mvntest",
+                           help="run Hadoop's real comparison tests via maven")
+    p_mvn.add_argument("--module", choices=["hdfs", "rbf"])
+    p_mvn.add_argument("--build-deps", action="store_true",
+                       help="also build dependency modules (mvn -am); slow but needed "
+                            "on a fresh checkout")
+    p_mvn.add_argument("--timeout", type=int, default=3600)
+    p_mvn.add_argument("--java-only", action="store_true",
+                       help="skip Hadoop's native (winutils) and bats shell-test builds; "
+                            "neither affects the configuration tests")
+    p_mvn.add_argument("--skip-native-win", action="store_true",
+                       help="skip only the winutils build")
+    p_mvn.add_argument("--mvn-arg", action="append",
+                       help="extra argument passed straight to maven; repeatable")
+    p_mvn.add_argument("-v", "--verbose", action="store_true")
+    p_mvn.set_defaults(func=cmd_mvntest)
 
     p_pipe = sub.add_parser(parents=[common], name="pipeline", help="run the whole M1-M4 process")
     p_pipe.add_argument("--apply", action="store_true",
                         help="let M4 write to the repo (default: analyse only)")
-    p_pipe.add_argument("--stop-after", choices=["M1", "M2", "M3"],
+    p_pipe.add_argument("--skip-maven", action="store_true",
+                        help="do not run Hadoop's real tests (M5); analysis only")
+    p_pipe.add_argument("--build-deps", action="store_true",
+                        help="M5: also build dependency modules (-am); needed on a "
+                             "fresh checkout")
+    p_pipe.add_argument("--java-only", action="store_true",
+                        help="M5: skip Hadoop's native and shell-test builds")
+    p_pipe.add_argument("--skip-native-win", action="store_true",
+                        help="M5: skip just the winutils build")
+    p_pipe.add_argument("--mvn-arg", action="append",
+                        help="M5: extra argument passed to maven; repeatable")
+    p_pipe.add_argument("--mvn-timeout", type=int, default=3600,
+                        help="M5: seconds to allow maven (default 3600)")
+    p_pipe.add_argument("--stop-after", choices=["M1", "M2", "M3", "M4"],
                         help="stop after the named stage")
     p_pipe.add_argument("--out", help="output directory (default: ./out)")
     p_pipe.set_defaults(func=cmd_pipeline)

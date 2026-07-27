@@ -26,7 +26,17 @@ Takes about **30 seconds**. Reads your checkout; writes nothing to it.
 | Python 3 | `python --version` | `Python 3.x` (tested on 3.13) |
 | A Hadoop checkout | `ls hadoop-hdfs-project` | a directory listing |
 
-No Maven, no Java, no build. Nothing is downloaded.
+The analysis needs nothing else — no Maven, no Java, no build.
+
+**To run Hadoop's real tests** (step 7) you additionally need a JDK and Maven:
+
+| Need | Check with |
+| --- | --- |
+| JDK 8+ | `java -version`, or set `JAVA_HOME` |
+| Maven | `mvn -v`, or set `MAVEN_HOME` |
+
+If either is missing, `scan.py mvntest` says so and exits non-zero. It never
+reports a pass for a test that did not run.
 
 <details>
 <summary>Starting from nothing? Get a checkout first</summary>
@@ -158,13 +168,35 @@ Review what changed before committing:
 git diff
 ```
 
-Then confirm the real Java tests pass — the scanner predicts them, it does not
-replace them:
+Then run Hadoop's real tests. `--apply` does this automatically, or run them
+yourself at any time:
 
 ```bash
-mvn test -Dtest=TestHdfsConfigFields -pl hadoop-hdfs-project/hadoop-hdfs
-mvn test -Dtest=TestRBFConfigFields  -pl hadoop-hdfs-project/hadoop-hdfs-rbf
+python scan.py mvntest                              # both comparison tests
+python scan.py mvntest --module hdfs                # just one
+python scan.py mvntest --build-deps --java-only     # first run on a fresh
+                                                    # checkout (slow)
 ```
+
+`--build-deps` is needed the first time, because the test cannot run until
+`hadoop-common` and `hadoop-hdfs-client` are built. Expect a long wait and
+roughly a gigabyte of downloads.
+
+`--java-only` turns off two parts of Hadoop's build that have nothing to do
+with these tests but stop them ever running on a plain developer machine:
+
+| Profile | What it does | Why it fails |
+| --- | --- | --- |
+| `native-win` | compiles `winutils.exe` | needs Visual Studio (`devenv`) |
+| `shelltest` | runs the bats shell suite | needs bats and a POSIX shell |
+
+Use `--mvn-arg` to pass anything else straight through to Maven.
+
+The scanner *predicts* these tests in step 3; this is the prediction being
+checked. Results are read from Maven's surefire report, so a failed assertion
+is reported differently from a module that never compiled — those need
+different fixes. A missing JDK or Maven is reported as a failure to verify,
+never as a pass.
 
 ---
 

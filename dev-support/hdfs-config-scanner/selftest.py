@@ -35,7 +35,7 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from hdfsconfscan import (  # noqa: E402
-    assess, callsites, e2_literals, e3_xml, inventory, javalex, javamodel, pipeline,
+    assess, callsites, e2_literals, e3_xml, inventory, javalex, javamodel, mvntest, pipeline,
 )
 from hdfsconfscan.semantics import is_partial_property, is_valid_property_name  # noqa: E402
 from hdfsconfscan.symbols import UNRESOLVED, FileIndex, SymbolTable  # noqa: E402
@@ -502,6 +502,65 @@ class TestPipelineEdits(unittest.TestCase):
     def test_missing_anchor_raises_rather_than_appending_blindly(self):
         with self.assertRaises(ValueError):
             pipeline._insert_property("<configuration></configuration>", "nope", "<property/>")
+
+
+class TestMavenResults(unittest.TestCase):
+    """Reading Maven's verdict, which must never be guessed from exit codes."""
+
+    def test_test_class_derived_from_path(self):
+        self.assertEqual(
+            mvntest.test_class_of("hadoop-hdfs-project/hadoop-hdfs/src/test/java/"
+                                  "org/apache/hadoop/tools/TestHdfsConfigFields.java"),
+            "org.apache.hadoop.tools.TestHdfsConfigFields")
+
+    def _outcome_from(self, xml: str):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = write(tmp, "report.xml", xml)
+            outcome = mvntest.TestOutcome(module_key="hdfs", test_class="T")
+            mvntest._parse_surefire(path, outcome)
+            return outcome
+
+    def test_passing_report(self):
+        outcome = self._outcome_from(
+            '<testsuite tests="4" failures="0" errors="0" skipped="0" time="2.5">'
+            '<testcase name="a"/><testcase name="b"/></testsuite>')
+        self.assertTrue(outcome.ok)
+        self.assertTrue(outcome.ran)
+        self.assertEqual(outcome.tests, 4)
+
+    def test_failing_report_captures_the_assertion(self):
+        outcome = self._outcome_from(
+            '<testsuite tests="2" failures="1" errors="0" skipped="0" time="1">'
+            '<testcase name="testCompareXmlAgainstConfigurationClass">'
+            '<failure message="hdfs-default.xml has 1 properties missing"/>'
+            '</testcase></testsuite>')
+        self.assertFalse(outcome.ok)
+        self.assertTrue(outcome.ran)
+        self.assertIn("properties missing", outcome.detail[0])
+
+    def test_zero_tests_is_not_a_pass(self):
+        # A run that executed nothing must not be reported as success.
+        outcome = self._outcome_from(
+            '<testsuite tests="0" failures="0" errors="0" skipped="0" time="0"/>')
+        self.assertFalse(outcome.ok)
+
+    def test_maven_args_are_built_in_one_place(self):
+        # mvntest, step M5 and pipeline must invoke maven identically.
+        self.assertEqual(mvntest.extra_args(java_only=True),
+                         ["-P", "!native-win,!shelltest"])
+        self.assertEqual(mvntest.extra_args(skip_native_win=True),
+                         ["-P", "!native-win"])
+        # --java-only supersedes the narrower switch rather than stacking.
+        self.assertEqual(mvntest.extra_args(java_only=True, skip_native_win=True),
+                         ["-P", "!native-win,!shelltest"])
+        self.assertEqual(mvntest.extra_args(mvn_arg=["-X"]), ["-X"])
+        self.assertEqual(mvntest.extra_args(), [])
+
+    def test_unrun_outcome_says_so(self):
+        outcome = mvntest.TestOutcome(module_key="hdfs", test_class="T",
+                                      message="no JDK found")
+        self.assertFalse(outcome.ok)
+        self.assertIn("DID NOT RUN", outcome.summary)
 
 
 class TestXmlExtraction(unittest.TestCase):

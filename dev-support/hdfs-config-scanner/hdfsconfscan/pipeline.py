@@ -13,10 +13,11 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""The M1-M4 process as a runnable pipeline.
+"""The M1-M5 process as a runnable pipeline.
 
-    python scan.py pipeline            # analyse only; never touches the repo
-    python scan.py pipeline --apply    # also write the batches that are ready
+    python scan.py pipeline                       # analyse, then run the real tests
+    python scan.py pipeline --skip-maven          # analysis only, ~30 seconds
+    python scan.py pipeline --apply --java-only   # also write the ready batches
 
 Which stages need a human:
 
@@ -29,8 +30,13 @@ Which stages need a human:
   exist. Placement inside each xml is a judgement call, so anchors are declared
   in ``PLACEMENTS`` rather than guessed.
 
+* **M5** - a JDK and Maven. It runs Hadoop's real TestHdfsConfigFields and
+  TestRBFConfigFields, which is what turns the oracle's prediction into a
+  result. It runs by default; ``--skip-maven`` drops back to analysis only.
+
 Every applied batch is verified immediately: the oracle must still pass, and a
-batch that breaks it is rolled back rather than left half-applied.
+batch that breaks it is rolled back rather than left half-applied.  M5 then
+checks the same thing for real.
 """
 
 from __future__ import annotations
@@ -40,7 +46,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-from . import assess, callsites, context as context_mod, inventory, oracle, report
+from . import assess, callsites, context as context_mod, inventory, mvntest, oracle, report
 from .context import ScanContext
 from .registry import MODULES, MODULES_BY_KEY
 
@@ -210,6 +216,35 @@ def stage_m4(ctx: ScanContext, inv: inventory.Inventory, apply_changes: bool) ->
     return result
 
 
+def stage_m5(ctx: ScanContext, build_deps: bool = False, timeout: int = 3600,
+             extra_args: Optional[List[str]] = None) -> StageResult:
+    """Run Hadoop's real comparison tests.
+
+    The oracle predicts these; this is the prediction being checked.  A missing
+    JDK or Maven is reported as a failure to *verify*, never as a pass - the
+    whole point is not to claim a green test that never ran.
+    """
+    result = StageResult("M5", "verify with Hadoop's own tests (maven)")
+    problem = mvntest.toolchain_problem()
+    if problem:
+        result.ok = False
+        result.say(f"cannot run the tests: {problem}")
+        result.blocked.append(f"install the toolchain to verify for real: {problem}")
+        return result
+
+    specs = [spec for spec in MODULES if spec.has_comparison_test]
+    outcomes = mvntest.run(ctx.repo, specs, build_deps=build_deps, timeout=timeout,
+                           extra_args=extra_args)
+    result.payload = outcomes
+    for outcome in outcomes:
+        result.say(f"{outcome.test_class.rsplit('.', 1)[-1]}: {outcome.summary}")
+        for line in outcome.detail[:8]:
+            result.say(f"    {line}")
+        if not outcome.ok:
+            result.ok = False
+    return result
+
+
 # ---------------------------------------------------------------- apply logic
 
 def _restyle(block: str, indent: int) -> str:
@@ -320,7 +355,9 @@ def _restore(originals: Dict[str, str]) -> None:
 # ------------------------------------------------------------------- driver
 
 def run(ctx: ScanContext, out_dir: str, apply_changes: bool = False,
-        stop_after: Optional[str] = None) -> List[StageResult]:
+        stop_after: Optional[str] = None, maven: bool = True,
+        build_deps: bool = False, mvn_timeout: int = 3600,
+        mvn_args: Optional[List[str]] = None) -> List[StageResult]:
     results: List[StageResult] = []
 
     m1 = stage_m1(ctx)
@@ -340,4 +377,13 @@ def run(ctx: ScanContext, out_dir: str, apply_changes: bool = False,
         return results
 
     results.append(stage_m4(ctx, inv, apply_changes))
+    if stop_after == "M4":
+        return results
+
+    # M5 runs by default: a prediction that is never checked is the thing this
+    # milestone exists to remove.  It can be turned off for a quick analysis
+    # pass, since a cold Maven build is slow.
+    if maven:
+        results.append(stage_m5(ctx, build_deps=build_deps, timeout=mvn_timeout,
+                                extra_args=mvn_args))
     return results
