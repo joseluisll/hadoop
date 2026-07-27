@@ -23,6 +23,12 @@ import java.util.HashSet;
 import org.apache.hadoop.conf.TestConfigurationFieldsBase;
 import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.client.HdfsClientConfigKeys;
+import org.apache.hadoop.hdfs.protocol.datatransfer.BlackListBasedTrustedChannelResolver;
+import org.apache.hadoop.hdfs.protocol.datatransfer.WhitelistBasedTrustedChannelResolver;
+import org.apache.hadoop.hdfs.qjournal.client.QuorumJournalManager;
+import org.apache.hadoop.hdfs.server.namenode.ha.EditLogTailer;
+import org.apache.hadoop.hdfs.web.oauth2.ConfRefreshTokenBasedAccessTokenProvider;
+import org.apache.hadoop.hdfs.web.oauth2.CredentialBasedAccessTokenProvider;
 
 /**
  * Unit test class to compare the following MR Configuration classes:
@@ -48,7 +54,12 @@ public class TestHdfsConfigFields extends TestConfigurationFieldsBase {
         HdfsClientConfigKeys.ShortCircuit.class,
         HdfsClientConfigKeys.Retry.class, HdfsClientConfigKeys.Mmap.class,
         HdfsClientConfigKeys.BlockWrite.ReplaceDatanodeOnFailure.class,
-        HdfsClientConfigKeys.Write.ECRedundancy.class};
+        HdfsClientConfigKeys.Write.ECRedundancy.class,
+        WhitelistBasedTrustedChannelResolver.class,
+        BlackListBasedTrustedChannelResolver.class,
+        EditLogTailer.class, QuorumJournalManager.class,
+        CredentialBasedAccessTokenProvider.class,
+        ConfRefreshTokenBasedAccessTokenProvider.class};
 
     // Set error modes
     errorIfMissingConfigProps = true;

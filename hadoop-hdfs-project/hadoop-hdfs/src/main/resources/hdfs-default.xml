@@ -2656,6 +2656,142 @@
 </property>
 
 <property>
+  <name>dfs.datatransfer.client.fixedBlackList.file</name>
+  <value></value>
+  <description>
+    Path to the file containing subnets and ip addresses to form the fixed
+    blacklist used by the client. When unset, the client uses the value of
+    dfs.datatransfer.server.fixedBlackList.file.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.client.fixedwhitelist.file</name>
+  <value></value>
+  <description>
+    Path to the file containing subnets and ip addresses to form the fixed
+    whitelist used by the client. When unset, the client uses the value of
+    dfs.datatransfer.server.fixedwhitelist.file.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.client.variableBlackList.cache.secs</name>
+  <value>3600</value>
+  <description>
+    Time in seconds after which the variable BlackList file is checked for updates. This key is for client.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.client.variableBlackList.enable</name>
+  <value>false</value>
+  <description>
+    Enables/Disables variable BlackList. This key is for client.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.client.variableBlackList.file</name>
+  <value></value>
+  <description>
+    Path to the file containing subnets and ip addresses to form the variable
+    blacklist used by the client. When unset, the client uses the value of
+    dfs.datatransfer.server.variableBlackList.file.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.client.variablewhitelist.cache.secs</name>
+  <value>3600</value>
+  <description>
+    Time in seconds by which the variable whitelist file is checked for updates.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.client.variablewhitelist.enable</name>
+  <value>false</value>
+  <description>
+    Enables/Disables variable whitelist.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.client.variablewhitelist.file</name>
+  <value></value>
+  <description>
+    Path to the file containing subnets and ip addresses to form the variable
+    whitelist used by the client. When unset, the client uses the value of
+    dfs.datatransfer.server.variablewhitelist.file.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.server.fixedBlackList.file</name>
+  <value>/etc/hadoop/fixedBlackList</value>
+  <description>
+    Path to the file containing subnets and ip addresses to form fixed BlackList. Server side config.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.server.fixedwhitelist.file</name>
+  <value>/etc/hadoop/fixedwhitelist</value>
+  <description>
+    Path to the file to containing subnets and ip addresses to form fixed whitelist.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.server.variableBlackList.cache.secs</name>
+  <value>3600</value>
+  <description>
+    Time in seconds after which the variable BlackList file is checked for updates. Server side config.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.server.variableBlackList.enable</name>
+  <value>false</value>
+  <description>
+    Enables/Disables variable BlackList. Server side config.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.server.variableBlackList.file</name>
+  <value>/etc/hadoop/blackList</value>
+  <description>
+    Path to the file containing subnets and ip addresses to form variable BlackList. Server side config.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.server.variablewhitelist.cache.secs</name>
+  <value>3600</value>
+  <description>
+    Time in seconds by which the variable whitelist file is checked for updates.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.server.variablewhitelist.enable</name>
+  <value>false</value>
+  <description>
+    Enables/Disables variable whitelist.
+  </description>
+</property>
+
+<property>
+  <name>dfs.datatransfer.server.variablewhitelist.file</name>
+  <value>/etc/hadoop/whitelist</value>
+  <description>
+    Path to the file to containing subnets and ip addresses to form variable whitelist.
+  </description>
+</property>
+
+<property>
   <name>dfs.data.transfer.protection</name>
   <value></value>
   <description>
@@ -3891,6 +4027,22 @@
     more up-to-date data. When using the QuorumJournalManager, this enables
     tailing of edit logs via the RPC-based mechanism, rather than streaming,
     which allows for much fresher data.
+  </description>
+</property>
+
+<property>
+  <name>dfs.ha.tail-edits.max-txns-per-lock</name>
+  <value>9223372036854775807</value>
+  <description>
+    StandbyNode will hold namesystem lock to apply at most this many journal transactions. It will then release the lock and re-acquire it to load more transactions. By default the write lock is held for the entire journal segment. Fine-grained locking allows read requests to get through.
+  </description>
+</property>
+
+<property>
+  <name>dfs.ha.tail-edits.qjm.rpc.max-txns</name>
+  <value>5000</value>
+  <description>
+    This config is not publicly exposed.
   </description>
 </property>
 
@@ -6035,6 +6187,30 @@
   <description>
     Access token provider class for WebHDFS using OAuth2.
     Defaults to org.apache.hadoop.hdfs.web.oauth2.ConfCredentialBasedAccessTokenProvider.
+  </description>
+</property>
+
+<property>
+  <name>dfs.webhdfs.oauth2.credential</name>
+  <value></value>
+  <description>
+    (required if using ConfCredentialBasedAccessTokenProvider). Credential used to obtain initial and subsequent access tokens.
+  </description>
+</property>
+
+<property>
+  <name>dfs.webhdfs.oauth2.refresh.token</name>
+  <value></value>
+  <description>
+    (required if using ConfRefreshTokenBasedAccessTokenProvider) Initial refresh token to use to obtain new access tokens.
+  </description>
+</property>
+
+<property>
+  <name>dfs.webhdfs.oauth2.refresh.token.expires.ms.since.epoch</name>
+  <value></value>
+  <description>
+    (required if using ConfRefreshTokenBasedAccessTokenProvider) Access token expiration measured in milliseconds since Jan 1, 1970. Note this is a different value than provided by OAuth providers and has been munged as described in interface to be suitable for a client application.
   </description>
 </property>
 

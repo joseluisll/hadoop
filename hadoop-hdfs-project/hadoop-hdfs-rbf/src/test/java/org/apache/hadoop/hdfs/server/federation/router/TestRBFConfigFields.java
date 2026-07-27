@@ -18,6 +18,10 @@
 package org.apache.hadoop.hdfs.server.federation.router;
 
 import org.apache.hadoop.conf.TestConfigurationFieldsBase;
+import org.apache.hadoop.hdfs.server.federation.resolver.order.AvailableSpaceResolver;
+import org.apache.hadoop.hdfs.server.federation.resolver.order.RouterResolver;
+import org.apache.hadoop.hdfs.server.federation.store.driver.impl.StateStoreFileImpl;
+import org.apache.hadoop.hdfs.server.federation.store.driver.impl.StateStoreFileSystemImpl;
 
 import java.util.HashSet;
 
@@ -35,7 +39,9 @@ public class TestRBFConfigFields extends TestConfigurationFieldsBase {
   @Override
   public void initializeMemberVariables() {
     xmlFilename = "hdfs-rbf-default.xml";
-    configurationClasses = new Class[] {RBFConfigKeys.class};
+    configurationClasses = new Class[] {RBFConfigKeys.class,
+        AvailableSpaceResolver.class, RouterResolver.class,
+        StateStoreFileImpl.class, StateStoreFileSystemImpl.class};
 
     // Set error modes
     errorIfMissingConfigProps = true;

@@ -441,6 +441,22 @@
   </property>
 
   <property>
+    <name>dfs.federation.router.available-space-resolver.balanced-space-preference-fraction</name>
+    <value>0.6</value>
+    <description>
+      Increases chance of files on subcluster with more available space.
+    </description>
+  </property>
+
+  <property>
+    <name>dfs.federation.router.router-resolver.update-period</name>
+    <value>10000</value>
+    <description>
+      Configuration key to set the minimum time to update subcluster info.
+    </description>
+  </property>
+
+  <property>
     <name>dfs.federation.router.store.driver.async.override.max.threads</name>
     <value>-1</value>
     <description>
@@ -1031,6 +1047,14 @@
   </property>
 
   <property>
+    <name>dfs.federation.router.store.driver.file.directory</name>
+    <value></value>
+    <description>
+      Configuration keys.
+    </description>
+  </property>
+
+  <property>
     <name>dfs.federation.router.store.driver.fs.async.threads</name>
     <value>0</value>
     <description>
@@ -1041,6 +1065,14 @@
       Default value is 0, which means StateStoreFileSystemImpl would work in sync mode, meaning it
       would access one file from the filesystem at a time.
       Use positive integer value to enable concurrent files access from the given filesystem.
+    </description>
+  </property>
+
+  <property>
+    <name>dfs.federation.router.store.driver.fs.path</name>
+    <value></value>
+    <description>
+      Configuration keys.
     </description>
   </property>
 
