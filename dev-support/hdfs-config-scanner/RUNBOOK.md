@@ -211,6 +211,10 @@ are the parts no tool can decide:
   subsystem must write these before their batch can be applied.
 - **Properties marked `NEEDS_REVIEW`.** The evidence was ambiguous, so a person
   decides whether each is really a configuration property.
+- **Properties marked `SKIPLISTED_CONTESTED`.** The test skip list calls them
+  deprecated or removed, but production code still reads them and no
+  deprecation registry agrees. A person re-vets each and either documents the
+  property or fixes the skip-list comment; the tool refuses to pick a side.
 - **Where a new property belongs in the xml.** Insertion points are listed in
   `PLACEMENTS` in `hdfsconfscan/pipeline.py`; a batch with no entry is skipped
   rather than dumped at the end of the file.
@@ -222,6 +226,6 @@ are the parts no tool can decide:
 If you suspect the scanner rather than Hadoop:
 
 ```bash
-python selftest.py          # 41 unit tests, under a second
+python selftest.py          # 51 unit tests, under a second
 python scan.py verify       # every reported file:line really contains what is claimed
 ```

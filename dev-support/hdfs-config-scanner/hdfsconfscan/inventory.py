@@ -46,6 +46,7 @@ DYNAMIC_PATTERN = "DYNAMIC_PATTERN"
 DEPRECATED_ALIAS = "DEPRECATED_ALIAS"
 DEPRECATED_CONSTANT = "DEPRECATED_CONSTANT"
 INTERNAL_SKIPLISTED = "INTERNAL_SKIPLISTED"
+SKIPLISTED_CONTESTED = "SKIPLISTED_CONTESTED"
 INTERNAL_PRIVATE = "INTERNAL_PRIVATE"
 TEST_ONLY = "TEST_ONLY"
 UNUSED = "UNUSED"
@@ -143,6 +144,8 @@ class Entry:
             DEPRECATED_ALIAS: "Do not document; deprecated alias",
             DEPRECATED_CONSTANT: "Do not document; constant is @Deprecated",
             INTERNAL_SKIPLISTED: "Do not document; already justified in the test skip list",
+            SKIPLISTED_CONTESTED: "Re-vet: the skip list's stated reason is "
+                                  "contradicted by the code evidence",
             INTERNAL_PRIVATE: "Do not document; declared private/internal in source",
             TEST_ONLY: "Do not document; only used by tests",
             UNUSED: "Investigate: declared but never read",
@@ -166,24 +169,15 @@ class Inventory:
     def contradicted_skips(self) -> List[Entry]:
         """Skip-list entries whose stated reason the evidence contradicts.
 
-        TestHdfsConfigFields excludes six properties under the comment
-        "Fully deprecated properties?" - written with a question mark, and
-        never resolved.  Every one is still read by production code and none
-        appears in a DeprecationDelta table, so they are live, undocumented
-        properties being hidden from the comparison under a false premise.
+        These are classified SKIPLISTED_CONTESTED by ``_classify``:
+        TestHdfsConfigFields excludes properties as deprecated ("Fully
+        deprecated properties?" - written with a question mark, and never
+        resolved) or removed ("Removed by HDFS-6440"), yet each is still
+        read by production code and none appears in a DeprecationDelta
+        table, so they are live, undocumented properties being hidden from
+        the comparison under a false premise.
         """
-        found = []
-        for entry in self.entries.values():
-            if entry.status != INTERNAL_SKIPLISTED:
-                continue
-            reason = (entry.skip_reason or "").lower()
-            if "deprecat" not in reason:
-                continue
-            if entry.deprecated_to or entry.deprecated_constant:
-                continue  # the reason holds up
-            if entry.read_main > 0 and not entry.documented_in:
-                found.append(entry)
-        return sorted(found, key=lambda e: e.key)
+        return self.by_status(SKIPLISTED_CONTESTED)
 
     def by_status(self, status: str) -> List[Entry]:
         return sorted((e for e in self.entries.values() if e.status == status),
@@ -431,6 +425,29 @@ def build(ctx: ScanContext) -> Inventory:
     return inv
 
 
+def _skip_reason_contested(entry: Entry) -> bool:
+    """Whether a skip-list reason makes a factual claim the evidence refutes.
+
+    Skip reasons split into two kinds.  *Intent* claims ("Property not
+    intended for users", "Purposely hidden") are the author's judgement; no
+    scan can falsify them, so they are trusted as-is.  *Fact* claims assert
+    something checkable: a reason ending in "?" is openly unsure, and one
+    saying deprecated/removed predicts that the property appears in a
+    DeprecationDelta table, carries a @Deprecated constant, or is no longer
+    read.  When such a claim is contradicted on every count - the property
+    is read by production code, maps to no delta, and has no deprecated
+    constant - the entry needs a human decision, not silent burial.
+    """
+    reason = (entry.skip_reason or "").strip()
+    low = reason.lower()
+    claims_fact = low.endswith("?") or "deprecat" in low or "removed" in low
+    if not claims_fact:
+        return False
+    if entry.deprecated_to or entry.deprecated_constant:
+        return False  # the deprecation claim holds up
+    return entry.read_main > 0 and not entry.documented_in
+
+
 def _classify(entry: Entry, key: str, skipped: Set[str],
               deprecated_map: Dict[str, List[str]], deprecated_constants) -> str:
     """Assign one status.  Order matters: earlier rules are stronger evidence.
@@ -465,6 +482,12 @@ def _classify(entry: Entry, key: str, skipped: Set[str],
 
     if key in skipped:
         entry.evidence.append("E5 skip list")
+        if _skip_reason_contested(entry):
+            entry.evidence.append(
+                f"skip reason {entry.skip_reason!r} contradicted: "
+                f"{entry.read_main} production read(s), no DeprecationDelta, "
+                "no @Deprecated constant")
+            return SKIPLISTED_CONTESTED
         return INTERNAL_SKIPLISTED
 
     if key in deprecated_constants:

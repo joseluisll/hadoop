@@ -24,7 +24,7 @@ from typing import List
 from .inventory import (
     ACTIVE_DOCUMENTED, ACTIVE_UNDOCUMENTED, DEPRECATED_ALIAS, DEPRECATED_CONSTANT,
     DOCUMENTED_ELSEWHERE, EXTERNAL, INTERNAL_PRIVATE, INTERNAL_SKIPLISTED,
-    NEEDS_REVIEW, TEST_ONLY, UNUSED, Inventory,
+    NEEDS_REVIEW, SKIPLISTED_CONTESTED, TEST_ONLY, UNUSED, Inventory,
 )
 
 CSV_COLUMNS = [
@@ -38,9 +38,9 @@ CSV_COLUMNS = [
 ]
 
 _STATUS_ORDER = [
-    ACTIVE_UNDOCUMENTED, NEEDS_REVIEW, UNUSED, DOCUMENTED_ELSEWHERE,
-    INTERNAL_PRIVATE, TEST_ONLY, INTERNAL_SKIPLISTED, DEPRECATED_ALIAS,
-    DEPRECATED_CONSTANT, EXTERNAL, ACTIVE_DOCUMENTED,
+    ACTIVE_UNDOCUMENTED, SKIPLISTED_CONTESTED, NEEDS_REVIEW, UNUSED,
+    DOCUMENTED_ELSEWHERE, INTERNAL_PRIVATE, TEST_ONLY, INTERNAL_SKIPLISTED,
+    DEPRECATED_ALIAS, DEPRECATED_CONSTANT, EXTERNAL, ACTIVE_DOCUMENTED,
 ]
 
 
@@ -134,9 +134,11 @@ def write_markdown(inv: Inventory, path: str, repo: str) -> None:
     if contradicted:
         out.append(f"## Skip-list reasons contradicted by the code ({len(contradicted)})")
         out.append("")
-        out.append("Excluded from `TestHdfsConfigFields` as deprecated, but still read by "
-                   "production code and listed in no `DeprecationDelta` table. The upstream "
-                   "comment ends in a question mark; these are the answers.")
+        out.append("Excluded from `TestHdfsConfigFields` as deprecated or removed, but "
+                   "still read by production code and listed in no `DeprecationDelta` "
+                   "table. Where the upstream comment ends in a question mark, these are "
+                   "the answers; where it claims removal, the reads refute it. Each needs "
+                   "a human verdict: document the property, or fix the skip-list comment.")
         out.append("")
         out.extend(_table(
             [[f"`{e.key}`", e.read_main, e.declared_at or "", e.skip_reason or ""]

@@ -216,6 +216,19 @@ because they moved to `HdfsClientConfigKeys`, while the properties stay live and
 documented. Only a `DeprecationDelta` entry deprecates a property *name*, so
 that is what drives `DEPRECATED_ALIAS`; the annotation is recorded as a column.
 
+The skip lists get the same scepticism. A skip reason that states *intent*
+("Property not intended for users", "Purposely hidden") is the author's
+judgement and is trusted as-is (`INTERNAL_SKIPLISTED`). A reason that states a
+checkable *fact* — it ends in a question mark, or claims the property is
+deprecated or removed — is verified against the evidence, and when the
+property is still read by production code, appears in no `DeprecationDelta`
+table and carries no `@Deprecated` constant, the entry becomes
+`SKIPLISTED_CONTESTED`: the claim is refuted, so a human must either document
+the property or fix the skip-list comment. This is how
+`dfs.ha.log-roll.rpc.timeout` ("Removed by HDFS-6440" — yet `EditLogTailer`
+still reads it) and the "Fully deprecated properties?" group surface instead
+of staying buried under a false premise.
+
 ## Proposed documentation
 
 `scan.py assess` turns the candidates into per-property recommendations and a
@@ -248,7 +261,7 @@ python scan.py oracle
 M1 (static extraction), M2 (call-site analysis, classification, reporting),
 M3 (assessment and proposed xml) and the first M4 patch (25 properties
 documented) are complete, each closed with an audit of its own output. Every check passes: the oracle on both modules, `verify` with 0
-provenance mismatches, `sweep` with 0 unaccounted call sites, and 37 unit tests.
+provenance mismatches, `sweep` with 0 unaccounted call sites, and 51 unit tests.
 1157 properties are classified; 58 are undocumented candidates, 32 of which
 already have an evidence-backed description. Four batches (25 properties) have
 no TODOs and are ready to upstream.

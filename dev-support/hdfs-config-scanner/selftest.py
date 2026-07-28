@@ -424,6 +424,31 @@ class TestClassification(unittest.TestCase):
         self.assertEqual(self._classify(entry, deprecated={entry.key: ["new.key"]}),
                          inventory.DEPRECATED_ALIAS)
 
+    def test_skiplisted_uncertain_deprecation_claim_with_reads_is_contested(self):
+        entry = self._entry(read_main=1, visibility="public",
+                            skip_reason="Fully deprecated properties?")
+        self.assertEqual(self._classify(entry, skipped={entry.key}),
+                         inventory.SKIPLISTED_CONTESTED)
+
+    def test_skiplisted_removal_claim_with_reads_is_contested(self):
+        entry = self._entry(read_main=1, visibility="public",
+                            skip_reason="Removed by HDFS-6440")
+        self.assertEqual(self._classify(entry, skipped={entry.key}),
+                         inventory.SKIPLISTED_CONTESTED)
+
+    def test_skiplisted_intent_claim_is_trusted_despite_reads(self):
+        entry = self._entry(read_main=1, visibility="public",
+                            skip_reason="Property not intended for users")
+        self.assertEqual(self._classify(entry, skipped={entry.key}),
+                         inventory.INTERNAL_SKIPLISTED)
+
+    def test_skiplisted_deprecation_claim_that_holds_up_is_trusted(self):
+        entry = self._entry(read_main=1, visibility="public",
+                            skip_reason="Fully deprecated properties?",
+                            deprecated_to="new.key")
+        self.assertEqual(self._classify(entry, skipped={entry.key}),
+                         inventory.INTERNAL_SKIPLISTED)
+
 
 class TestDescriptionSourcing(unittest.TestCase):
     """Descriptions must be derived from evidence, or left as TODO."""

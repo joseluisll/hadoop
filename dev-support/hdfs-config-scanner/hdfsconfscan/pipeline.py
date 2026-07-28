@@ -161,6 +161,12 @@ def stage_m2(ctx: ScanContext, out_dir: str) -> StageResult:
         result.blocked.append(
             f"{counts_by_status['NEEDS_REVIEW']} properties are NEEDS_REVIEW - a human "
             "must decide whether each is a real property")
+    if counts_by_status.get(inventory.SKIPLISTED_CONTESTED):
+        result.blocked.append(
+            f"{counts_by_status['SKIPLISTED_CONTESTED']} properties are "
+            "SKIPLISTED_CONTESTED - the test skip list calls them deprecated or "
+            "removed, but production code still reads them; re-vet each and either "
+            "document it or fix the skip-list comment")
     return result
 
 
