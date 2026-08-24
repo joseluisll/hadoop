@@ -222,7 +222,7 @@
         </exclusion>
         <exclusion>
           <groupId>org.glassfish.jersey.test-framework.providers</groupId>
-          <artifactId>jersey-test-framework-provider-jetty</artifactId>
+          <artifactId>jersey-test-framework-provider-grizzly2</artifactId>
         </exclusion>
         <exclusion>
           <groupId>org.glassfish.jersey.test-framework</groupId>
