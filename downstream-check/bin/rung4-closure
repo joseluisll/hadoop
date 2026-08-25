@@ -22,7 +22,7 @@ W = "/home/user/dcheck-work"
 MVN = f"{W}/tools/apache-maven-3.9.15/bin/mvn"
 HADOOP_VERSION = "3.6.0-SNAPSHOT"
 SERVLET = re.compile(r"servlet|jsp", re.I)
-PROJECTS = ["hbase", "tez", "knox", "hive", "ranger", "atlas", "oozie"]
+PROJECTS = ["hbase", "tez", "knox", "hive", "ranger", "atlas", "oozie", "ozone", "spark"]
 
 
 def strip_ns(tree):
@@ -55,7 +55,7 @@ def scan(proj, available):
     """
     hadoop, excl, decl = set(), set(), {}
     props = {}
-    poms = glob.glob(f"{W}/downstream/{proj}/**/pom.xml", recursive=True)
+    poms = glob.glob(f"{W}/downstream/{proj}/**/pom.xml", recursive=True) + glob.glob(f"{W}/downstream/{proj}/pom.xml")
     for p in poms:
         try:
             root = strip_ns(ET.parse(p).getroot())
