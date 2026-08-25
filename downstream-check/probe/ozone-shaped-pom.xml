@@ -1,0 +1,27 @@
+<project xmlns="http://maven.apache.org/POM/4.0.0"><modelVersion>4.0.0</modelVersion>
+  <groupId>probe</groupId><artifactId>ozone-shaped</artifactId><version>1</version>
+  <!-- Mirrors what Ozone's hadoop-hdds/hadoop-dependency-client does to Hadoop:
+       exclude the servlet API Hadoop brings, then declare its own. -->
+  <properties><hadoop.version>3.6.0-SNAPSHOT</hadoop.version></properties>
+  <dependencies>
+    <dependency>
+      <groupId>org.apache.hadoop</groupId><artifactId>hadoop-hdfs-client</artifactId>
+      <version>${hadoop.version}</version>
+      <exclusions>
+        <exclusion><groupId>javax.servlet</groupId><artifactId>javax.servlet-api</artifactId></exclusion>
+        <exclusion><groupId>javax.servlet.jsp</groupId><artifactId>*</artifactId></exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.hadoop</groupId><artifactId>hadoop-common</artifactId>
+      <version>${hadoop.version}</version>
+      <exclusions>
+        <exclusion><groupId>javax.servlet</groupId><artifactId>javax.servlet-api</artifactId></exclusion>
+        <exclusion><groupId>javax.servlet.jsp</groupId><artifactId>*</artifactId></exclusion>
+      </exclusions>
+    </dependency>
+    <dependency>
+      <groupId>javax.servlet</groupId><artifactId>javax.servlet-api</artifactId><version>3.1.0</version>
+    </dependency>
+  </dependencies>
+</project>
