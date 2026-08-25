@@ -10,7 +10,7 @@ from a 2026-08-25 run on a 4-core container with a cold Maven cache.
 | Maven **3.9.15 or newer** | The root POM enforces `[3.9.15,)`. Older Maven fails in ~17 s on the enforcer, before compiling anything. 3.9.11 is not enough. At the time of writing 3.9.15 is the newest on Central. |
 | JDK 17 or newer | The root POM enforces `[17,)`. Runs so far used JDK 21. |
 | ~30 GB free disk | Each built tree is ~2.6 GB and is deleted after installing. The shared artifact tail settles around 1.4 GB, each ref's repo around 380 MB. |
-| japi-compliance-checker 1.8 | `git clone -b 1.8 https://github.com/lvc/japi-compliance-checker`. Do not rely on the script's download — see `vendor/README.md`. |
+| japi-compliance-checker **1.8** | `git clone -b 1.8 https://github.com/lvc/japi-compliance-checker`. Use 1.8, not a newer release — see below. Do not rely on the script's download; see `vendor/README.md`. |
 | Perl | For the checker. |
 
 `protoc` is *not* needed: the build resolves it as a Maven artifact.
@@ -58,13 +58,49 @@ python3 vendor/checkcompatibility.py \
     --src-dir      <work>/refs/<baseline>/repo/org/apache/hadoop \
     --dst-dir      <work>/refs/<candidate>/repo/org/apache/hadoop \
     --include-file 'hadoop.*' \
+    --exclude-file 'hadoop-client-api-.*' \
+    --exclude-file 'hadoop-client-runtime-.*' \
+    --exclude-file 'hadoop-client-minicluster-.*' \
+    --exclude-file '.*-uber\.jar' \
     --keep-internal \
     --annotation org.apache.hadoop.classification.InterfaceAudience.Public \
     --annotation org.apache.hadoop.classification.InterfaceAudience.LimitedPrivate \
     <baseline-label> <candidate-label>
 ```
 
-Exit 0 clean, 2 findings, 1 the checker itself failed.
+Exit 0 clean, 2 findings, 1 the checker itself failed. About 27 minutes over 86
+jars per side.
+
+**The exclusions are not optional.** The three shaded client jars repackage
+classes that are already compared unshaded, so leaving them in double-counts
+every finding and attributes it to a jar that does not own the source — the same
+change was reported against both `hadoop-client-api` and `hadoop-yarn-client`,
+which is how it looked on the first run. The benchmark uber jar bundles Jetty
+itself, so leaving it in makes the checker report Jetty's own API changes as
+Hadoop findings. Upstream's `find_jars` drops `-tests`, `-sources` and
+`-with-dependencies`, but none of these four.
+
+Rung 2 covers the shaded artifacts, which is its job.
+
+### Which checker version
+
+Use **1.8**, despite it being the oldest.
+
+| Version | One jar | 86–90 jars |
+| --- | --- | --- |
+| **1.8** | works, 62 s | **works** |
+| 2.0 – 2.3 | works, 28 s | **deadlocks** |
+| 2.4 | `ERROR: internal error in parser` | — |
+
+2.4 fails under JDK 21 even on a two-class jar. 2.0–2.3 run javap through
+`open3(*IN, *OUT, *ERR, ...)` and never drain `<ERR>`, so once javap fills the
+64 KB stderr pipe buffer both processes block forever — perl in
+`anon_pipe_read`, javap in `anon_pipe_write`. 1.8 redirects both streams to
+files with `system()`, so it cannot deadlock.
+
+Benchmarking on a single jar suggests 2.3; it does not survive the real input.
+If a faster checker is wanted later, one line in `Internals/APIDump.pm` fixes
+2.3 — `open3(*IN, *OUT, ">&STDERR", @Cmd)` — but that is unverified at scale.
 
 ## Rung 2 — shaded client invariants
 

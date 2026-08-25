@@ -47,9 +47,29 @@ script crashes precisely when it has something to say. Now:
 git clone -b 1.8 https://github.com/lvc/japi-compliance-checker <dir>
 ```
 
-Version 1.8 is what upstream pins. It handles Hadoop-scale jars: hadoop-common
-3.4.0 against 3.4.1 — 2,590 and 2,625 classes — completes in 58 s under JDK 21
-with the annotation filter applied.
+Version 1.8 is what upstream pins, and it is the version to use — not because it
+is what Hadoop specifies, but because the newer ones do not work here.
+
+| Version | One jar | 86–90 jars |
+| --- | --- | --- |
+| **1.8** | works, 62 s | **works** |
+| 2.0 – 2.3 | works, 28 s | **deadlocks** |
+| 2.4 | `ERROR: internal error in parser` | — |
+
+2.4 fails under JDK 21 on a two-class toy jar, so it is not Hadoop-specific.
+2.0–2.3 run javap through `open3(*IN, *OUT, *ERR, @Cmd)` in
+`Internals/APIDump.pm` and the parser reads only `<OUT>`, never draining
+`<ERR>`, with no `select()`. Once javap fills the 64 KB stderr pipe buffer it
+blocks writing while perl blocks reading stdout, and neither ever wakes. 1.8
+does not use pipes at all — `system($Cmd." ".$Input." >\"$Output\"
+2>\"$TMP_DIR/warn\"")` sends both streams to files — so it cannot deadlock.
+
+One line fixes 2.3, should a faster checker be wanted later, but it is unverified
+at scale:
+
+```perl
+my $Pid = open3(*IN, *OUT, ">&STDERR", @Cmd);
+```
 
 ## Example
 
