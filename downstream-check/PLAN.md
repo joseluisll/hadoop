@@ -199,6 +199,24 @@ current one.
 - Do the `checkcompatibility.py` fixes go upstream as their own issue, or stay in
   our copy?
 
+## Amendments from the first run
+
+Recorded here rather than edited into the proposal above, so the changes stay
+visible. See `RUNBOOK.md` for the operational detail.
+
+- **Two refs per comparison, not one per phase.** The branches stack, so
+  `jetty-phase-c` carries all three JIRAs and a single baseline → phase-c
+  comparison answers the question. Phases a and b are built only when there is
+  a finding to attribute.
+- **`git merge-base` is not enough to pick a baseline.** All three phase
+  branches share a merge-base with trunk, but they also carry four commits
+  unrelated to these JIRAs. When the noise matters — a dependency-closure delta
+  — the baseline is the commit below the first Jetty commit (`2add9630`), not
+  the merge-base.
+- **Rung 1 reads the installed repositories**, not the built trees, so each
+  ~2.6 GB tree can be deleted after installing.
+- **Maven 3.9.15 is a hard prerequisite**, enforced by the root POM.
+
 ## Basis
 
 Figures above were measured, not assumed:
