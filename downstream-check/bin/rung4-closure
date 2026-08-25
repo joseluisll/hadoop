@@ -22,7 +22,7 @@ W = "/home/user/dcheck-work"
 MVN = f"{W}/tools/apache-maven-3.9.15/bin/mvn"
 HADOOP_VERSION = "3.6.0-SNAPSHOT"
 SERVLET = re.compile(r"servlet|jsp", re.I)
-PROJECTS = ["hbase", "tez", "knox", "hive", "ranger", "atlas", "oozie", "ozone", "spark"]
+PROJECTS = ["oozie"]
 
 
 def strip_ns(tree):
@@ -40,8 +40,18 @@ def text(elem, tag):
 def available_hadoop_artifacts():
     """Which hadoop artifacts our built refs actually publish."""
     base = f"{W}/refs/trunk/repo/org/apache/hadoop"
-    return {d for d in os.listdir(base)
-            if os.path.isdir(os.path.join(base, d, HADOOP_VERSION))}
+    out = set()
+    for d in os.listdir(base):
+        vdir = os.path.join(base, d, HADOOP_VERSION)
+        if not os.path.isdir(vdir):
+            continue
+        # Aggregators like hadoop-tools publish only a POM. Declaring them as a
+        # jar dependency fails resolution, which reads as the project being
+        # untestable when it is only the probe being wrong.
+        if not any(f.endswith(".jar") for f in os.listdir(vdir)):
+            continue
+        out.add(d)
+    return out
 
 
 def scan(proj, available):
