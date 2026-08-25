@@ -1,0 +1,378 @@
+<title>Jetty 12 Downstream Findings</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@400;500;700&display=swap">
+
+<style>
+  :root {
+    --paper:#f4f6f5; --surface:#fff; --sunk:#eaeeed;
+    --ink:#141a1a; --ink-2:#3f4b4a; --ink-3:#6b7877; --rule:#d2dbd9;
+    --accent:#0d6a68; --pass:#2c6e49; --fail:#a32b1f; --warn:#96660a; --unknown:#6b7877;
+    --shadow:0 1px 2px rgba(20,26,26,.06),0 8px 24px -16px rgba(20,26,26,.35);
+    --f-display:"Archivo","Helvetica Neue",Arial,sans-serif;
+    --f-body:"Source Serif 4",Georgia,"Times New Roman",serif;
+    --f-mono:"JetBrains Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+    --paper:#0e1414; --surface:#151d1d; --sunk:#101717;
+    --ink:#e7eeed; --ink-2:#b3c1bf; --ink-3:#7f8f8d; --rule:#263333;
+    --accent:#57bdb6; --pass:#6cc08b; --fail:#e08376; --warn:#d3a24a; --unknown:#7f8f8d;
+    --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 28px -18px rgba(0,0,0,.9);}}
+  :root[data-theme="dark"]{
+    --paper:#0e1414; --surface:#151d1d; --sunk:#101717;
+    --ink:#e7eeed; --ink-2:#b3c1bf; --ink-3:#7f8f8d; --rule:#263333;
+    --accent:#57bdb6; --pass:#6cc08b; --fail:#e08376; --warn:#d3a24a; --unknown:#7f8f8d;
+    --shadow:0 1px 2px rgba(0,0,0,.5),0 10px 28px -18px rgba(0,0,0,.9);}
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--f-body);
+       font-size:17px;line-height:1.62;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:60rem;margin:0 auto;padding:0 1.5rem 6rem}
+  .col{max-width:40rem}
+  h1,h2,h3,.eyebrow,.chip,th,.stat-label{font-family:var(--f-display)}
+  h1{font-size:clamp(2rem,5.5vw,3rem);line-height:1.07;font-weight:700;letter-spacing:-.02em;
+     text-wrap:balance;margin:0 0 .6rem}
+  h2{font-size:1.4rem;font-weight:600;letter-spacing:-.01em;text-wrap:balance;margin:0}
+  h3{font-size:1rem;font-weight:600;margin:1.8rem 0 .5rem}
+  p{margin:0 0 1rem}
+  code,.mono{font-family:var(--f-mono);font-size:.85em}
+  code{background:var(--sunk);border:1px solid var(--rule);border-radius:3px;padding:.08em .32em;
+       word-break:break-word}
+  .eyebrow{font-size:.7rem;font-weight:600;letter-spacing:.14em;text-transform:uppercase;
+           color:var(--accent);margin:0 0 .5rem}
+  header.masthead{border-bottom:1px solid var(--rule);padding:3.5rem 0 2rem;margin-bottom:2.5rem}
+  .lede{font-size:1.16rem;color:var(--ink-2);max-width:36rem;margin-bottom:1.6rem}
+  .meta{display:flex;flex-wrap:wrap;gap:.4rem 2.2rem;font-family:var(--f-mono);
+        font-size:.74rem;color:var(--ink-3)}
+  .meta b{color:var(--ink-2);font-weight:500}
+
+  .verdict{background:var(--surface);border:1px solid var(--rule);border-top:3px solid var(--warn);
+           border-radius:5px;box-shadow:var(--shadow);padding:1.6rem 1.7rem 1.3rem;margin-bottom:2rem}
+  .verdict p:last-child{margin-bottom:0}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(9rem,1fr));gap:1px;
+         background:var(--rule);border:1px solid var(--rule);border-radius:5px;overflow:hidden;
+         margin-bottom:3.5rem}
+  .stat{background:var(--surface);padding:1rem 1.1rem}
+  .stat-num{font-family:var(--f-mono);font-size:1.7rem;font-weight:700;letter-spacing:-.02em;
+            line-height:1.1;font-variant-numeric:tabular-nums}
+  .stat-num.ok{color:var(--pass)} .stat-num.warn{color:var(--warn)}
+  .stat-label{display:block;font-size:.68rem;letter-spacing:.09em;text-transform:uppercase;
+              color:var(--ink-3);margin-top:.35rem;line-height:1.4}
+
+  section{margin-bottom:3.5rem}
+  .section-head{border-bottom:1px solid var(--rule);padding-bottom:.55rem;margin-bottom:1.5rem}
+  .table-scroll{overflow-x:auto;margin-bottom:1.2rem}
+  table{width:100%;border-collapse:collapse;font-size:.87rem;line-height:1.45;min-width:32rem}
+  th{text-align:left;font-size:.68rem;font-weight:600;letter-spacing:.1em;text-transform:uppercase;
+     color:var(--ink-3);border-bottom:1px solid var(--rule);padding:0 .8rem .5rem 0;vertical-align:bottom}
+  td{padding:.62rem .8rem .62rem 0;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+  td:first-child{color:var(--ink)}
+  td.mono{font-family:var(--f-mono);font-size:.76rem}
+  .num{font-variant-numeric:tabular-nums;text-align:center}
+  tbody tr:last-child td{border-bottom:0}
+  .chip{display:inline-block;font-size:.63rem;font-weight:600;letter-spacing:.07em;
+        text-transform:uppercase;padding:.18em .5em;border-radius:3px;border:1px solid currentColor;
+        white-space:nowrap}
+  .chip.pass{color:var(--pass)} .chip.fail{color:var(--fail)}
+  .chip.warn{color:var(--warn)} .chip.unknown{color:var(--unknown)}
+  .note{border-left:3px solid var(--warn);background:var(--surface);padding:.9rem 1.1rem;
+        border-radius:0 4px 4px 0;font-size:.92rem;color:var(--ink-2);margin:0 0 1.2rem}
+  .note b{color:var(--ink)}
+  ul.tight{margin:0 0 1.2rem;padding-left:1.15rem}
+  ul.tight li{margin-bottom:.5rem;color:var(--ink-2)}
+  ul.tight li::marker{color:var(--accent)}
+  ul.tight b{color:var(--ink);font-weight:600}
+  footer{border-top:1px solid var(--rule);padding-top:1.2rem;color:var(--ink-3);
+         font-family:var(--f-mono);font-size:.74rem}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">HADOOP-19912 · results · 2026-08-25</p>
+  <h1>Does Jetty 12 break the ecosystem?</h1>
+  <p class="lede">Yes, for four of the six projects that could be tested. Three of them build
+    without a warning first.</p>
+  <div class="meta">
+    <span><b>Baseline</b> trunk d57814e3</span>
+    <span><b>Candidate</b> jetty-phase-c 91ccfd1f</span>
+    <span><b>Covers</b> HADOOP-19970 / 19971 / 19972</span>
+  </div>
+</header>
+
+<div class="verdict col">
+  <p class="eyebrow">Verdict</p>
+  <p><b>Four confirmed downstream breaks, all reproduced by real builds:</b> Tez fails to compile;
+    Ozone, Hive and Knox compile cleanly and then cannot link Hadoop's HTTP stack.</p>
+  <p><b>The claim that this work is invisible to downstream projects is false.</b> Whether that
+    should block the change is a reviewer's decision — none of these are Hadoop API breaks, and two
+    are arguably the downstream project's own fragility. But they are real, and a release note that
+    does not mention them will surprise people.</p>
+  <p><b>Not universal, and the predicate is now known.</b> Oozie pins Jetty 9 and comes through
+    clean. What decides it is whether the project's own Jetty declaration wins Maven mediation for
+    the core artifacts while Hadoop's <span class="mono">ee8</span> modules arrive transitively —
+    a property of declaration depth across the whole reactor, invisible from reading a POM.</p>
+</div>
+
+<div class="stats">
+  <div class="stat"><div class="stat-num" style="color:var(--fail)">4</div><span class="stat-label">confirmed breaks</span></div>
+  <div class="stat"><div class="stat-num" style="color:var(--fail)">3</div><span class="stat-label">compile clean, then fail</span></div>
+  <div class="stat"><div class="stat-num ok">1</div><span class="stat-label">confirmed unaffected</span></div>
+  <div class="stat"><div class="stat-num warn">3</div><span class="stat-label">could not be tested</span></div>
+  <div class="stat"><div class="stat-num ok">9</div><span class="stat-label">projects examined</span></div>
+</div>
+
+<section>
+  <div class="section-head"><h2>Every project, and how it was established</h2></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Project</th><th>Version</th><th>Outcome</th><th>Evidence</th></tr></thead>
+      <tbody>
+        <tr><td><b>Tez</b></td><td class="mono">0.10.4</td><td><span class="chip fail">breaks — compile</span></td>
+          <td><span class="mono">package org.eclipse.jetty.servlet does not exist</span>. Extends Jetty 9's <span class="mono">DefaultServlet</span>, declares no Jetty, loses the jar Hadoop stops shipping. Real build, clean on trunk.</td></tr>
+        <tr><td><b>Ozone</b></td><td class="mono">2.3.0-SNAPSHOT</td><td><span class="chip fail">breaks — link</span></td>
+          <td>Builds clean. <span class="mono">HttpServer2</span> then fails to load: <span class="mono">NoClassDefFoundError: org/eclipse/jetty/server/Deployable</span>. Real reactor build of <span class="mono">hadoop-hdds/framework</span>.</td></tr>
+        <tr><td><b>Hive</b></td><td class="mono">4.0.1</td><td><span class="chip fail">breaks — link</span></td>
+          <td>Builds clean on both refs. Jetty 12 <span class="mono">ee8</span> unlinkable on phase-c, absent on trunk. Real build of <span class="mono">hive/common</span>.</td></tr>
+        <tr><td><b>Knox</b></td><td class="mono">2.0.0</td><td><span class="chip fail">breaks — link</span></td>
+          <td>Same failure. Real build of <span class="mono">gateway-spi</span>; <span class="mono">gateway-server</span> is unbuildable for unrelated reasons.</td></tr>
+        <tr><td>Oozie</td><td class="mono">5.2.1</td><td><span class="chip pass">unaffected</span></td>
+          <td>Pins Jetty 9.3.27, but Hadoop's <span class="mono">jetty-server:12.0.37</span> wins mediation, so the stack stays coherent and <span class="mono">ee8</span> links.</td></tr>
+        <tr><td>HBase</td><td class="mono">2.6.1</td><td><span class="chip pass">no exposure</span></td>
+          <td>Zero Jetty imports across 4,980 Java files.</td></tr>
+        <tr><td>Ranger</td><td class="mono">2.4.0</td><td><span class="chip pass">no exposure</span></td>
+          <td>Zero Jetty imports.</td></tr>
+        <tr><td>Atlas</td><td class="mono">2.3.0</td><td><span class="chip unknown">blocked upstream</span></td>
+          <td>Cannot compile against Hadoop 3.6 on <em>either</em> ref — Hadoop already dropped the Jersey 1 that Atlas borrows. Blocked before Jetty is reached.</td></tr>
+        <tr><td>Spark</td><td class="mono">3.5.3</td><td><span class="chip unknown">not established</span></td>
+          <td>Probe suggested exposure, but Spark consumes the shaded client artifacts, which this change leaves untouched. Probably unaffected; not built.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="section-head"><h2>Why three projects compile and then fail</h2></div>
+  <p class="col">The compile step passes because the project's own Jetty 9 jars satisfy every import
+    in its source. The failure is one level down, in what Hadoop drags along beside them.</p>
+
+  <figure>
+    <div class="fig-frame">
+      <svg viewBox="0 0 900 300" role="img"
+           aria-label="A downstream project declares jetty-server 9 which wins Maven mediation, while Hadoop brings jetty-ee8 12 transitively. The ee8 module requires Jetty 12 core, which is not present, so the class fails to load.">
+        <defs>
+          <marker id="a1" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/></marker>
+          <marker id="a2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--fail)"/></marker>
+        </defs>
+
+        <g font-family="Archivo, sans-serif" font-size="12" fill="currentColor">
+          <rect x="10" y="30" width="200" height="64" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="110" y="54" text-anchor="middle" font-weight="600">Downstream project</text>
+          <text x="110" y="74" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--ink-3)">declares jetty-server 9.4.x</text>
+
+          <rect x="10" y="180" width="200" height="64" rx="4" fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="110" y="204" text-anchor="middle" font-weight="600">Hadoop 3.6 (phase-c)</text>
+          <text x="110" y="224" text-anchor="middle" font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--ink-3)">brings jetty-ee8-* 12.0.37</text>
+
+          <rect x="350" y="30" width="210" height="64" rx="4" fill="none" stroke="currentColor" stroke-width="2"/>
+          <text x="455" y="54" text-anchor="middle" font-weight="600">jetty-server 9.4.x</text>
+          <text x="455" y="74" text-anchor="middle" font-size="10.5" fill="var(--ink-3)">wins mediation — nearest</text>
+
+          <rect x="350" y="180" width="210" height="64" rx="4" fill="none" stroke="var(--fail)" stroke-width="2"/>
+          <text x="455" y="204" text-anchor="middle" font-weight="600" fill="var(--fail)">jetty-ee8-webapp 12.0.37</text>
+          <text x="455" y="224" text-anchor="middle" font-size="10.5" fill="var(--fail)">arrives transitively</text>
+        </g>
+
+        <line x1="214" y1="62" x2="344" y2="62" stroke="currentColor" stroke-width="1.5" marker-end="url(#a1)"/>
+        <line x1="214" y1="212" x2="344" y2="212" stroke="var(--fail)" stroke-width="1.5" marker-end="url(#a2)"/>
+
+        <path d="M 564 212 L 640 212 L 640 100" fill="none" stroke="var(--fail)" stroke-width="2"
+              stroke-dasharray="5 4" marker-end="url(#a2)"/>
+        <text x="700" y="160" font-family="Archivo, sans-serif" font-size="12" font-weight="600" fill="var(--fail)">requires Jetty 12 core</text>
+        <text x="700" y="178" font-family="JetBrains Mono, monospace" font-size="10.5" fill="var(--fail)">org.eclipse.jetty.server.Deployable</text>
+        <text x="700" y="196" font-family="Archivo, sans-serif" font-size="12" fill="var(--fail)">— not present</text>
+
+        <text x="455" y="118" text-anchor="middle" font-family="Archivo, sans-serif" font-size="12"
+              font-weight="600" fill="var(--fail)">NoClassDefFoundError at first use</text>
+        <line x1="290" y1="130" x2="620" y2="130" stroke="var(--rule)" stroke-width="1"/>
+        <text x="455" y="150" text-anchor="middle" font-family="Archivo, sans-serif" font-size="11.5" fill="var(--ink-3)">the compiler never sees this — the project's own source only touches Jetty 9</text>
+      </svg>
+    </div>
+    <figcaption><b>The break is in mediation, not in code.</b> Maven resolves one version per
+      artifact. The project's direct declaration of <span class="mono">jetty-server</span> beats
+      Hadoop's transitive one, so Jetty 12's <span class="mono">ee8</span> modules end up sitting on
+      Jetty 9's core. Oozie escapes only because its declaration loses, leaving a coherent Jetty 12
+      stack.</figcaption>
+  </figure>
+</section>
+
+<section>
+  <div class="section-head"><h2>What each check found</h2></div>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Check</th><th>Result</th><th>Caught a break?</th></tr></thead>
+      <tbody>
+        <tr><td>Hadoop build</td><td>119 modules, clean on both refs</td><td><span class="chip unknown">no</span></td></tr>
+        <tr><td>Shaded client invariants</td><td>12 rules, 0 failed, both refs</td><td><span class="chip unknown">no</span></td></tr>
+        <tr><td>API signatures</td><td>9 problems, none downstream-reachable</td><td><span class="chip unknown">no</span></td></tr>
+        <tr><td>Dependency closure</td><td>Both old servlet coordinates leave; <span class="mono">jetty-servlet</span> leaves 34 modules</td><td><span class="chip warn">the raw material, not the finding</span></td></tr>
+        <tr><td>Downstream resolution</td><td>No project gains a duplicate servlet API</td><td><span class="chip unknown">no — passed all four breakers</span></td></tr>
+        <tr><td>Out-of-tree consumer</td><td>HADOOP-19971 bridge works, compiled-vs-run across refs</td><td><span class="chip unknown">no</span></td></tr>
+        <tr><td><b>Downstream compile</b></td><td>Tez fails</td><td><span class="chip fail">yes — 1</span></td></tr>
+        <tr><td><b>Runtime linkage</b></td><td>Ozone, Hive, Knox fail</td><td><span class="chip fail">yes — 3</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note col" style="border-left-color:var(--fail)"><b>Every cheap check passed every
+    project that breaks.</b> Six rungs of signature, packaging and resolution analysis produced a
+    clean bill of health. The breaks appeared only when real projects were compiled, and three of
+    the four only when a class was actually loaded.</p>
+</section>
+
+<section>
+  <div class="section-head"><h2>Estimated downstream impact</h2></div>
+
+  <h3>Confirmed broken</h3>
+  <ul class="tight col">
+    <li><b>Ozone, Hive, Knox — compile clean, fail at runtime.</b> Every HTTP entry point that goes
+      through Hadoop's <span class="mono">HttpServer2</span> fails to start. Nothing in the build
+      warns them.</li>
+    <li><b>Tez — fails at compile.</b> Loud and immediate, so lower risk in practice.</li>
+  </ul>
+
+  <h3>Who else is likely affected</h3>
+  <ul class="tight col">
+    <li><b>Any project that declares <span class="mono">jetty-server</span> 9.x directly and takes
+      Hadoop transitively.</b> That is the predicate, and it is checkable in one command:
+      resolve the classpath and see whether <span class="mono">jetty-server</span> lands at 9 or 12
+      while <span class="mono">jetty-ee8-*</span> is present.</li>
+    <li><b>Any project borrowing a Jetty jar it never declares.</b> Tez's shape. Rung 3 measured
+      <span class="mono">jetty-servlet</span> leaving 34 module classpaths,
+      <span class="mono">jetty-webapp</span> 30, the websocket family 29 each.</li>
+  </ul>
+
+  <h3>Not affected</h3>
+  <ul class="tight col">
+    <li><b>Shaded-client consumers.</b> Packaging invariants unchanged; Spark is the notable case.</li>
+    <li><b>Projects with no Jetty imports</b> — HBase, Ranger.</li>
+    <li><b>Projects whose Jetty declaration loses mediation</b> — Oozie, which gets a coherent
+      Jetty 12 stack.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="section-head"><h2>Can it be made non-breaking?</h2></div>
+
+  <h3>The downstream fix is one line</h3>
+  <p class="col">Tested directly against phase-c, with a consumer taking
+    <span class="mono">hadoop-common</span> and <span class="mono">hadoop-hdfs</span>:</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Consumer's POM</th><th><span class="mono">jetty-server</span> resolves to</th><th>Jetty 12 ee8</th></tr></thead>
+      <tbody>
+        <tr><td>pins Jetty 9.4.58</td><td class="mono">9.4.58</td><td><span class="chip fail">fails</span></td></tr>
+        <tr><td><b>no Jetty pin at all</b></td><td class="mono">12.0.37</td><td><span class="chip pass">links</span></td></tr>
+        <tr><td><b>pins Jetty 12.0.37</b></td><td class="mono">12.0.37</td><td><span class="chip pass">links</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="col">Drop the pin, or move it to 12. Either works.</p>
+
+  <h3>Hadoop cannot force it</h3>
+  <p class="col">Maven resolves one version per artifact by <em>nearest wins</em>. A consumer's
+    direct declaration is depth 1; Hadoop's transitive Jetty is depth 2 or more. No version, scope
+    or ordering choice in Hadoop's POMs outranks it. That is a property of Maven, not of this
+    change — and it rules out any fix that works by adjusting Hadoop's dependency declarations.</p>
+
+  <h3>Shading Jetty into hadoop-common — tried, and it mostly works</h3>
+  <p class="col">A <span class="mono">maven-shade-plugin</span> execution relocating
+    <span class="mono">org.eclipse.jetty</span> into
+    <span class="mono">org.apache.hadoop.shaded.…</span>, with
+    <span class="mono">createDependencyReducedPom</span>. It builds clean in 47 seconds.</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th></th><th>phase-c</th><th>with shading</th></tr></thead>
+      <tbody>
+        <tr><td>Relocated Jetty classes in the jar</td><td class="num">0</td><td class="num"><b>1,700</b></td></tr>
+        <tr><td>Unshaded Jetty leaked into the jar</td><td class="num">0</td><td class="num"><b>0</b></td></tr>
+        <tr><td>Jetty entries in the published POM</td><td>many</td><td><b>one</b> — the servlet API</td></tr>
+        <tr><td>Jar size</td><td class="mono">4.7 MB</td><td class="mono">7.9 MB</td></tr>
+        <tr><td>Consumer pinning Jetty 9 loads <span class="mono">HttpServer2</span></td><td><span class="chip fail">no</span></td><td><span class="chip pass">yes</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="col">The consumer keeps its Jetty 9, Hadoop uses a private Jetty 12, and they no longer
+    collide. <b>That is the Ozone, Hive and Knox failure eliminated with no downstream change at
+    all.</b></p>
+
+  <p class="note col" style="border-left-color:var(--fail)"><b>It does not fix Tez, and makes it
+    worse.</b> Tez borrows <span class="mono">org.eclipse.jetty.servlet</span> from Hadoop's
+    closure. Against phase-c it inherits 13 Jetty jars but the class has moved to
+    <span class="mono">ee8</span>; against the shaded build it inherits <b>one</b>, so it gets
+    nothing at all. Three of four breaks fixed, the fourth left standing with a less obvious
+    diagnosis.</p>
+
+  <h3>What this proof of concept does not establish</h3>
+  <ul class="tight col">
+    <li><b>Only <span class="mono">hadoop-common</span> was shaded.</b> <span class="mono">hadoop-hdfs</span>,
+      YARN and others use Jetty directly and cannot share its relocated copy, since the package
+      names differ. Whether the full change is tractable is the open question.</li>
+    <li><b>3 MB added</b> per artifact that does this.</li>
+    <li><b><span class="mono">HttpServer2</span>'s API now exposes shaded Jetty types.</b> It is
+      <span class="mono">Private</span>, so defensible, but it is a signature change.</li>
+    <li><b>Untested:</b> whether Hadoop's own modules still work against a shaded
+      <span class="mono">hadoop-common</span> — the first thing a real attempt would need to prove.</li>
+  </ul>
+
+  <h3>And ee8 is not the problem</h3>
+  <p class="col">Choosing the <span class="mono">ee8</span> environment is already the
+    minimal-disruption option: it keeps the <span class="mono">javax.servlet</span> package names,
+    where <span class="mono">ee9</span> or <span class="mono">ee10</span> would move the servlet API
+    to <span class="mono">jakarta.servlet</span> and break every consumer's imports outright. What
+    breaks things here is Jetty 12 relocating <em>its own core packages</em> —
+    <span class="mono">Deployable</span>, <span class="mono">Handler.Singleton</span> — which no
+    environment choice avoids.</p>
+</section>
+
+<section>
+  <div class="section-head"><h2>Claims that did not survive checking</h2></div>
+  <p class="col">Recorded so none of them resurfaces as received wisdom.</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Claimed</th><th>Actually</th></tr></thead>
+      <tbody>
+        <tr><td><span class="mono">HttpServer2.webAppContext</span> is a downstream-reachable break.</td>
+          <td>Unreachable — <span class="mono">final</span> class, private constructor, so <span class="mono">protected</span> grants nobody access.</td></tr>
+        <tr><td>An Ozone-shaped POM proves the duplicate servlet API failure.</td>
+          <td>The probe used 2 Hadoop artifacts and 2 exclusions; Ozone really uses 14 and 19, and shows no duplicate.</td></tr>
+        <tr><td>Any project pinning Jetty 9 is exposed.</td>
+          <td>Oozie pins 9.3.27 and is fine. Mediation decides, not the pin.</td></tr>
+        <tr><td>Oozie could not be tested.</td>
+          <td>A probe bug — <span class="mono">hadoop-tools</span> is a pom-only aggregator being declared as a jar.</td></tr>
+        <tr><td>HBase is the strongest detector to prioritise.</td>
+          <td>Zero Jetty imports. It cannot detect this at all.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="section-head"><h2>How to read this</h2></div>
+  <p class="col">Every number is a difference between two Hadoop refs built identically, minutes
+    apart, into isolated local repositories. A check that fails the same way on both sides is
+    reported as telling us nothing — Atlas and, before its probe was fixed, Oozie.</p>
+  <p class="col">Nine projects is a sample, not proof, and three of them could not be tested at all.
+    Of the six that could be, four break. The cheap checks were not merely incomplete — they were
+    actively misleading, returning a clean result for every project that turned out to be broken.</p>
+</section>
+
+<footer>
+  trunk d57814e3 → jetty-phase-c 91ccfd1f · JDK 21.0.10 · Maven 3.9.15 ·
+  japi-compliance-checker 1.8 · full record in downstream-check/runs/2026-08-25-phase-c.md
+</footer>
+
+</div>
