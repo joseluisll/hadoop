@@ -93,8 +93,8 @@
 <header class="masthead">
   <p class="eyebrow">HADOOP-19912 · results · 2026-08-25</p>
   <h1>Does Jetty 12 break the ecosystem?</h1>
-  <p class="lede">Yes, for four of the six projects that could be tested. Three of them build
-    without a warning first.</p>
+  <p class="lede">Yes — four of the six projects that could be tested, three of them building
+    without a warning first. And yes, it can be fixed inside Hadoop.</p>
   <div class="meta">
     <span><b>Baseline</b> trunk d57814e3</span>
     <span><b>Candidate</b> jetty-phase-c 91ccfd1f</span>
@@ -114,12 +114,18 @@
     clean. What decides it is whether the project's own Jetty declaration wins Maven mediation for
     the core artifacts while Hadoop's <span class="mono">ee8</span> modules arrive transitively —
     a property of declaration depth across the whole reactor, invisible from reading a POM.</p>
+  <p><b>Three of the four are fixable with no downstream action, and the fix has been built.</b>
+    Relocating Jetty into a published <span class="mono">hadoop-shaded-jetty</span> artifact — the
+    pattern Hadoop already uses for Protobuf and Guava — removes the collision at the source. It
+    compiles across all 119 modules, passes every invariant check, and produces zero test
+    regressions. The fourth, Tez, needs two lines in Tez.</p>
 </div>
 
 <div class="stats">
   <div class="stat"><div class="stat-num" style="color:var(--fail)">4</div><span class="stat-label">confirmed breaks</span></div>
   <div class="stat"><div class="stat-num" style="color:var(--fail)">3</div><span class="stat-label">compile clean, then fail</span></div>
-  <div class="stat"><div class="stat-num ok">1</div><span class="stat-label">confirmed unaffected</span></div>
+  <div class="stat"><div class="stat-num ok">3</div><span class="stat-label">fixed with no downstream change</span></div>
+  <div class="stat"><div class="stat-num ok">0</div><span class="stat-label">test regressions from the fix</span></div>
   <div class="stat"><div class="stat-num warn">3</div><span class="stat-label">could not be tested</span></div>
   <div class="stat"><div class="stat-num ok">9</div><span class="stat-label">projects examined</span></div>
 </div>
@@ -266,6 +272,10 @@
 
 <section>
   <div class="section-head"><h2>Can it be made non-breaking?</h2></div>
+  <p class="col"><b>Yes, for the three link-time breaks — and it was built, not sketched.</b> Below,
+    in the order the question was actually worked: what a downstream project can do itself, why
+    Hadoop cannot impose that, the shading approach that failed, the one that held, and what Tez
+    still needs.</p>
 
   <h3>The downstream fix is one line</h3>
   <p class="col">Tested directly against phase-c, with a consumer taking
@@ -288,45 +298,95 @@
     or ordering choice in Hadoop's POMs outranks it. That is a property of Maven, not of this
     change — and it rules out any fix that works by adjusting Hadoop's dependency declarations.</p>
 
-  <h3>Shading Jetty into hadoop-common — tried, and it mostly works</h3>
-  <p class="col">A <span class="mono">maven-shade-plugin</span> execution relocating
-    <span class="mono">org.eclipse.jetty</span> into
-    <span class="mono">org.apache.hadoop.shaded.…</span>, with
-    <span class="mono">createDependencyReducedPom</span>. It builds clean in 47 seconds.</p>
+  <h3>Shading inside each module does not scale</h3>
+  <p class="col">The obvious attempt — a <span class="mono">maven-shade-plugin</span> execution in
+    <span class="mono">hadoop-common</span> relocating <span class="mono">org.eclipse.jetty</span>
+    into <span class="mono">org.apache.hadoop.shaded.…</span> — builds clean in 47 seconds and, in
+    isolation, works: 1,700 relocated classes, no leakage, and a consumer pinning Jetty 9 loads
+    <span class="mono">HttpServer2</span> again. Extended to the full reactor it failed three times
+    in a row, each failure a variant of the same thing:</p>
+  <ul class="tight col">
+    <li><span class="mono">WebApps</span> in YARN handing an <em>unshaded</em>
+      <span class="mono">WebAppContext</span> to a shaded server.</li>
+    <li>The WebSocket packages absent from <span class="mono">hadoop-common</span>'s shaded jar, so
+      YARN could not find them at all.</li>
+    <li><span class="mono">WebServer</span> needing a shaded <span class="mono">WebAppContext</span>
+      accepted by an unshaded WebSocket API.</li>
+  </ul>
+  <p class="col"><b>Relocation is all-or-nothing across every module that interoperates.</b> Package
+    names are the interface; shading one module renames half of a conversation. That rules out
+    per-module shading, not shading itself.</p>
+
+  <h3>The <span class="mono">hadoop-thirdparty</span> pattern — built, and it holds</h3>
+  <p class="col">One new module, <span class="mono">hadoop-shaded-jetty</span>, publishes Jetty 12
+    ee8 pre-relocated into <span class="mono">org.apache.hadoop.thirdparty.org.eclipse.jetty</span>;
+    every consuming module imports from there. This is the same route Hadoop already took for
+    Protobuf and Guava. <span class="mono">org.eclipse.jetty.toolchain</span> — the servlet API — is
+    deliberately <em>not</em> relocated, because that is the contract downstream code compiles
+    against.</p>
   <div class="table-scroll">
     <table>
-      <thead><tr><th></th><th>phase-c</th><th>with shading</th></tr></thead>
+      <thead><tr><th>Gate</th><th>Result</th></tr></thead>
       <tbody>
-        <tr><td>Relocated Jetty classes in the jar</td><td class="num">0</td><td class="num"><b>1,700</b></td></tr>
-        <tr><td>Unshaded Jetty leaked into the jar</td><td class="num">0</td><td class="num"><b>0</b></td></tr>
-        <tr><td>Jetty entries in the published POM</td><td>many</td><td><b>one</b> — the servlet API</td></tr>
-        <tr><td>Jar size</td><td class="mono">4.7 MB</td><td class="mono">7.9 MB</td></tr>
-        <tr><td>Consumer pinning Jetty 9 loads <span class="mono">HttpServer2</span></td><td><span class="chip fail">no</span></td><td><span class="chip pass">yes</span></td></tr>
+        <tr><td>Relocated classes in the new artifact</td><td class="mono">2,149 · 4.0 MB · 0 leaked</td></tr>
+        <tr><td>Compilation, all 119 modules</td><td><span class="chip pass">passes</span></td></tr>
+        <tr><td><span class="mono">hadoop-client-check-invariants</span></td><td><span class="chip pass">passes</span></td></tr>
+        <tr><td><span class="mono">hadoop-client-check-test-invariants</span></td><td><span class="chip pass">passes</span></td></tr>
+        <tr><td>Consumer pinning Jetty 9 loads <span class="mono">HttpServer2</span></td><td><span class="chip pass">yes</span> — classpath carries 9.4 only</td></tr>
+        <tr><td>Scale of the change</td><td class="mono">74 files · +347 / −432</td></tr>
       </tbody>
     </table>
   </div>
-  <p class="col">The consumer keeps its Jetty 9, Hadoop uses a private Jetty 12, and they no longer
-    collide. <b>That is the Ozone, Hive and Knox failure eliminated with no downstream change at
+  <p class="col">The consumer keeps its Jetty 9, Hadoop uses its own relocated Jetty 12, and they no
+    longer meet. <b>That is Ozone, Hive and Knox fixed at the source, with no downstream change at
     all.</b></p>
+  <p class="note col"><b>The one gate it initially failed is worth knowing about.</b>
+    <span class="mono">BanDuplicateClasses</span> fired because
+    <span class="mono">hadoop-client-runtime</span> and <span class="mono">-minicluster</span>
+    exclude Jetty <em>by coordinate</em>, and those excludes stop matching once Jetty arrives as one
+    pre-relocated artifact. Two added <span class="mono">&lt;exclude&gt;</span> lines fix it — but any
+    packaging rule naming Jetty by coordinate needs the same treatment.</p>
 
-  <p class="note col" style="border-left-color:var(--fail)"><b>It does not fix Tez, and makes it
-    worse.</b> Tez borrows <span class="mono">org.eclipse.jetty.servlet</span> from Hadoop's
-    closure. Against phase-c it inherits 13 Jetty jars but the class has moved to
-    <span class="mono">ee8</span>; against the shaded build it inherits <b>one</b>, so it gets
-    nothing at all. Three of four breaks fixed, the fourth left standing with a less obvious
-    diagnosis.</p>
+  <h3>Full suites: zero regressions</h3>
+  <p class="col">Both refs, same command, on the three modules the relocation touches —
+    <span class="mono">hadoop-auth</span> (HADOOP-19971's surface),
+    <span class="mono">hadoop-common</span> (<span class="mono">HttpServer2</span>) and
+    <span class="mono">hadoop-yarn-common</span> (<span class="mono">WebApps</span>, the class the
+    inline attempt broke). Run with <span class="mono">-fae</span> so nothing stops early and
+    <span class="mono">rerunFailingTestsCount=0</span> so nothing is retried into passing.</p>
+  <div class="table-scroll">
+    <table>
+      <thead><tr><th>Module</th><th class="num">Run</th><th class="num">Fail</th><th class="num">Err</th><th class="num">Skip</th><th>Relocated</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">hadoop-auth</td><td class="num">192</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-common</td><td class="num">5,499</td><td class="num">41</td><td class="num">0</td><td class="num">380</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-yarn-common</td><td class="num">540</td><td class="num">0</td><td class="num">1</td><td class="num">7</td><td><span class="chip pass">identical</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="col">Matching totals are weaker evidence than they look — two different tests could fail
+    on the two refs and still total 41 — so the failing sets were diffed by name: <b>28 names on
+    each ref, none only in one.</b> Every one is a container artifact of running as root, a missing
+    native library, or a Kerberos dependency, and every one fails identically without the patch.</p>
+  <p class="col"><b>Zero regressions across 6,231 tests.</b> Three modules, though, not all of
+    Hadoop: HDFS, the YARN servers, MapReduce, the cloud connectors and the client-module
+    integration tests were not run.</p>
 
-  <h3>What this proof of concept does not establish</h3>
-  <ul class="tight col">
-    <li><b>Only <span class="mono">hadoop-common</span> was shaded.</b> <span class="mono">hadoop-hdfs</span>,
-      YARN and others use Jetty directly and cannot share its relocated copy, since the package
-      names differ. Whether the full change is tractable is the open question.</li>
-    <li><b>3 MB added</b> per artifact that does this.</li>
-    <li><b><span class="mono">HttpServer2</span>'s API now exposes shaded Jetty types.</b> It is
-      <span class="mono">Private</span>, so defensible, but it is a signature change.</li>
-    <li><b>Untested:</b> whether Hadoop's own modules still work against a shaded
-      <span class="mono">hadoop-common</span> — the first thing a real attempt would need to prove.</li>
-  </ul>
+  <h3>Tez needs two lines, and they are in Tez</h3>
+  <p class="col">Shading cannot reach Tez, because Tez's problem is <em>inheritance</em>, not
+    resolution: <span class="mono">ProfileOutputServlet extends</span> Jetty's
+    <span class="mono">DefaultServlet</span>, borrowed from Hadoop's closure. Relocating that class
+    moves it further away, not closer.</p>
+  <pre class="table-scroll" style="background:var(--sunk);border:1px solid var(--rule);border-radius:4px;padding:.9rem 1.1rem;font-family:var(--f-mono);font-size:.78rem;line-height:1.6;margin:0 0 1rem"><code style="background:none;border:0;padding:0">-import org.eclipse.jetty.servlet.DefaultServlet;
++import javax.servlet.http.HttpServlet;
+
+-public class ProfileOutputServlet extends DefaultServlet {
++public class ProfileOutputServlet extends HttpServlet {</code></pre>
+  <p class="col">Verified safe by inspection: the class uses nothing from
+    <span class="mono">DefaultServlet</span> — no <span class="mono">super.</span> call, no
+    <span class="mono">getResource</span>, no <span class="mono">ResourceService</span>, no
+    <span class="mono">ContextHandler</span> — and its <span class="mono">doGet</span> overrides
+    completely. It never should have extended a Jetty class.</p>
 
   <h3>And ee8 is not the problem</h3>
   <p class="col">Choosing the <span class="mono">ee8</span> environment is already the
@@ -355,6 +415,10 @@
           <td>A probe bug — <span class="mono">hadoop-tools</span> is a pom-only aggregator being declared as a jar.</td></tr>
         <tr><td>HBase is the strongest detector to prioritise.</td>
           <td>Zero Jetty imports. It cannot detect this at all.</td></tr>
+        <tr><td>Shading <span class="mono">hadoop-common</span> alone is a workable route.</td>
+          <td>Fails three ways at full-reactor scale. Relocation is all-or-nothing across modules that interoperate.</td></tr>
+        <tr><td>japi-compliance-checker 2.3 is the version to use.</td>
+          <td>Deadlocks on larger jars — undrained stderr in its <span class="mono">open3</span> call. 1.8 uses <span class="mono">system()</span> with redirects and does not. The 2.2× speedup was measured on one jar and generalised wrongly.</td></tr>
       </tbody>
     </table>
   </div>
@@ -368,11 +432,16 @@
   <p class="col">Nine projects is a sample, not proof, and three of them could not be tested at all.
     Of the six that could be, four break. The cheap checks were not merely incomplete — they were
     actively misleading, returning a clean result for every project that turned out to be broken.</p>
+  <p class="col">The <span class="mono">hadoop-thirdparty</span> result is a working build in a
+    branch, not a proposal: 74 files, every module compiling, every invariant rule green, and the
+    failing-test set unchanged. What it is not is a full-Hadoop validation, and the sections above
+    say so where it matters rather than in a caveat at the end.</p>
 </section>
 
 <footer>
   trunk d57814e3 → jetty-phase-c 91ccfd1f · JDK 21.0.10 · Maven 3.9.15 ·
-  japi-compliance-checker 1.8 · full record in downstream-check/runs/2026-08-25-phase-c.md
+  japi-compliance-checker 1.8 · 6,231 tests per ref · full record in
+  downstream-check/runs/2026-08-25-phase-c.md
 </footer>
 
 </div>
