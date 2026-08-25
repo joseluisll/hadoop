@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>example</groupId>
+  <artifactId>downstream-consumer</artifactId>
+  <version>1.0</version>
+  <packaging>jar</packaging>
+
+  <!--
+    An out-of-tree consumer of the hadoop-auth surface HADOOP-19971 changed.
+    Deliberately uses only the API that exists on the baseline, so it can be
+    compiled against one Hadoop ref and run against another. That is the point:
+    compiling proves source compatibility, running the same class file against
+    different jars proves binary compatibility, and nothing in Hadoop's own
+    tests can do the second.
+  -->
+  <properties>
+    <hadoop.version>3.6.0-SNAPSHOT</hadoop.version>
+    <maven.compiler.release>17</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>org.apache.hadoop</groupId>
+      <artifactId>hadoop-auth</artifactId>
+      <version>${hadoop.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.apache.hadoop</groupId>
+      <artifactId>hadoop-common</artifactId>
+      <version>${hadoop.version}</version>
+    </dependency>
+  </dependencies>
+</project>
