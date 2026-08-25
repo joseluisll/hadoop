@@ -1,0 +1,73 @@
+#!/usr/bin/env python3
+#
+# Rung 2: read the client-packaging invariants out of a Maven install log.
+#
+# hadoop-client-check-invariants and check-test-invariants are in the default
+# reactor, so a plain `mvn install` already runs them. This does not re-run
+# anything; it extracts what the build already decided, so the answer is
+# recorded the same way for every ref.
+
+import argparse
+import re
+import sys
+
+MODULES = [
+    "hadoop-client-check-invariants",
+    "hadoop-client-check-test-invariants",
+]
+
+RULE = re.compile(r"^\[(INFO|WARNING|ERROR)\] Rule \d+: (\S+) (passed|failed)")
+GOAL = re.compile(r"^\[INFO\] --- enforcer:[\d.]+:enforce \(([^)]+)\) @ (\S+) ---")
+OUTCOME = re.compile(r"^\[INFO\] BUILD (SUCCESS|FAILURE)")
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Summarise the client-packaging invariants from a build log.")
+    parser.add_argument("log", help="Maven install log for one ref.")
+    parser.add_argument("--ref", default="", help="Label for the ref.")
+    args = parser.parse_args()
+
+    module = None
+    rules = []
+    outcome = "UNKNOWN"
+
+    with open(args.log, encoding="utf-8", errors="replace") as handle:
+        for line in handle:
+            goal = GOAL.match(line)
+            if goal:
+                module = goal.group(2)
+                continue
+            outcome_match = OUTCOME.match(line)
+            if outcome_match:
+                outcome = outcome_match.group(1)
+                continue
+            rule = RULE.match(line)
+            if rule and module in MODULES:
+                name = rule.group(2).rsplit(".", 1)[-1]
+                rules.append((module, name, rule.group(3)))
+
+    if not rules:
+        print(f"rung2 {args.ref}: NO INVARIANT RULES FOUND in {args.log}")
+        print("  The build did not reach the client packaging modules.")
+        return 1
+
+    # A rule can run more than once; report the worst outcome for each.
+    worst = {}
+    for module_name, name, result in rules:
+        key = (module_name, name)
+        if worst.get(key) != "failed":
+            worst[key] = result
+
+    failed = [k for k, v in worst.items() if v == "failed"]
+    print(f"rung2 {args.ref}: build {outcome}, "
+          f"{len(worst)} invariant rules, {len(failed)} failed")
+    for (module_name, name), result in sorted(worst.items()):
+        mark = "FAIL" if result == "failed" else "ok"
+        print(f"  [{mark:4}] {module_name}: {name}")
+
+    return 2 if failed or outcome != "SUCCESS" else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
