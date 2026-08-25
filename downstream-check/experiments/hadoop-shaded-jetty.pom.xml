@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+  <parent>
+    <groupId>org.apache.hadoop</groupId>
+    <artifactId>hadoop-project</artifactId>
+    <version>3.6.0-SNAPSHOT</version>
+    <relativePath>../hadoop-project</relativePath>
+  </parent>
+  <artifactId>hadoop-shaded-jetty</artifactId>
+  <packaging>jar</packaging>
+  <name>Apache Hadoop Shaded Jetty</name>
+  <description>
+    Jetty 12, relocated under org.apache.hadoop.thirdparty, following the same
+    pattern hadoop-thirdparty uses for protobuf and Guava. One relocated copy
+    shared by every Hadoop module, so Jetty types match across module
+    boundaries. The servlet API is deliberately NOT relocated: it is the
+    contract downstream consumers compile against.
+  </description>
+
+  <dependencies>
+    <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-server</artifactId></dependency>
+    <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-util</artifactId></dependency>
+    <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-client</artifactId><version>${jetty.version}</version></dependency>
+    <dependency><groupId>org.eclipse.jetty.ee8</groupId><artifactId>jetty-ee8-servlet</artifactId><version>${jetty.version}</version></dependency>
+    <dependency><groupId>org.eclipse.jetty.ee8</groupId><artifactId>jetty-ee8-webapp</artifactId><version>${jetty.version}</version></dependency>
+    <dependency><groupId>org.eclipse.jetty.ee8.websocket</groupId><artifactId>jetty-ee8-websocket-jetty-server</artifactId><version>${jetty.version}</version></dependency>
+    <dependency><groupId>org.eclipse.jetty.ee8.websocket</groupId><artifactId>jetty-ee8-websocket-jetty-client</artifactId><version>${jetty.version}</version></dependency>
+    <dependency><groupId>org.eclipse.jetty.ee8.websocket</groupId><artifactId>jetty-ee8-websocket-servlet</artifactId><version>${jetty.version}</version></dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <createDependencyReducedPom>true</createDependencyReducedPom>
+              <promoteTransitiveDependencies>true</promoteTransitiveDependencies>
+              <artifactSet>
+                <includes>
+                  <include>org.eclipse.jetty:*</include>
+                  <include>org.eclipse.jetty.ee8:*</include>
+                  <include>org.eclipse.jetty.ee8.websocket:*</include>
+                  <include>org.eclipse.jetty.websocket:*</include>
+                </includes>
+              </artifactSet>
+              <relocations>
+                <relocation>
+                  <pattern>org.eclipse.jetty</pattern>
+                  <shadedPattern>org.apache.hadoop.thirdparty.org.eclipse.jetty</shadedPattern>
+                </relocation>
+              </relocations>
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
+              </transformers>
+              <filters>
+                <filter><artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>module-info.class</exclude>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                    <exclude>META-INF/versions/**/module-info.class</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+    </plugins>
+  </build>
+</project>

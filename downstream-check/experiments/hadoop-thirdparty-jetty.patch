@@ -1,0 +1,1850 @@
+diff --git a/hadoop-client-modules/hadoop-client-minicluster/pom.xml b/hadoop-client-modules/hadoop-client-minicluster/pom.xml
+index 1ea7f7bb..26f156ed 100644
+--- a/hadoop-client-modules/hadoop-client-minicluster/pom.xml
++++ b/hadoop-client-modules/hadoop-client-minicluster/pom.xml
+@@ -722,6 +722,7 @@
+                 <configuration>
+                   <artifactSet>
+                     <excludes>
++                      <exclude>org.apache.hadoop:hadoop-shaded-jetty</exclude>
+                       <!-- Fine to expose our already-shaded deps as dependencies -->
+                       <exclude>org.apache.hadoop:hadoop-annotations</exclude>
+                       <exclude>org.apache.hadoop:hadoop-client-api</exclude>
+diff --git a/hadoop-client-modules/hadoop-client-runtime/pom.xml b/hadoop-client-modules/hadoop-client-runtime/pom.xml
+index 3b9e6a7d..9af6e802 100644
+--- a/hadoop-client-modules/hadoop-client-runtime/pom.xml
++++ b/hadoop-client-modules/hadoop-client-runtime/pom.xml
+@@ -176,6 +176,9 @@
+                        the tree, so they are no longer named here.
+                       -->
+                       <exclude>org.eclipse.jetty:jetty-util</exclude>
++                      <!-- Jetty now arrives pre-relocated in one artifact, so the
++                           per-coordinate excludes above no longer match it. -->
++                      <exclude>org.apache.hadoop:hadoop-shaded-jetty</exclude>
+                       <exclude>org.eclipse.jetty:jetty-server</exclude>
+                       <exclude>org.eclipse.jetty:jetty-session</exclude>
+                       <exclude>org.eclipse.jetty.ee8:jetty-ee8-servlet</exclude>
+diff --git a/hadoop-common-project/hadoop-auth-examples/pom.xml b/hadoop-common-project/hadoop-auth-examples/pom.xml
+index f442839f..53cc8a5e 100644
+--- a/hadoop-common-project/hadoop-auth-examples/pom.xml
++++ b/hadoop-common-project/hadoop-auth-examples/pom.xml
+@@ -31,11 +31,10 @@
+   <description>Apache Hadoop Auth Examples - Java HTTP SPNEGO</description>
+ 
+   <dependencies>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-      <scope>provided</scope>
+-    </dependency>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-auth</artifactId>
+diff --git a/hadoop-common-project/hadoop-auth/pom.xml b/hadoop-common-project/hadoop-auth/pom.xml
+index 9bab9991..ccec768c 100644
+--- a/hadoop-common-project/hadoop-auth/pom.xml
++++ b/hadoop-common-project/hadoop-auth/pom.xml
+@@ -35,6 +35,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <!-- Used, even though 'mvn dependency:analyze' doesn't find it -->
+       <groupId>org.apache.hadoop</groupId>
+@@ -46,26 +50,6 @@
+       <artifactId>mockito-core</artifactId>
+       <scope>test</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-      <scope>test</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-server</artifactId>
+-      <scope>test</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-servlet</artifactId>
+-      <scope>test</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-      <scope>provided</scope>
+-    </dependency>
+     <dependency>
+       <groupId>org.slf4j</groupId>
+       <artifactId>slf4j-api</artifactId>
+diff --git a/hadoop-common-project/hadoop-auth/src/test/java/org/apache/hadoop/security/authentication/client/AuthenticatorTestCase.java b/hadoop-common-project/hadoop-auth/src/test/java/org/apache/hadoop/security/authentication/client/AuthenticatorTestCase.java
+index c6137b4e..8fee4100 100644
+--- a/hadoop-common-project/hadoop-auth/src/test/java/org/apache/hadoop/security/authentication/client/AuthenticatorTestCase.java
++++ b/hadoop-common-project/hadoop-auth/src/test/java/org/apache/hadoop/security/authentication/client/AuthenticatorTestCase.java
+@@ -32,12 +32,12 @@
+ import org.apache.http.impl.client.BasicCredentialsProvider;
+ import org.apache.http.impl.client.HttpClientBuilder;
+ import org.apache.http.util.EntityUtils;
+-import org.eclipse.jetty.server.Connector;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.ee8.servlet.FilterHolder;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Connector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
+ 
+ import javax.servlet.DispatcherType;
+ import javax.servlet.FilterConfig;
+diff --git a/hadoop-common-project/hadoop-common/pom.xml b/hadoop-common-project/hadoop-common/pom.xml
+index 23d5db11..2c92820b 100644
+--- a/hadoop-common-project/hadoop-common/pom.xml
++++ b/hadoop-common-project/hadoop-common/pom.xml
+@@ -38,6 +38,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop.thirdparty</groupId>
+       <artifactId>hadoop-shaded-protobuf_3_25</artifactId>
+@@ -127,31 +131,6 @@
+       here so the module states which servlet API it compiles against instead of
+       depending on which jar happened to come first on the classpath.
+     -->
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-server</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-servlet</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-webapp</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+     <dependency>
+       <groupId>ch.qos.reload4j</groupId>
+       <artifactId>reload4j</artifactId>
+diff --git a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/AdminAuthorizedServlet.java b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/AdminAuthorizedServlet.java
+index 8b17db75..de6cd069 100644
+--- a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/AdminAuthorizedServlet.java
++++ b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/AdminAuthorizedServlet.java
+@@ -23,7 +23,7 @@
+ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+ 
+-import org.eclipse.jetty.ee8.servlet.DefaultServlet;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.DefaultServlet;
+ 
+ /**
+  * General servlet which is admin-authorized.
+diff --git a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpRequestLog.java b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpRequestLog.java
+index 863afdf1..65eee86a 100644
+--- a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpRequestLog.java
++++ b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpRequestLog.java
+@@ -20,9 +20,9 @@
+ import java.util.Collections;
+ import java.util.HashMap;
+ import java.util.Map;
+-import org.eclipse.jetty.server.CustomRequestLog;
+-import org.eclipse.jetty.server.RequestLog;
+-import org.eclipse.jetty.server.Slf4jRequestLogWriter;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.CustomRequestLog;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.RequestLog;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Slf4jRequestLogWriter;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+diff --git a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpServer2.java b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpServer2.java
+index 25818cd2..3be086ce 100644
+--- a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpServer2.java
++++ b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpServer2.java
+@@ -90,33 +90,33 @@
+ import org.apache.hadoop.util.ReflectionUtils;
+ import org.apache.hadoop.util.Shell;
+ import org.apache.hadoop.util.StringUtils;
+-import org.eclipse.jetty.ee8.nested.ErrorHandler;
+-import org.eclipse.jetty.ee8.nested.SessionHandler;
+-import org.eclipse.jetty.ee8.servlet.FilterHolder;
+-import org.eclipse.jetty.ee8.servlet.FilterMapping;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
+-import org.eclipse.jetty.ee8.servlet.ServletMapping;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
+-import org.eclipse.jetty.http.HttpVersion;
+-import org.eclipse.jetty.server.ConnectionFactory;
+-import org.eclipse.jetty.server.Connector;
+-import org.eclipse.jetty.server.Handler;
+-import org.eclipse.jetty.server.HttpConfiguration;
+-import org.eclipse.jetty.server.HttpConnectionFactory;
+-import org.eclipse.jetty.server.RequestLog;
+-import org.eclipse.jetty.server.SecureRequestCustomizer;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.server.SslConnectionFactory;
+-import org.eclipse.jetty.server.SymlinkAllowedResourceAliasChecker;
+-import org.eclipse.jetty.server.handler.ContextHandlerCollection;
+-import org.eclipse.jetty.server.handler.StatisticsHandler;
+-import org.eclipse.jetty.util.ArrayUtil;
+-import org.eclipse.jetty.util.ExceptionUtil;
+-import org.eclipse.jetty.util.ssl.SslContextFactory;
+-import org.eclipse.jetty.util.thread.QueuedThreadPool;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.nested.ErrorHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.nested.SessionHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterMapping;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletMapping;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.http.HttpVersion;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ConnectionFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Connector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Handler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.HttpConfiguration;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.HttpConnectionFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.RequestLog;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.SecureRequestCustomizer;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.SslConnectionFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.SymlinkAllowedResourceAliasChecker;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.handler.ContextHandlerCollection;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.handler.StatisticsHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ArrayUtil;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ExceptionUtil;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ssl.SslContextFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+@@ -177,14 +177,14 @@ public final class HttpServer2 implements FilterContainer {
+    * Prefix under which a context init parameter reaches Jetty's DefaultServlet.
+    * <p>
+    * This is not the package the servlet lives in: ee8 moved the class to
+-   * org.eclipse.jetty.ee8.servlet but DefaultServlet#getInitParameter still
++   * org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet but DefaultServlet#getInitParameter still
+    * reads the 9.4 name. Spelling it the other way costs nothing at startup and
+    * silently drops the setting - dirAllowed then falls back to its default of
+    * true and /static starts listing directories - so the prefix is written
+    * once here rather than at each call site.
+    */
+   private static final String DEFAULT_SERVLET_INIT_PREFIX =
+-      "org.eclipse.jetty.servlet.Default.";
++      "org.apache.hadoop.thirdparty.org.eclipse.jetty.servlet.Default.";
+ 
+   // The ServletContext attribute where the daemon Configuration
+   // gets stored.
+diff --git a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpServer2Metrics.java b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpServer2Metrics.java
+index 6cdb3d5b..9fe8184a 100644
+--- a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpServer2Metrics.java
++++ b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/HttpServer2Metrics.java
+@@ -17,8 +17,8 @@
+  */
+ package org.apache.hadoop.http;
+ 
+-import org.eclipse.jetty.server.handler.StatisticsHandler;
+-import org.eclipse.jetty.util.thread.QueuedThreadPool;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.handler.StatisticsHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
+ 
+ import org.apache.hadoop.classification.InterfaceAudience;
+ import org.apache.hadoop.classification.InterfaceStability;
+diff --git a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/ProfileOutputServlet.java b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/ProfileOutputServlet.java
+index 3c69eca6..10f7118c 100644
+--- a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/ProfileOutputServlet.java
++++ b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/ProfileOutputServlet.java
+@@ -25,7 +25,7 @@
+ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+ 
+-import org.eclipse.jetty.ee8.servlet.DefaultServlet;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.DefaultServlet;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+diff --git a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/WebServlet.java b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/WebServlet.java
+index 76570962..3e92cea5 100644
+--- a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/WebServlet.java
++++ b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/http/WebServlet.java
+@@ -22,7 +22,7 @@
+ import javax.servlet.ServletException;
+ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+-import org.eclipse.jetty.ee8.servlet.DefaultServlet;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.DefaultServlet;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+diff --git a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/util/JsonUtils.java b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/util/JsonUtils.java
+index 458a3d3e..eaa8546b 100644
+--- a/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/util/JsonUtils.java
++++ b/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/util/JsonUtils.java
+@@ -28,7 +28,7 @@
+ 
+ /**
+  * Simple JSON utility to replace usage of the removed
+- * {@code org.eclipse.jetty.util.ajax.JSON} class.
++ * {@code org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ajax.JSON} class.
+  * Mainly used in tests and is not a public API.
+  *
+  * Uses Jackson {@link ObjectMapper} under the hood.
+@@ -44,7 +44,7 @@ private JsonUtils() {
+ 
+   /**
+    * Parse a JSON string into a Java object of the given type.
+-   * This method replaces {@code org.eclipse.jetty.util.ajax.JSON.parse}
++   * This method replaces {@code org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ajax.JSON.parse}
+    * which did not throw checked exceptions.
+    * @param json the JSON string
+    * @param clazz the target class to deserialize into
+diff --git a/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestHttpRequestLog.java b/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestHttpRequestLog.java
+index e150ab04..95e0a842 100644
+--- a/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestHttpRequestLog.java
++++ b/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestHttpRequestLog.java
+@@ -17,9 +17,9 @@
+  */
+ package org.apache.hadoop.http;
+ 
+-import org.eclipse.jetty.server.CustomRequestLog;
+-import org.eclipse.jetty.server.RequestLog;
+-import org.eclipse.jetty.server.Slf4jRequestLogWriter;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.CustomRequestLog;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.RequestLog;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Slf4jRequestLogWriter;
+ import org.junit.jupiter.api.Test;
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+diff --git a/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestHttpServer.java b/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestHttpServer.java
+index 0cf5a82f..df4b655b 100644
+--- a/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestHttpServer.java
++++ b/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestHttpServer.java
+@@ -32,11 +32,11 @@
+ import org.apache.hadoop.util.JsonUtils;
+ 
+ import com.fasterxml.jackson.core.type.TypeReference;
+-import org.eclipse.jetty.server.HttpConfiguration;
+-import org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.HttpConfiguration;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
+ import org.apache.hadoop.test.GenericTestUtils;
+-import org.eclipse.jetty.server.Handler;
+-import org.eclipse.jetty.server.handler.StatisticsHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Handler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.handler.StatisticsHandler;
+ import org.junit.jupiter.api.AfterAll;
+ import org.junit.jupiter.api.BeforeAll;
+ import org.junit.jupiter.api.Test;
+diff --git a/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestSSLHttpServerConfigs.java b/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestSSLHttpServerConfigs.java
+index 58270a10..493e2603 100644
+--- a/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestSSLHttpServerConfigs.java
++++ b/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/http/TestSSLHttpServerConfigs.java
+@@ -28,9 +28,9 @@
+ import org.apache.hadoop.security.ssl.KeyStoreTestUtil;
+ import org.apache.hadoop.security.ssl.SSLFactory;
+ import org.apache.hadoop.test.GenericTestUtils;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.server.SslConnectionFactory;
+-import org.eclipse.jetty.util.ssl.SslContextFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.SslConnectionFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ssl.SslContextFactory;
+ import org.junit.jupiter.api.AfterEach;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+diff --git a/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/security/token/delegation/web/TestWebDelegationToken.java b/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/security/token/delegation/web/TestWebDelegationToken.java
+index c39296c4..956bebb8 100644
+--- a/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/security/token/delegation/web/TestWebDelegationToken.java
++++ b/hadoop-common-project/hadoop-common/src/test/java/org/apache/hadoop/security/token/delegation/web/TestWebDelegationToken.java
+@@ -33,14 +33,14 @@
+ import org.apache.hadoop.security.authentication.util.KerberosUtil;
+ import org.apache.hadoop.security.token.delegation.AbstractDelegationTokenSecretManager;
+ import org.apache.hadoop.test.GenericTestUtils;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+ import org.junit.jupiter.api.AfterEach;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+-import org.eclipse.jetty.ee8.servlet.FilterHolder;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
+ import org.slf4j.event.Level;
+ 
+ import javax.security.auth.Subject;
+diff --git a/hadoop-common-project/hadoop-kms/pom.xml b/hadoop-common-project/hadoop-kms/pom.xml
+index 42c36543..246a5a40 100644
+--- a/hadoop-common-project/hadoop-kms/pom.xml
++++ b/hadoop-common-project/hadoop-kms/pom.xml
+@@ -33,6 +33,10 @@
+   <description>Apache Hadoop KMS</description>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-minikdc</artifactId>
+@@ -68,23 +72,11 @@
+       <artifactId>jersey-hk2</artifactId>
+       <scope>compile</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-server</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.glassfish.jaxb</groupId>
+       <artifactId>jaxb-runtime</artifactId>
+       <scope>runtime</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-webapp</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-common</artifactId>
+@@ -158,11 +150,6 @@
+       <artifactId>jul-to-slf4j</artifactId>
+       <scope>compile</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+     <dependency>
+       <groupId>io.dropwizard.metrics</groupId>
+       <artifactId>metrics-core</artifactId>
+diff --git a/hadoop-common-project/hadoop-nfs/pom.xml b/hadoop-common-project/hadoop-nfs/pom.xml
+index f942f047..66aa58f6 100644
+--- a/hadoop-common-project/hadoop-nfs/pom.xml
++++ b/hadoop-common-project/hadoop-nfs/pom.xml
+@@ -36,6 +36,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <!-- Used, even though 'mvn dependency:analyze' doesn't find it -->
+       <groupId>org.apache.hadoop</groupId>
+@@ -58,11 +62,6 @@
+       <artifactId>mockito-inline</artifactId>
+       <scope>test</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-      <scope>provided</scope>
+-    </dependency>
+     <dependency>
+       <groupId>org.slf4j</groupId>
+       <artifactId>slf4j-api</artifactId>
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/pom.xml b/hadoop-hdfs-project/hadoop-hdfs-httpfs/pom.xml
+index 539f29d7..7518c136 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/pom.xml
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/pom.xml
+@@ -42,6 +42,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.mockito</groupId>
+       <artifactId>mockito-inline</artifactId>
+@@ -62,11 +66,6 @@
+       <artifactId>jersey-server</artifactId>
+       <scope>compile</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop.thirdparty</groupId>
+       <artifactId>hadoop-shaded-guava</artifactId>
+@@ -77,19 +76,11 @@
+       <artifactId>json-simple</artifactId>
+       <scope>compile</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-server</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.glassfish.jaxb</groupId>
+       <artifactId>jaxb-runtime</artifactId>
+       <scope>runtime</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-webapp</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-common</artifactId>
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/client/BaseTestHttpFSWith.java b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/client/BaseTestHttpFSWith.java
+index a414c975..b65a267e 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/client/BaseTestHttpFSWith.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/client/BaseTestHttpFSWith.java
+@@ -81,8 +81,8 @@
+ import org.json.simple.JSONObject;
+ import org.json.simple.parser.ContainerFactory;
+ import org.json.simple.parser.JSONParser;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ import org.junit.jupiter.params.ParameterizedTest;
+ import org.junit.jupiter.params.provider.MethodSource;
+ 
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSAccessControlled.java b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSAccessControlled.java
+index e7334e88..93634eb7 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSAccessControlled.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSAccessControlled.java
+@@ -30,8 +30,8 @@
+ import org.apache.hadoop.test.TestJetty;
+ import org.apache.hadoop.test.TestJettyHelper;
+ import org.junit.jupiter.api.Test;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ 
+ import java.io.File;
+ import java.io.FileOutputStream;
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServer.java b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServer.java
+index d5a82a46..eb342e9e 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServer.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServer.java
+@@ -110,8 +110,8 @@
+ import org.json.simple.JSONObject;
+ import org.json.simple.parser.JSONParser;
+ import org.junit.jupiter.api.Test;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ 
+ import org.apache.hadoop.thirdparty.com.google.common.collect.Maps;
+ import java.util.Properties;
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServerNoACLs.java b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServerNoACLs.java
+index 3cb15048..2698a2d8 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServerNoACLs.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServerNoACLs.java
+@@ -31,8 +31,8 @@
+ import org.apache.hadoop.test.TestJetty;
+ import org.apache.hadoop.test.TestJettyHelper;
+ import org.junit.jupiter.api.Test;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ 
+ import java.io.BufferedReader;
+ import java.io.File;
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServerNoXAttrs.java b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServerNoXAttrs.java
+index bd7c9dff..777040a5 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServerNoXAttrs.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSServerNoXAttrs.java
+@@ -32,8 +32,8 @@
+ import org.apache.hadoop.test.TestJetty;
+ import org.apache.hadoop.test.TestJettyHelper;
+ import org.junit.jupiter.api.Test;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ 
+ import java.io.BufferedReader;
+ import java.io.File;
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSWithKerberos.java b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSWithKerberos.java
+index 349664ab..9acb23b9 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSWithKerberos.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/fs/http/server/TestHttpFSWithKerberos.java
+@@ -40,8 +40,8 @@
+ import org.json.simple.parser.JSONParser;
+ import org.junit.jupiter.api.AfterEach;
+ import org.junit.jupiter.api.Test;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ 
+ import java.io.File;
+ import java.io.FileOutputStream;
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestHFSTestCase.java b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestHFSTestCase.java
+index ceae8b88..8cae0137 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestHFSTestCase.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestHFSTestCase.java
+@@ -35,9 +35,9 @@
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
+ import org.apache.hadoop.util.Time;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+ import org.junit.jupiter.api.Test;
+-import org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertNotNull;
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestHTestCase.java b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestHTestCase.java
+index 1b603246..cbf863dd 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestHTestCase.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestHTestCase.java
+@@ -30,9 +30,9 @@
+ import javax.servlet.http.HttpServletResponse;
+ 
+ import org.apache.hadoop.util.Time;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+ import org.junit.jupiter.api.Test;
+-import org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
+ 
+ import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.assertNotNull;
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestJettyHelper.java b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestJettyHelper.java
+index 14028914..2c0f6a7b 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestJettyHelper.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-httpfs/src/test/java/org/apache/hadoop/test/TestJettyHelper.java
+@@ -26,15 +26,15 @@
+ import java.net.UnknownHostException;
+ 
+ import org.apache.hadoop.http.JettyUtils;
+-import org.eclipse.jetty.http.HttpVersion;
+-import org.eclipse.jetty.server.ConnectionFactory;
+-import org.eclipse.jetty.server.HttpConfiguration;
+-import org.eclipse.jetty.server.HttpConnectionFactory;
+-import org.eclipse.jetty.server.SecureRequestCustomizer;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.server.SslConnectionFactory;
+-import org.eclipse.jetty.util.ssl.SslContextFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.http.HttpVersion;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ConnectionFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.HttpConfiguration;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.HttpConnectionFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.SecureRequestCustomizer;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.SslConnectionFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ssl.SslContextFactory;
+ import org.junit.jupiter.api.extension.AfterEachCallback;
+ import org.junit.jupiter.api.extension.BeforeEachCallback;
+ import org.junit.jupiter.api.extension.ExtensionContext;
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-nfs/pom.xml b/hadoop-hdfs-project/hadoop-hdfs-nfs/pom.xml
+index 149a075b..945b8b87 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-nfs/pom.xml
++++ b/hadoop-hdfs-project/hadoop-hdfs-nfs/pom.xml
+@@ -30,6 +30,10 @@ https://maven.apache.org/xsd/maven-4.0.0.xsd">
+   <packaging>jar</packaging>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-annotations</artifactId>
+@@ -98,16 +102,6 @@ https://maven.apache.org/xsd/maven-4.0.0.xsd">
+       <artifactId>hadoop-shaded-guava</artifactId>
+       <scope>compile</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-server</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+     <dependency>
+       <groupId>org.glassfish.jersey.core</groupId>
+       <artifactId>jersey-common</artifactId>
+@@ -148,11 +142,6 @@ https://maven.apache.org/xsd/maven-4.0.0.xsd">
+       <artifactId>protobuf-java</artifactId>
+       <scope>${transient.protobuf2.scope}</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+     <dependency>
+       <groupId>org.mockito</groupId>
+       <artifactId>mockito-inline</artifactId>
+diff --git a/hadoop-hdfs-project/hadoop-hdfs/pom.xml b/hadoop-hdfs-project/hadoop-hdfs/pom.xml
+index 1c2ff021..a22285ae 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs/pom.xml
++++ b/hadoop-hdfs-project/hadoop-hdfs/pom.xml
+@@ -35,6 +35,10 @@ https://maven.apache.org/xsd/maven-4.0.0.xsd">
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-auth</artifactId>
+@@ -77,16 +81,6 @@ https://maven.apache.org/xsd/maven-4.0.0.xsd">
+       <artifactId>hadoop-shaded-guava</artifactId>
+       <scope>compile</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-server</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+     <dependency>
+       <groupId>org.glassfish.jersey.core</groupId>
+       <artifactId>jersey-common</artifactId>
+@@ -141,11 +135,6 @@ https://maven.apache.org/xsd/maven-4.0.0.xsd">
+       <artifactId>protobuf-java</artifactId>
+       <scope>${transient.protobuf2.scope}</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
+     <dependency>
+       <groupId>com.google.code.findbugs</groupId>
+       <artifactId>findbugs</artifactId>
+diff --git a/hadoop-hdfs-project/hadoop-hdfs/src/main/java/org/apache/hadoop/hdfs/server/namenode/TransferFsImage.java b/hadoop-hdfs-project/hadoop-hdfs/src/main/java/org/apache/hadoop/hdfs/server/namenode/TransferFsImage.java
+index ac31c16c..8319f3bd 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs/src/main/java/org/apache/hadoop/hdfs/server/namenode/TransferFsImage.java
++++ b/hadoop-hdfs-project/hadoop-hdfs/src/main/java/org/apache/hadoop/hdfs/server/namenode/TransferFsImage.java
+@@ -59,7 +59,7 @@
+ import org.apache.http.client.utils.URIBuilder;
+ 
+ import org.apache.hadoop.classification.VisibleForTesting;
+-import org.eclipse.jetty.io.EofException;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.io.EofException;
+ 
+ import static org.apache.hadoop.hdfs.server.common.Util.IO_FILE_BUFFER_SIZE;
+ import static org.apache.hadoop.hdfs.server.common.Util.connectionFactory;
+diff --git a/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-app/pom.xml b/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-app/pom.xml
+index 81df215f..fd6eeee4 100644
+--- a/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-app/pom.xml
++++ b/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-app/pom.xml
+@@ -33,6 +33,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-yarn-common</artifactId>
+@@ -105,10 +109,6 @@
+       <artifactId>jackson-databind</artifactId>
+     </dependency>
+     <!-- JobEndNotifier uses org.eclipse.jetty.util.log.Log -->
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.bouncycastle</groupId>
+       <artifactId>bcprov-jdk18on</artifactId>
+diff --git a/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-jobclient/src/test/java/org/apache/hadoop/mapred/NotificationTestCase.java b/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-jobclient/src/test/java/org/apache/hadoop/mapred/NotificationTestCase.java
+index 5e044c80..9360b5fa 100644
+--- a/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-jobclient/src/test/java/org/apache/hadoop/mapred/NotificationTestCase.java
++++ b/hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-jobclient/src/test/java/org/apache/hadoop/mapred/NotificationTestCase.java
+@@ -18,10 +18,10 @@
+ 
+ package org.apache.hadoop.mapred;
+ 
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
+ import org.apache.hadoop.fs.Path;
+ import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.io.Text;
+diff --git a/hadoop-project/pom.xml b/hadoop-project/pom.xml
+index 248a3d82..1988920a 100644
+--- a/hadoop-project/pom.xml
++++ b/hadoop-project/pom.xml
+@@ -254,6 +254,11 @@
+ 
+   <dependencyManagement>
+     <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++        <version>${hadoop.version}</version>
++      </dependency>
+       <dependency>
+         <groupId>com.squareup.okhttp3</groupId>
+         <artifactId>mockwebserver3-junit5</artifactId>
+diff --git a/hadoop-shaded-jetty/pom.xml b/hadoop-shaded-jetty/pom.xml
+new file mode 100644
+index 00000000..14b15c69
+--- /dev/null
++++ b/hadoop-shaded-jetty/pom.xml
+@@ -0,0 +1,80 @@
++<?xml version="1.0" encoding="UTF-8"?>
++<project xmlns="http://maven.apache.org/POM/4.0.0"
++         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
++         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
++  <modelVersion>4.0.0</modelVersion>
++  <parent>
++    <groupId>org.apache.hadoop</groupId>
++    <artifactId>hadoop-project</artifactId>
++    <version>3.6.0-SNAPSHOT</version>
++    <relativePath>../hadoop-project</relativePath>
++  </parent>
++  <artifactId>hadoop-shaded-jetty</artifactId>
++  <packaging>jar</packaging>
++  <name>Apache Hadoop Shaded Jetty</name>
++  <description>
++    Jetty 12, relocated under org.apache.hadoop.thirdparty, following the same
++    pattern hadoop-thirdparty uses for protobuf and Guava. One relocated copy
++    shared by every Hadoop module, so Jetty types match across module
++    boundaries. The servlet API is deliberately NOT relocated: it is the
++    contract downstream consumers compile against.
++  </description>
++
++  <dependencies>
++    <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-server</artifactId></dependency>
++    <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-util</artifactId></dependency>
++    <dependency><groupId>org.eclipse.jetty</groupId><artifactId>jetty-client</artifactId><version>${jetty.version}</version></dependency>
++    <dependency><groupId>org.eclipse.jetty.ee8</groupId><artifactId>jetty-ee8-servlet</artifactId><version>${jetty.version}</version></dependency>
++    <dependency><groupId>org.eclipse.jetty.ee8</groupId><artifactId>jetty-ee8-webapp</artifactId><version>${jetty.version}</version></dependency>
++    <dependency><groupId>org.eclipse.jetty.ee8.websocket</groupId><artifactId>jetty-ee8-websocket-jetty-server</artifactId><version>${jetty.version}</version></dependency>
++    <dependency><groupId>org.eclipse.jetty.ee8.websocket</groupId><artifactId>jetty-ee8-websocket-jetty-client</artifactId><version>${jetty.version}</version></dependency>
++    <dependency><groupId>org.eclipse.jetty.ee8.websocket</groupId><artifactId>jetty-ee8-websocket-servlet</artifactId><version>${jetty.version}</version></dependency>
++  </dependencies>
++
++  <build>
++    <plugins>
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-shade-plugin</artifactId>
++        <executions>
++          <execution>
++            <phase>package</phase>
++            <goals><goal>shade</goal></goals>
++            <configuration>
++              <createDependencyReducedPom>true</createDependencyReducedPom>
++              <promoteTransitiveDependencies>true</promoteTransitiveDependencies>
++              <artifactSet>
++                <includes>
++                  <include>org.eclipse.jetty:*</include>
++                  <include>org.eclipse.jetty.ee8:*</include>
++                  <include>org.eclipse.jetty.ee8.websocket:*</include>
++                  <include>org.eclipse.jetty.websocket:*</include>
++                </includes>
++              </artifactSet>
++              <relocations>
++                <relocation>
++                  <pattern>org.eclipse.jetty</pattern>
++                  <shadedPattern>org.apache.hadoop.thirdparty.org.eclipse.jetty</shadedPattern>
++                </relocation>
++              </relocations>
++              <transformers>
++                <transformer implementation="org.apache.maven.plugins.shade.resource.ServicesResourceTransformer"/>
++              </transformers>
++              <filters>
++                <filter><artifact>*:*</artifact>
++                  <excludes>
++                    <exclude>module-info.class</exclude>
++                    <exclude>META-INF/*.SF</exclude>
++                    <exclude>META-INF/*.DSA</exclude>
++                    <exclude>META-INF/*.RSA</exclude>
++                    <exclude>META-INF/versions/**/module-info.class</exclude>
++                  </excludes>
++                </filter>
++              </filters>
++            </configuration>
++          </execution>
++        </executions>
++      </plugin>
++    </plugins>
++  </build>
++</project>
+diff --git a/hadoop-tools/hadoop-resourceestimator/pom.xml b/hadoop-tools/hadoop-resourceestimator/pom.xml
+index 7985a201..a4be7940 100644
+--- a/hadoop-tools/hadoop-resourceestimator/pom.xml
++++ b/hadoop-tools/hadoop-resourceestimator/pom.xml
+@@ -32,6 +32,10 @@
+     <name>Apache Hadoop Resource Estimator Service</name>
+     <packaging>jar</packaging>
+     <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+         <dependency>
+             <groupId>com.google.code.gson</groupId>
+             <artifactId>gson</artifactId>
+@@ -70,10 +74,6 @@
+             <artifactId>jersey-test-framework-provider-grizzly2</artifactId>
+             <scope>test</scope>
+         </dependency>
+-        <dependency>
+-            <groupId>org.eclipse.jetty.toolchain</groupId>
+-            <artifactId>jetty-servlet-api</artifactId>
+-        </dependency>
+         <dependency>
+             <groupId>org.glassfish.jersey.core</groupId>
+             <artifactId>jersey-server</artifactId>
+diff --git a/hadoop-tools/hadoop-sls/pom.xml b/hadoop-tools/hadoop-sls/pom.xml
+index 2e9be815..1902f0b9 100644
+--- a/hadoop-tools/hadoop-sls/pom.xml
++++ b/hadoop-tools/hadoop-sls/pom.xml
+@@ -29,6 +29,10 @@
+   <packaging>jar</packaging>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-client</artifactId>
+@@ -48,26 +52,11 @@
+       <artifactId>metrics-core</artifactId>
+       <scope>compile</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-server</artifactId>
+-      <scope>provided</scope>
+-    </dependency>
+     <!--
+       SLSWebApp handles requests through the ee8 nested handler API, the shape
+       Jetty 9 had at org.eclipse.jetty.server. It reached this module through
+       jetty-server before and has to be asked for by name now.
+     -->
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-nested</artifactId>
+-      <scope>provided</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-      <scope>provided</scope>
+-    </dependency>
+     <dependency>
+       <groupId>com.fasterxml.jackson.core</groupId>
+       <artifactId>jackson-databind</artifactId>
+diff --git a/hadoop-tools/hadoop-sls/src/main/java/org/apache/hadoop/yarn/sls/web/SLSWebApp.java b/hadoop-tools/hadoop-sls/src/main/java/org/apache/hadoop/yarn/sls/web/SLSWebApp.java
+index ada2f83b..8ff98579 100644
+--- a/hadoop-tools/hadoop-sls/src/main/java/org/apache/hadoop/yarn/sls/web/SLSWebApp.java
++++ b/hadoop-tools/hadoop-sls/src/main/java/org/apache/hadoop/yarn/sls/web/SLSWebApp.java
+@@ -41,13 +41,13 @@
+ import org.apache.hadoop.yarn.sls.scheduler.SchedulerWrapper;
+ 
+ import org.apache.hadoop.yarn.sls.utils.NodeUsageRanges;
+-import org.eclipse.jetty.ee8.nested.AbstractHandler;
+-import org.eclipse.jetty.ee8.nested.ContextHandler;
+-import org.eclipse.jetty.ee8.nested.Handler;
+-import org.eclipse.jetty.ee8.nested.Request;
+-import org.eclipse.jetty.ee8.nested.ResourceHandler;
+-import org.eclipse.jetty.http.MimeTypes;
+-import org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.nested.AbstractHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.nested.ContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.nested.Handler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.nested.Request;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.nested.ResourceHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.http.MimeTypes;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
+ import com.codahale.metrics.Counter;
+ import com.codahale.metrics.Gauge;
+ import com.codahale.metrics.Histogram;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp/pom.xml
+index d766394e..4ed66a4c 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp/pom.xml
+@@ -40,6 +40,10 @@
+     </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>io.swagger</groupId>
+       <artifactId>swagger-annotations</artifactId>
+@@ -93,27 +97,6 @@
+           exclusions on solr-solrj and solr-core below keep the old names,
+           because those match what Solr itself depends on.
+       -->
+-      <dependency>
+-          <groupId>org.eclipse.jetty.http2</groupId>
+-          <artifactId>jetty-http2-hpack</artifactId>
+-          <version>${jetty.version}</version>
+-      </dependency>
+-      <dependency>
+-          <groupId>org.eclipse.jetty.http2</groupId>
+-          <artifactId>jetty-http2-client</artifactId>
+-          <version>${jetty.version}</version>
+-      </dependency>
+-      <dependency>
+-          <groupId>org.eclipse.jetty.http2</groupId>
+-          <artifactId>jetty-http2-common</artifactId>
+-          <version>${jetty.version}</version>
+-      </dependency>
+-      <dependency>
+-          <groupId>org.eclipse.jetty.http2</groupId>
+-          <artifactId>jetty-http2-client-transport</artifactId>
+-          <version>${jetty.version}</version>
+-      </dependency>
+-
+       <dependency>
+             <groupId>org.apache.solr</groupId>
+             <artifactId>solr-solrj</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/pom.xml
+index e27e7ead..1a7eb4e2 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/pom.xml
+@@ -82,6 +82,10 @@
+   </reporting>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+ 
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+@@ -123,10 +127,6 @@
+       <groupId>org.slf4j</groupId>
+       <artifactId>slf4j-api</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-webapp</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>com.google.inject</groupId>
+       <artifactId>guice</artifactId>
+@@ -135,10 +135,6 @@
+       <groupId>jakarta.ws.rs</groupId>
+       <artifactId>jakarta.ws.rs-api</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>commons-codec</groupId>
+       <artifactId>commons-codec</artifactId>
+@@ -159,23 +155,11 @@
+       <groupId>org.glassfish.jersey.core</groupId>
+       <artifactId>jersey-client</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-server</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.glassfish.jaxb</groupId>
+       <artifactId>jaxb-runtime</artifactId>
+       <scope>runtime</scope>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-servlet</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.mockito</groupId>
+       <artifactId>mockito-inline</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/main/java/org/apache/hadoop/yarn/service/webapp/ApiServerWebApp.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/main/java/org/apache/hadoop/yarn/service/webapp/ApiServerWebApp.java
+index a9c1bdfe..5766efae 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/main/java/org/apache/hadoop/yarn/service/webapp/ApiServerWebApp.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/main/java/org/apache/hadoop/yarn/service/webapp/ApiServerWebApp.java
+@@ -27,7 +27,7 @@
+ import org.apache.hadoop.yarn.conf.YarnConfiguration;
+ import org.apache.hadoop.yarn.webapp.GenericExceptionHandler;
+ import org.apache.hadoop.yarn.webapp.YarnJacksonJaxbJsonProvider;
+-import org.eclipse.jetty.ee8.webapp.Configuration;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.Configuration;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/test/java/org/apache/hadoop/yarn/service/client/TestApiServiceClient.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/test/java/org/apache/hadoop/yarn/service/client/TestApiServiceClient.java
+index e62bdc8e..85625805 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/test/java/org/apache/hadoop/yarn/service/client/TestApiServiceClient.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/test/java/org/apache/hadoop/yarn/service/client/TestApiServiceClient.java
+@@ -30,11 +30,11 @@
+ import org.apache.hadoop.util.Lists;
+ import org.apache.hadoop.yarn.conf.YarnConfiguration;
+ import org.apache.hadoop.yarn.exceptions.YarnException;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
+-import org.eclipse.jetty.util.thread.QueuedThreadPool;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
+ import org.junit.jupiter.api.AfterAll;
+ import org.junit.jupiter.api.BeforeAll;
+ import org.junit.jupiter.api.Test;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/test/java/org/apache/hadoop/yarn/service/client/TestSecureApiServiceClient.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/test/java/org/apache/hadoop/yarn/service/client/TestSecureApiServiceClient.java
+index fb0b2a84..82af888b 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/test/java/org/apache/hadoop/yarn/service/client/TestSecureApiServiceClient.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-services/hadoop-yarn-services-api/src/test/java/org/apache/hadoop/yarn/service/client/TestSecureApiServiceClient.java
+@@ -44,11 +44,11 @@
+ import org.apache.hadoop.yarn.conf.YarnConfiguration;
+ import org.apache.hadoop.yarn.client.util.YarnClientUtils;
+ import org.apache.log4j.Logger;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
+-import org.eclipse.jetty.util.thread.QueuedThreadPool;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
+ import org.junit.jupiter.api.AfterEach;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/pom.xml
+index e32f38fe..584d816d 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/pom.xml
+@@ -31,6 +31,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+@@ -69,11 +73,6 @@
+       <groupId>ch.qos.reload4j</groupId>
+       <artifactId>reload4j</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8.websocket</groupId>
+-      <artifactId>jetty-ee8-websocket-jetty-client</artifactId>
+-    </dependency>
+-
+     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/src/main/java/org/apache/hadoop/yarn/client/api/ContainerShellWebSocket.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/src/main/java/org/apache/hadoop/yarn/client/api/ContainerShellWebSocket.java
+index 7b83d720..1c0ed5fc 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/src/main/java/org/apache/hadoop/yarn/client/api/ContainerShellWebSocket.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/src/main/java/org/apache/hadoop/yarn/client/api/ContainerShellWebSocket.java
+@@ -26,11 +26,11 @@
+ 
+ import org.apache.hadoop.classification.InterfaceAudience;
+ import org.apache.hadoop.classification.InterfaceStability;
+-import org.eclipse.jetty.ee8.websocket.api.Session;
+-import org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketClose;
+-import org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketConnect;
+-import org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketMessage;
+-import org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.Session;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketClose;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketConnect;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketMessage;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
+ import org.jline.terminal.Terminal;
+ import org.jline.terminal.TerminalBuilder;
+ import org.jline.reader.LineReader;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/src/main/java/org/apache/hadoop/yarn/client/api/impl/YarnClientImpl.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/src/main/java/org/apache/hadoop/yarn/client/api/impl/YarnClientImpl.java
+index 538d0a8a..47068c70 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/src/main/java/org/apache/hadoop/yarn/client/api/impl/YarnClientImpl.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-client/src/main/java/org/apache/hadoop/yarn/client/api/impl/YarnClientImpl.java
+@@ -143,10 +143,10 @@
+ import org.apache.hadoop.yarn.util.Records;
+ import org.apache.hadoop.yarn.util.resource.ResourceUtils;
+ import org.apache.hadoop.yarn.util.timeline.TimelineUtils;
+-import org.eclipse.jetty.ee8.websocket.api.Session;
+-import org.eclipse.jetty.ee8.websocket.api.exceptions.WebSocketException;
+-import org.eclipse.jetty.ee8.websocket.client.ClientUpgradeRequest;
+-import org.eclipse.jetty.ee8.websocket.client.WebSocketClient;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.Session;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.exceptions.WebSocketException;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.client.ClientUpgradeRequest;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.client.WebSocketClient;
+ 
+ import org.apache.hadoop.classification.VisibleForTesting;
+ import org.slf4j.Logger;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-common/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-common/pom.xml
+index 9dcc685b..ef595a20 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-common/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-common/pom.xml
+@@ -34,6 +34,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+@@ -64,18 +68,10 @@
+       <groupId>org.apache.commons</groupId>
+       <artifactId>commons-compress</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>commons-codec</groupId>
+       <artifactId>commons-codec</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop.thirdparty</groupId>
+       <artifactId>hadoop-shaded-guava</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-common/src/main/java/org/apache/hadoop/yarn/webapp/WebApps.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-common/src/main/java/org/apache/hadoop/yarn/webapp/WebApps.java
+index b25751d3..982ea3fd 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-common/src/main/java/org/apache/hadoop/yarn/webapp/WebApps.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-common/src/main/java/org/apache/hadoop/yarn/webapp/WebApps.java
+@@ -45,7 +45,7 @@
+ import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
+ import org.apache.hadoop.yarn.conf.YarnConfiguration;
+ import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ import org.glassfish.jersey.server.ResourceConfig;
+ import org.glassfish.jersey.servlet.ServletProperties;
+ import org.slf4j.Logger;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-applicationhistoryservice/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-applicationhistoryservice/pom.xml
+index e811cfae..92ca7dfd 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-applicationhistoryservice/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-applicationhistoryservice/pom.xml
+@@ -37,10 +37,10 @@
+ 
+ 
+   <dependencies>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-    </dependency>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+@@ -57,17 +57,6 @@
+     <!-- ApplicationHistoryServer uses org.eclipse.jetty.webapp.WebAppContext and
+          org.eclipse.jetty.servlet.FilterHolder. Declared provided, matching the
+          scope they already resolve at through the provided hadoop-common above. -->
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-webapp</artifactId>
+-      <scope>provided</scope>
+-    </dependency>
+-
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-servlet</artifactId>
+-      <scope>provided</scope>
+-    </dependency>
+     <dependency>
+       <groupId>org.mockito</groupId>
+       <artifactId>mockito-inline</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-applicationhistoryservice/src/main/java/org/apache/hadoop/yarn/server/applicationhistoryservice/ApplicationHistoryServer.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-applicationhistoryservice/src/main/java/org/apache/hadoop/yarn/server/applicationhistoryservice/ApplicationHistoryServer.java
+index e2a75b32..83651f73 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-applicationhistoryservice/src/main/java/org/apache/hadoop/yarn/server/applicationhistoryservice/ApplicationHistoryServer.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-applicationhistoryservice/src/main/java/org/apache/hadoop/yarn/server/applicationhistoryservice/ApplicationHistoryServer.java
+@@ -64,8 +64,8 @@
+ import org.apache.hadoop.yarn.webapp.WebApps;
+ import org.apache.hadoop.yarn.webapp.YarnJacksonJaxbJsonProvider;
+ import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
+-import org.eclipse.jetty.ee8.servlet.FilterHolder;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ 
+ import org.apache.hadoop.classification.VisibleForTesting;
+ import org.glassfish.jersey.internal.inject.AbstractBinder;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-common/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-common/pom.xml
+index 1c1c2435..cda64d9a 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-common/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-common/pom.xml
+@@ -34,6 +34,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+@@ -118,10 +122,6 @@
+       <groupId>${leveldbjni.group}</groupId>
+       <artifactId>leveldbjni-all</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>javax.cache</groupId>
+       <artifactId>cache-api</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-globalpolicygenerator/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-globalpolicygenerator/pom.xml
+index 1aa2c6e7..8c78b881 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-globalpolicygenerator/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-globalpolicygenerator/pom.xml
+@@ -33,6 +33,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+ 
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+@@ -123,11 +127,6 @@
+       <scope>test</scope>
+     </dependency>
+ 
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-    </dependency>
+-
+     <dependency>
+       <groupId>org.junit.jupiter</groupId>
+       <artifactId>junit-jupiter-api</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/pom.xml
+index 44559d06..266c27f7 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/pom.xml
+@@ -34,6 +34,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+@@ -69,32 +73,15 @@
+       <groupId>org.codehaus.jettison</groupId>
+       <artifactId>jettison</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>commons-codec</groupId>
+       <artifactId>commons-codec</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8.websocket</groupId>
+-      <artifactId>jetty-ee8-websocket-jetty-server</artifactId>
+-    </dependency>
+     <!--
+       The Jetty 9 server artifact pulled the WebSocket client in behind it; the
+       Jetty 12 one does not, and TestNMContainerWebSocket opens a client
+       connection against the container shell endpoint.
+     -->
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8.websocket</groupId>
+-      <artifactId>jetty-ee8-websocket-jetty-client</artifactId>
+-      <scope>test</scope>
+-    </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop.thirdparty</groupId>
+       <artifactId>hadoop-shaded-guava</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellWebSocket.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellWebSocket.java
+index 461e85ee..61456815 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellWebSocket.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellWebSocket.java
+@@ -35,11 +35,11 @@
+ import org.apache.hadoop.yarn.server.nodemanager.ContainerExecutor;
+ import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.Container;
+ import org.apache.hadoop.yarn.server.nodemanager.executor.ContainerExecContext;
+-import org.eclipse.jetty.ee8.websocket.api.Session;
+-import org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketClose;
+-import org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketConnect;
+-import org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketMessage;
+-import org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.Session;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketClose;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketConnect;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketMessage;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
+ import org.apache.hadoop.hdfs.protocol.datatransfer.IOStreamPair;
+ import org.apache.hadoop.security.HadoopKerberosName;
+ import org.apache.hadoop.security.UserGroupInformation;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellWebSocketServlet.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellWebSocketServlet.java
+index d82454b1..c3cca585 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellWebSocketServlet.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellWebSocketServlet.java
+@@ -20,8 +20,8 @@
+ 
+ import javax.servlet.annotation.WebServlet;
+ 
+-import org.eclipse.jetty.ee8.websocket.server.JettyWebSocketServlet;
+-import org.eclipse.jetty.ee8.websocket.server.JettyWebSocketServletFactory;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.server.JettyWebSocketServlet;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.server.JettyWebSocketServletFactory;
+ 
+ /**
+  * Container shell web socket interface.
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/TerminalServlet.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/TerminalServlet.java
+index ac6be36d..a2c4809e 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/TerminalServlet.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/TerminalServlet.java
+@@ -24,7 +24,7 @@
+ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+ 
+-import org.eclipse.jetty.ee8.servlet.DefaultServlet;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.DefaultServlet;
+ 
+ /**
+  * TerminalServlet host the static html and javascript for
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/WebServer.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/WebServer.java
+index b920d42c..37a8ebba 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/WebServer.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/main/java/org/apache/hadoop/yarn/server/nodemanager/webapp/WebServer.java
+@@ -40,7 +40,7 @@
+ import org.apache.hadoop.yarn.webapp.WebApps;
+ import org.apache.hadoop.yarn.webapp.YarnWebParams;
+ import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
+-import org.eclipse.jetty.ee8.websocket.server.config.JettyWebSocketServletContainerInitializer;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.server.config.JettyWebSocketServletContainerInitializer;
+ 
+ import javax.servlet.Filter;
+ import org.glassfish.jersey.internal.inject.AbstractBinder;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/containermanager/logaggregation/TestLogAggregationService.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/containermanager/logaggregation/TestLogAggregationService.java
+index a77d2346..d28b89f1 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/containermanager/logaggregation/TestLogAggregationService.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/containermanager/logaggregation/TestLogAggregationService.java
+@@ -156,7 +156,7 @@
+ import org.junit.jupiter.api.Timeout;
+ import org.mockito.ArgumentCaptor;
+ import org.mockito.Mockito;
+-import org.eclipse.jetty.util.ExceptionUtil;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ExceptionUtil;
+ 
+ import java.util.function.Supplier;
+ import org.slf4j.LoggerFactory;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellClientSocketTest.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellClientSocketTest.java
+index 9e4484e6..3eee6acd 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellClientSocketTest.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/webapp/ContainerShellClientSocketTest.java
+@@ -18,9 +18,9 @@
+ 
+ package org.apache.hadoop.yarn.server.nodemanager.webapp;
+ 
+-import org.eclipse.jetty.ee8.websocket.api.Session;
+-import org.eclipse.jetty.ee8.websocket.api.WebSocketAdapter;
+-import org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.Session;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.WebSocketAdapter;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/webapp/TestNMContainerWebSocket.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/webapp/TestNMContainerWebSocket.java
+index 31a1bb21..b052a7fa 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/webapp/TestNMContainerWebSocket.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanager/src/test/java/org/apache/hadoop/yarn/server/nodemanager/webapp/TestNMContainerWebSocket.java
+@@ -28,9 +28,9 @@
+ import org.apache.hadoop.yarn.server.nodemanager.containermanager.container.Container;
+ import org.apache.hadoop.yarn.server.nodemanager.health.NodeHealthCheckerService;
+ import org.apache.hadoop.yarn.server.security.ApplicationACLsManager;
+-import org.eclipse.jetty.ee8.websocket.api.Session;
+-import org.eclipse.jetty.ee8.websocket.api.UpgradeRequest;
+-import org.eclipse.jetty.ee8.websocket.client.WebSocketClient;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.Session;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.UpgradeRequest;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.client.WebSocketClient;
+ import org.junit.jupiter.api.AfterEach;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/pom.xml
+index 500cd653..2a21965a 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/pom.xml
+@@ -32,10 +32,10 @@
+   </properties>
+ 
+   <dependencies>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-    </dependency>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+@@ -141,10 +141,6 @@
+       <groupId>org.glassfish.jersey.containers</groupId>
+       <artifactId>jersey-container-servlet</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-util</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop.thirdparty</groupId>
+       <artifactId>hadoop-shaded-guava</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/main/java/org/apache/hadoop/yarn/server/resourcemanager/ResourceManager.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/main/java/org/apache/hadoop/yarn/server/resourcemanager/ResourceManager.java
+index c6d7d366..3d15da2d 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/main/java/org/apache/hadoop/yarn/server/resourcemanager/ResourceManager.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-resourcemanager/src/main/java/org/apache/hadoop/yarn/server/resourcemanager/ResourceManager.java
+@@ -139,7 +139,7 @@
+ import org.apache.hadoop.yarn.webapp.WebApps.Builder;
+ import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
+ import org.apache.zookeeper.server.auth.DigestAuthenticationProvider;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ 
+ import java.io.IOException;
+ import java.io.InputStream;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/pom.xml
+index 67efbc2a..808d8e15 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/pom.xml
+@@ -33,6 +33,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-yarn-api</artifactId>
+@@ -68,11 +72,6 @@
+          deliberately left undeclared: they already arrive through
+          jetty-ee8-webapp at the same version and scope, and declaring them
+          directly reorders the servlet API this module resolves against. -->
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-webapp</artifactId>
+-    </dependency>
+-
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-yarn-server-common</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/main/java/org/apache/hadoop/yarn/server/router/Router.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/main/java/org/apache/hadoop/yarn/server/router/Router.java
+index ffeaca54..da7b9290 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/main/java/org/apache/hadoop/yarn/server/router/Router.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/main/java/org/apache/hadoop/yarn/server/router/Router.java
+@@ -67,7 +67,7 @@
+ import org.apache.hadoop.yarn.webapp.WebApps.Builder;
+ import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
+ import org.apache.hadoop.yarn.webapp.util.WebServiceClient;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
+ 
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/test/java/org/apache/hadoop/yarn/server/router/TestRouter.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/test/java/org/apache/hadoop/yarn/server/router/TestRouter.java
+index 6da068f9..953a09f3 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/test/java/org/apache/hadoop/yarn/server/router/TestRouter.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/test/java/org/apache/hadoop/yarn/server/router/TestRouter.java
+@@ -33,9 +33,9 @@
+ import org.apache.hadoop.test.LambdaTestUtils;
+ import org.apache.hadoop.yarn.conf.YarnConfiguration;
+ import org.apache.hadoop.yarn.webapp.WebApp;
+-import org.eclipse.jetty.ee8.servlet.FilterHolder;
+-import org.eclipse.jetty.ee8.servlet.ServletHandler;
+-import org.eclipse.jetty.ee8.webapp.WebAppContext;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+ import org.junit.jupiter.api.Test;
+ 
+ import javax.servlet.FilterChain;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/test/java/org/apache/hadoop/yarn/server/router/webapp/TestRouterWebAppProxy.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/test/java/org/apache/hadoop/yarn/server/router/webapp/TestRouterWebAppProxy.java
+index f319b0f0..17551f80 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/test/java/org/apache/hadoop/yarn/server/router/webapp/TestRouterWebAppProxy.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-router/src/test/java/org/apache/hadoop/yarn/server/router/webapp/TestRouterWebAppProxy.java
+@@ -39,11 +39,11 @@
+ import org.apache.hadoop.yarn.server.router.clientrm.FederationClientInterceptor;
+ import org.apache.hadoop.yarn.server.router.clientrm.RouterClientRMService.RequestInterceptorChainWrapper;
+ import org.apache.hadoop.yarn.server.webproxy.FedAppReportFetcher;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
+-import org.eclipse.jetty.util.thread.QueuedThreadPool;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
+ import org.junit.jupiter.api.BeforeAll;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.Timeout;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice-hbase-tests/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice-hbase-tests/pom.xml
+index cf8f016e..47e94d16 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice-hbase-tests/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice-hbase-tests/pom.xml
+@@ -35,6 +35,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+ 
+     <!-- Since hbase 1.0.1 requires an older version of hadoop we enforce an
+          older version of hadoop just for the hbase unit tests. We also need to
+@@ -459,17 +463,6 @@
+     <!-- 'mvn dependency:analyze' fails to detect use of this direct
+          dependency -->
+     <!-- Jetty 9 is needed by the ATS code -->
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-servlet</artifactId>
+-      <scope>test</scope>
+-    </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.ee8</groupId>
+-      <artifactId>jetty-ee8-webapp</artifactId>
+-      <scope>test</scope>
+-    </dependency>
+-
+     <dependency>
+       <groupId>org.apache.commons</groupId>
+       <artifactId>commons-lang3</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice/pom.xml
+index 2206ed41..3c911ce9 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice/pom.xml
+@@ -35,6 +35,10 @@
+   </properties>
+ 
+   <dependencies>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+       <artifactId>hadoop-common</artifactId>
+@@ -87,11 +91,6 @@
+       <artifactId>commons-io</artifactId>
+     </dependency>
+ 
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-    </dependency>
+-
+     <dependency>
+       <groupId>jakarta.xml.bind</groupId>
+       <artifactId>jakarta.xml.bind-api</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/pom.xml b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/pom.xml
+index 126e3d55..c46c1641 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/pom.xml
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/pom.xml
+@@ -32,11 +32,10 @@
+   </properties>
+ 
+   <dependencies>
+-    <dependency>
+-      <groupId>org.eclipse.jetty.toolchain</groupId>
+-      <artifactId>jetty-servlet-api</artifactId>
+-      <scope>compile</scope>
+-    </dependency>
++      <dependency>
++        <groupId>org.apache.hadoop</groupId>
++        <artifactId>hadoop-shaded-jetty</artifactId>
++      </dependency>
+     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
+     <dependency>
+       <groupId>org.apache.hadoop</groupId>
+@@ -94,10 +93,6 @@
+       <groupId>org.apache.hadoop.thirdparty</groupId>
+       <artifactId>hadoop-shaded-guava</artifactId>
+     </dependency>
+-    <dependency>
+-      <groupId>org.eclipse.jetty</groupId>
+-      <artifactId>jetty-server</artifactId>
+-    </dependency>
+     <dependency>
+       <groupId>org.glassfish.jaxb</groupId>
+       <artifactId>jaxb-runtime</artifactId>
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/TestWebAppProxyServlet.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/TestWebAppProxyServlet.java
+index 90086d0a..50101e37 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/TestWebAppProxyServlet.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/TestWebAppProxyServlet.java
+@@ -43,11 +43,11 @@
+ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+ 
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
+-import org.eclipse.jetty.util.thread.QueuedThreadPool;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
+ import org.junit.jupiter.api.AfterAll;
+ import org.junit.jupiter.api.BeforeAll;
+ import org.junit.jupiter.api.Test;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/TestWebAppProxyServletFed.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/TestWebAppProxyServletFed.java
+index 3906b758..48fe9f0d 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/TestWebAppProxyServletFed.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/TestWebAppProxyServletFed.java
+@@ -52,11 +52,11 @@
+ import org.apache.hadoop.yarn.server.federation.store.records.SubClusterState;
+ import org.apache.hadoop.yarn.server.federation.utils.FederationStateStoreFacade;
+ import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
+-import org.eclipse.jetty.util.thread.QueuedThreadPool;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
+ import org.junit.jupiter.api.AfterAll;
+ import org.junit.jupiter.api.BeforeAll;
+ import org.junit.jupiter.api.Test;
+diff --git a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/amfilter/TestAmFilter.java b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/amfilter/TestAmFilter.java
+index ad9d2a74..20de176d 100644
+--- a/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/amfilter/TestAmFilter.java
++++ b/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-web-proxy/src/test/java/org/apache/hadoop/yarn/server/webproxy/amfilter/TestAmFilter.java
+@@ -44,11 +44,11 @@
+ import javax.servlet.http.HttpServletRequest;
+ import javax.servlet.http.HttpServletResponse;
+ 
+-import org.eclipse.jetty.server.Server;
+-import org.eclipse.jetty.server.ServerConnector;
+-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+-import org.eclipse.jetty.ee8.servlet.ServletHolder;
+-import org.eclipse.jetty.util.thread.QueuedThreadPool;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
++import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
+ import org.junit.jupiter.api.Test;
+ import org.junit.jupiter.api.Timeout;
+ import org.mockito.Mockito;
+diff --git a/pom.xml b/pom.xml
+index 10c5b366..6d2f52ef 100644
+--- a/pom.xml
++++ b/pom.xml
+@@ -148,6 +148,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
+ 
+   <modules>
+     <module>hadoop-project</module>
++    <module>hadoop-shaded-jetty</module>
+     <module>hadoop-project-dist</module>
+     <module>hadoop-assemblies</module>
+     <module>hadoop-maven-plugins</module>
