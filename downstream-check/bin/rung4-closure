@@ -1,0 +1,187 @@
+#!/usr/bin/env python3
+"""Rung 4: per-candidate closure composition.
+
+For each downstream project, read its real Hadoop dependencies, its
+servlet/jsp exclusions on them, and the servlet artifacts it declares itself.
+Reproduce that shape in a probe POM, resolve it against each Hadoop ref, and
+count how many artifacts on the resulting classpath carry
+javax/servlet/Servlet.class.
+
+Resolution only: nothing downstream is compiled.
+"""
+import collections
+import glob
+import os
+import re
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+import zipfile
+
+W = "/home/user/dcheck-work"
+MVN = f"{W}/tools/apache-maven-3.9.15/bin/mvn"
+HADOOP_VERSION = "3.6.0-SNAPSHOT"
+SERVLET = re.compile(r"servlet|jsp", re.I)
+PROJECTS = ["hbase", "tez", "knox", "hive", "ranger", "atlas", "oozie"]
+
+
+def strip_ns(tree):
+    for e in tree.iter():
+        if "}" in e.tag:
+            e.tag = e.tag.split("}", 1)[1]
+    return tree
+
+
+def text(elem, tag):
+    c = elem.find(tag)
+    return (c.text or "").strip() if c is not None and c.text else ""
+
+
+def available_hadoop_artifacts():
+    """Which hadoop artifacts our built refs actually publish."""
+    base = f"{W}/refs/trunk/repo/org/apache/hadoop"
+    return {d for d in os.listdir(base)
+            if os.path.isdir(os.path.join(base, d, HADOOP_VERSION))}
+
+
+def scan(proj, available):
+    """Read a project's Hadoop deps, its servlet exclusions on them, and the
+    servlet API it declares itself.
+
+    Declared versions are usually properties, and those declarations are the
+    whole point of the probe, so properties are collected across every POM and
+    substituted. A version that still cannot be resolved falls back to a
+    plausible concrete one rather than being dropped.
+    """
+    hadoop, excl, decl = set(), set(), {}
+    props = {}
+    poms = glob.glob(f"{W}/downstream/{proj}/**/pom.xml", recursive=True)
+    for p in poms:
+        try:
+            root = strip_ns(ET.parse(p).getroot())
+        except ET.ParseError:
+            continue
+        for pr in root.iter("properties"):
+            for child in pr:
+                if child.text:
+                    props.setdefault(child.tag, child.text.strip())
+
+    def resolve_version(v, depth=0):
+        while v.startswith("${") and v.endswith("}") and depth < 5:
+            v = props.get(v[2:-1], "")
+            depth += 1
+        return v if re.match(r"^\d", v or "") else ""
+
+    for p in poms:
+        try:
+            root = strip_ns(ET.parse(p).getroot())
+        except ET.ParseError:
+            continue
+        for d in root.iter("dependency"):
+            g, a, v = text(d, "groupId"), text(d, "artifactId"), text(d, "version")
+            if g == "org.apache.hadoop" and a in available:
+                hadoop.add(a)
+            if g in ("javax.servlet", "jakarta.servlet") and "servlet-api" in a:
+                rv = resolve_version(v)
+                if not rv:
+                    rv = "3.1.0" if g == "javax.servlet" else "4.0.4"
+                decl.setdefault(f"{g}:{a}", rv)
+            for ex in d.iter("exclusion"):
+                eg, ea = text(ex, "groupId"), text(ex, "artifactId")
+                if SERVLET.search(f"{eg}:{ea}") or ea == "*":
+                    excl.add((eg, ea))
+    return sorted(hadoop), sorted(excl), decl
+
+
+def write_pom(path, hadoop, excl, decl):
+    ex = "".join(
+        f"        <exclusion><groupId>{g}</groupId>"
+        f"<artifactId>{a}</artifactId></exclusion>\n" for g, a in excl)
+    deps = ""
+    for a in hadoop:
+        deps += (f"    <dependency>\n"
+                 f"      <groupId>org.apache.hadoop</groupId>\n"
+                 f"      <artifactId>{a}</artifactId>\n"
+                 f"      <version>{HADOOP_VERSION}</version>\n"
+                 + (f"      <exclusions>\n{ex}      </exclusions>\n" if ex else "")
+                 + f"    </dependency>\n")
+    for ga, v in decl.items():
+        g, a = ga.split(":")
+        deps += (f"    <dependency>\n      <groupId>{g}</groupId>\n"
+                 f"      <artifactId>{a}</artifactId>\n"
+                 f"      <version>{v}</version>\n    </dependency>\n")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w") as f:
+        f.write(
+            '<project xmlns="http://maven.apache.org/POM/4.0.0">\n'
+            "  <modelVersion>4.0.0</modelVersion>\n"
+            "  <groupId>probe</groupId><artifactId>shape</artifactId>"
+            "<version>1</version>\n  <dependencies>\n" + deps +
+            "  </dependencies>\n</project>\n")
+
+
+def carriers(classpath_file):
+    found = []
+    with open(classpath_file) as f:
+        for jar in f.read().strip().split(":"):
+            if not jar or not os.path.exists(jar):
+                continue
+            try:
+                with zipfile.ZipFile(jar) as z:
+                    if "javax/servlet/Servlet.class" in z.namelist():
+                        found.append(os.path.basename(jar))
+            except zipfile.BadZipFile:
+                continue
+    return sorted(found)
+
+
+def resolve(pom_dir, ref):
+    cp = f"/tmp/rung4-cp.txt"
+    if os.path.exists(cp):
+        os.remove(cp)
+    r = subprocess.run(
+        [MVN, "-B", "-q", "dependency:build-classpath",
+         f"-Dmdep.outputFile={cp}",
+         f"-Dmaven.repo.local={W}/refs/{ref}/repo",
+         f"-Dmaven.repo.local.tail={W}/m2-tail"],
+        cwd=pom_dir, capture_output=True, text=True)
+    if not os.path.exists(cp):
+        msg = "\n".join(l for l in (r.stdout + r.stderr).splitlines()
+                 if "JAVA_TOOL_OPTIONS" not in l and l.strip())
+        return None, msg[-500:]
+    return carriers(cp), None
+
+
+def main():
+    available = available_hadoop_artifacts()
+    rows = []
+    for proj in PROJECTS:
+        hadoop, excl, decl = scan(proj, available)
+        if not hadoop:
+            rows.append((proj, "no resolvable hadoop deps", None, None))
+            continue
+        d = f"{W}/probes/{proj}"
+        write_pom(f"{d}/pom.xml", hadoop, excl, decl)
+        out = {}
+        for ref in ("trunk", "phase-c"):
+            got, err = resolve(d, ref)
+            out[ref] = got if got is not None else f"RESOLVE FAILED: {err}"
+        rows.append((proj, f"{len(hadoop)} hadoop deps, {len(excl)} exclusions, "
+                     f"{len(decl)} own servlet decls", out["trunk"], out["phase-c"]))
+
+    print("=" * 78)
+    for proj, shape, t, p in rows:
+        print(f"\n### {proj} — {shape}")
+        if isinstance(t, list) and isinstance(p, list):
+            print(f"  trunk   : {len(t)} carrier(s)  {t}")
+            print(f"  phase-c : {len(p)} carrier(s)  {p}")
+            verdict = ("DUPLICATE INTRODUCED" if len(p) > len(t)
+                       else "no change" if len(p) == len(t) else "fewer")
+            print(f"  -> {verdict}")
+        else:
+            print(f"  trunk   : {t}")
+            print(f"  phase-c : {p}")
+
+
+if __name__ == "__main__":
+    main()
