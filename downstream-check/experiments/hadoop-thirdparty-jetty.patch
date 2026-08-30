@@ -849,10 +849,10 @@ index 248a3d82..1988920a 100644
          <artifactId>mockwebserver3-junit5</artifactId>
 diff --git a/hadoop-shaded-jetty/pom.xml b/hadoop-shaded-jetty/pom.xml
 new file mode 100644
-index 00000000..14b15c69
+index 00000000..5c98ac7d
 --- /dev/null
 +++ b/hadoop-shaded-jetty/pom.xml
-@@ -0,0 +1,80 @@
+@@ -0,0 +1,139 @@
 +<?xml version="1.0" encoding="UTF-8"?>
 +<project xmlns="http://maven.apache.org/POM/4.0.0"
 +         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -926,6 +926,65 @@ index 00000000..14b15c69
 +                  </excludes>
 +                </filter>
 +              </filters>
++            </configuration>
++          </execution>
++        </executions>
++      </plugin>
++
++      <!--
++        maven-shade-plugin rewrites class files and resource PATHS, but not
++        class names inside resource CONTENT. Jetty names classes as text in
++        three functional descriptors, and every WebAppContext reads the first
++        of them:
++
++          ee8/webapp/webdefault-ee8.xml  - listener-class, servlet-class and
++              the org.eclipse.jetty.session.* init-param keys
++          xml/configure_*.dtd            - org.eclipse.jetty.xml.XmlConfiguration
++
++        Left alone, the descriptor asks for org.eclipse.jetty.ee8.servlet.
++        listener.IntrospectorCleaner, which no longer exists under that name,
++        the context fails to start and the webapp answers 503. Caught by
++        TestApplicationHistoryServer.testHostedUIs; nothing at compile time
++        sees it.
++
++        The other ~36 resources carrying unrelocated names are
++        META-INF/maven/**/pom.{xml,properties} build metadata and a GraalVM
++        native-image config. Nothing reads those at runtime, so they are left
++        as they are rather than rewritten blind.
++
++        org.eclipse.jetty.toolchain is excluded from the rewrite for the same
++        reason it is excluded from the relocation: the servlet API is the
++        contract downstream compiles against and must keep its own name.
++      -->
++      <plugin>
++        <groupId>org.apache.maven.plugins</groupId>
++        <artifactId>maven-antrun-plugin</artifactId>
++        <executions>
++          <execution>
++            <id>relocate-names-inside-jetty-descriptors</id>
++            <phase>package</phase>
++            <goals><goal>run</goal></goals>
++            <configuration>
++              <target>
++                <property name="staging" value="${project.build.directory}/descriptor-relocation"/>
++                <delete dir="${staging}"/>
++                <mkdir dir="${staging}"/>
++                <unzip src="${project.build.directory}/${project.build.finalName}.jar" dest="${staging}">
++                  <patternset>
++                    <include name="org/apache/hadoop/thirdparty/org/eclipse/jetty/ee8/webapp/webdefault-ee8.xml"/>
++                    <include name="org/apache/hadoop/thirdparty/org/eclipse/jetty/xml/configure_*.dtd"/>
++                  </patternset>
++                </unzip>
++                <!-- Negative lookbehind keeps an already-relocated name from
++                     being prefixed twice if this ever runs more than once. -->
++                <replaceregexp flags="g" byline="false"
++                               match="(?&lt;!thirdparty\.)org\.eclipse\.jetty\.(?!toolchain)"
++                               replace="org.apache.hadoop.thirdparty.org.eclipse.jetty.">
++                  <fileset dir="${staging}"/>
++                </replaceregexp>
++                <zip destfile="${project.build.directory}/${project.build.finalName}.jar"
++                     basedir="${staging}" update="true"/>
++              </target>
 +            </configuration>
 +          </execution>
 +        </executions>
