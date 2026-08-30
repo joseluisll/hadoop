@@ -153,3 +153,21 @@ every package named `impl` or `internal`, announcing it only as a warning in the
 middle of its output.
 
 **`pkill -f` matches your own shell.** Use a pattern that cannot match itself.
+
+**Maven recompiles on changed sources, not on changed dependencies.** Comparing
+two refs by swapping `-Dmaven.repo.local` leaves the previous ref's compiled
+classes in `target/`. They link against jars that are no longer there and throw
+`NoSuchMethodError`, which reads exactly like a regression and is not one. This
+cost a full pass of the remaining-suites run: a `TestHttpFSServerWebServer`
+class compiled during an abandoned inline-shading experiment surfaced as five
+errors naming `org.apache.hadoop.shaded.…`, a prefix the build under test never
+produces. **The prefix in the error is the tell** — if a class name in a
+failure cannot come from the ref you are testing, suspect the harness before
+the change. Delete `target/classes` and `target/test-classes` per module per
+ref, and audit with:
+
+```
+find <worktree> -name '*.class' -path '*/target/*' \
+  -exec grep -l 'org/eclipse/jetty' {} + \
+  | xargs grep -L 'org/apache/hadoop/thirdparty/org/eclipse/jetty'
+```
