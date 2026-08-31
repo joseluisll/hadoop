@@ -1,0 +1,613 @@
+<title>Jetty Relocation Handover</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+
+<style>
+  :root{
+    --paper:#f1f4f8; --surface:#ffffff; --sunk:#e6ebf2; --band:#eaeff6;
+    --ink:#11151c; --ink-2:#3e4857; --ink-3:#697485; --rule:#d1d9e4;
+    --accent:#3d5a99; --accent-soft:#dfe6f4;
+    --pass:#2f6b4f; --fail:#a3342a; --warn:#8a6212; --none:#697485;
+    --shadow:0 1px 2px rgba(17,21,28,.05),0 10px 26px -18px rgba(17,21,28,.4);
+    --f-ui:"IBM Plex Sans","Helvetica Neue",Arial,sans-serif;
+    --f-body:"IBM Plex Serif",Georgia,"Times New Roman",serif;
+    --f-mono:"IBM Plex Mono",ui-monospace,Menlo,Consolas,monospace;
+  }
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+    --paper:#0d1117; --surface:#151b24; --sunk:#10161e; --band:#131a23;
+    --ink:#e6ecf4; --ink-2:#aeb9c8; --ink-3:#7a8598; --rule:#242e3b;
+    --accent:#7d9ede; --accent-soft:#1b2740;
+    --pass:#6bbd8d; --fail:#e08a7d; --warn:#d0a153; --none:#7a8598;
+    --shadow:0 1px 2px rgba(0,0,0,.5),0 12px 30px -20px rgba(0,0,0,.9);}}
+  :root[data-theme="dark"]{
+    --paper:#0d1117; --surface:#151b24; --sunk:#10161e; --band:#131a23;
+    --ink:#e6ecf4; --ink-2:#aeb9c8; --ink-3:#7a8598; --rule:#242e3b;
+    --accent:#7d9ede; --accent-soft:#1b2740;
+    --pass:#6bbd8d; --fail:#e08a7d; --warn:#d0a153; --none:#7a8598;
+    --shadow:0 1px 2px rgba(0,0,0,.5),0 12px 30px -20px rgba(0,0,0,.9);}
+
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--f-body);
+       font-size:16.5px;line-height:1.65;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:62rem;margin:0 auto;padding:0 1.5rem 6rem}
+  .col{max-width:41rem}
+  h1,h2,h3,h4,.ui{font-family:var(--f-ui)}
+  h1{font-size:clamp(1.9rem,4.8vw,2.7rem);line-height:1.1;font-weight:700;letter-spacing:-.022em;
+     text-wrap:balance;margin:0 0 .7rem}
+  h2{font-size:1.3rem;font-weight:600;letter-spacing:-.012em;margin:0;text-wrap:balance}
+  h3{font-size:1.02rem;font-weight:600;margin:2rem 0 .6rem;letter-spacing:-.005em}
+  h4{font-size:.83rem;font-weight:600;margin:1.4rem 0 .4rem;text-transform:uppercase;
+     letter-spacing:.09em;color:var(--ink-3)}
+  p{margin:0 0 1rem}
+  code,.mono{font-family:var(--f-mono);font-size:.84em}
+  code{background:var(--sunk);border:1px solid var(--rule);border-radius:3px;
+       padding:.06em .3em;word-break:break-word}
+  a{color:var(--accent)}
+  .eyebrow{font-family:var(--f-ui);font-size:.69rem;font-weight:600;letter-spacing:.15em;
+           text-transform:uppercase;color:var(--accent);margin:0 0 .55rem}
+
+  header.masthead{padding:3.4rem 0 0}
+  .lede{font-size:1.13rem;color:var(--ink-2);max-width:39rem;margin:0 0 1.5rem}
+  .status{display:flex;gap:.8rem;align-items:flex-start;background:var(--surface);
+          border:1px solid var(--rule);border-left:3px solid var(--warn);
+          border-radius:0 5px 5px 0;padding:1rem 1.2rem;margin:0 0 2rem;max-width:47rem}
+  .status .ui{font-size:.93rem;color:var(--ink-2)}
+  .status b{color:var(--ink)}
+  .meta{display:flex;flex-wrap:wrap;gap:.35rem 2rem;font-family:var(--f-mono);
+        font-size:.73rem;color:var(--ink-3);border-top:1px solid var(--rule);
+        border-bottom:1px solid var(--rule);padding:.8rem 0;margin-bottom:2.6rem}
+  .meta b{color:var(--ink-2);font-weight:500}
+
+  .stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(8rem,1fr));gap:1px;
+         background:var(--rule);border:1px solid var(--rule);border-radius:5px;
+         overflow:hidden;margin-bottom:3.2rem}
+  .stat{background:var(--surface);padding:.95rem 1.05rem}
+  .stat-n{font-family:var(--f-mono);font-size:1.6rem;font-weight:600;line-height:1.1;
+          letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+  .stat-n.ok{color:var(--pass)} .stat-n.bad{color:var(--fail)} .stat-n.wa{color:var(--warn)}
+  .stat-l{display:block;font-family:var(--f-ui);font-size:.66rem;letter-spacing:.08em;
+          text-transform:uppercase;color:var(--ink-3);margin-top:.3rem;line-height:1.35}
+
+  section{margin-bottom:3.4rem}
+  .shead{display:flex;align-items:baseline;justify-content:space-between;gap:1rem;
+         border-bottom:2px solid var(--ink);padding-bottom:.5rem;margin-bottom:1.4rem}
+  .shead .n{font-family:var(--f-mono);font-size:.75rem;color:var(--ink-3);white-space:nowrap}
+
+  .tw{overflow-x:auto;margin-bottom:1.3rem;border:1px solid var(--rule);border-radius:5px;
+      background:var(--surface)}
+  table{width:100%;border-collapse:collapse;font-size:.85rem;line-height:1.45;min-width:31rem}
+  th{font-family:var(--f-ui);text-align:left;font-size:.66rem;font-weight:600;letter-spacing:.09em;
+     text-transform:uppercase;color:var(--ink-3);background:var(--band);
+     border-bottom:1px solid var(--rule);padding:.55rem .85rem;vertical-align:bottom;
+     white-space:nowrap}
+  td{padding:.55rem .85rem;border-bottom:1px solid var(--rule);vertical-align:top;color:var(--ink-2)}
+  td:first-child{color:var(--ink)}
+  tbody tr:last-child td{border-bottom:0}
+  .num{font-family:var(--f-mono);font-variant-numeric:tabular-nums;text-align:right;font-size:.79rem}
+  th.num{text-align:right}
+  td.mono{font-family:var(--f-mono);font-size:.75rem}
+  .chip{display:inline-block;font-family:var(--f-ui);font-size:.62rem;font-weight:600;
+        letter-spacing:.06em;text-transform:uppercase;padding:.16em .48em;border-radius:3px;
+        border:1px solid currentColor;white-space:nowrap}
+  .chip.pass{color:var(--pass)} .chip.fail{color:var(--fail)}
+  .chip.warn{color:var(--warn)} .chip.none{color:var(--none)}
+
+  pre{background:var(--sunk);border:1px solid var(--rule);border-radius:4px;
+      padding:.85rem 1.05rem;overflow-x:auto;margin:0 0 1.2rem;
+      font-family:var(--f-mono);font-size:.775rem;line-height:1.62}
+  pre code{background:none;border:0;padding:0;font-size:inherit}
+  .add{color:var(--pass)} .del{color:var(--fail)} .cm{color:var(--ink-3)}
+
+  .defect{background:var(--surface);border:1px solid var(--rule);border-radius:5px;
+          box-shadow:var(--shadow);padding:1.3rem 1.4rem;margin-bottom:1.5rem}
+  .defect > .tag{display:inline-block;font-family:var(--f-ui);font-size:.64rem;font-weight:600;
+        letter-spacing:.09em;text-transform:uppercase;color:var(--fail);
+        border:1px solid currentColor;border-radius:3px;padding:.15em .5em;margin-bottom:.7rem}
+  .defect h3{margin:0 0 .6rem;font-size:1.06rem}
+  .defect p:last-child{margin-bottom:0}
+
+  ul.t{margin:0 0 1.2rem;padding-left:1.15rem}
+  ul.t li{margin-bottom:.55rem;color:var(--ink-2)}
+  ul.t li::marker{color:var(--accent)}
+  ul.t b{color:var(--ink);font-weight:600}
+  ol.steps{margin:0 0 1.2rem;padding-left:1.35rem}
+  ol.steps li{margin-bottom:.7rem;color:var(--ink-2)}
+  ol.steps li::marker{font-family:var(--f-mono);font-size:.82rem;color:var(--accent)}
+  ol.steps b{color:var(--ink);font-weight:600}
+
+  .note{border-left:3px solid var(--accent);background:var(--surface);padding:.85rem 1.1rem;
+        border-radius:0 4px 4px 0;font-size:.93rem;color:var(--ink-2);margin:0 0 1.2rem}
+  .note b{color:var(--ink)}
+  .lesson{border-top:1px solid var(--rule);padding-top:1.1rem;margin-top:1.1rem}
+  .lesson:first-of-type{border-top:0;padding-top:0;margin-top:0}
+  .lesson h3{margin-top:0}
+  footer{border-top:1px solid var(--rule);padding-top:1.2rem;color:var(--ink-3);
+         font-family:var(--f-mono);font-size:.73rem;line-height:1.75}
+  :focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+</style>
+
+<div class="wrap">
+
+<header class="masthead">
+  <p class="eyebrow">HADOOP-19912 · handover · 2026-08-31</p>
+  <h1>Making Jetty 12 invisible to downstream consumers</h1>
+  <p class="lede">A worked, tested attempt at relocating Jetty into a published
+    <span class="mono">hadoop-shaded-jetty</span> artifact, so that Hadoop's container upgrade
+    stops reaching downstream classpaths. What it fixed, what it broke, and what anyone repeating
+    it should know before starting.</p>
+
+  <div class="status">
+    <div class="ui"><b>This work is stopped and is not proposed for merge.</b> It was built against
+      <span class="mono">jetty-phase-c</span> at <span class="mono">91ccfd1f</span>; phases A, B and
+      C have since been reworked, so the patch below no longer applies as-is. It is recorded here so
+      the community can judge whether the approach is worth redoing on the new phase
+      implementations — the findings and the defects it uncovered outlive the patch.</div>
+  </div>
+
+  <div class="meta">
+    <span><b>Baseline</b> jetty-phase-c 91ccfd1f</span>
+    <span><b>Candidate</b> baseline + relocation patch</span>
+    <span><b>JDK</b> 21.0.10</span>
+    <span><b>Maven</b> 3.9.15</span>
+    <span><b>Branch</b> jetty12-downstream-compatibility</span>
+  </div>
+</header>
+
+<div class="stats">
+  <div class="stat"><div class="stat-n bad">4</div><span class="stat-l">downstream projects broken by phase-c</span></div>
+  <div class="stat"><div class="stat-n ok">3</div><span class="stat-l">fixed with zero downstream change</span></div>
+  <div class="stat"><div class="stat-n">10,039</div><span class="stat-l">tests compared across both refs</span></div>
+  <div class="stat"><div class="stat-n ok">0</div><span class="stat-l">test regressions</span></div>
+  <div class="stat"><div class="stat-n bad">2</div><span class="stat-l">defects found in the approach</span></div>
+  <div class="stat"><div class="stat-n wa">3</div><span class="stat-l">modules never tested</span></div>
+</div>
+
+<section>
+  <div class="shead"><h2>The problem</h2><span class="n">why any of this was needed</span></div>
+
+  <p class="col">Upgrading to Jetty 12 on the <span class="mono">ee8</span> environment breaks
+    downstream projects, and mostly does so <em>silently</em>. Four projects were confirmed broken by
+    real builds against phase-c:</p>
+
+  <div class="tw">
+    <table>
+      <thead><tr><th>Project</th><th>Failure</th><th>When it appears</th></tr></thead>
+      <tbody>
+        <tr><td>Tez 0.10.4</td><td class="mono">package org.eclipse.jetty.servlet does not exist</td><td>compile</td></tr>
+        <tr><td>Ozone</td><td class="mono">NoClassDefFoundError: org/eclipse/jetty/server/Deployable</td><td><b>runtime</b>, after a clean build</td></tr>
+        <tr><td>Hive 4.0.1</td><td class="mono">same</td><td><b>runtime</b>, after a clean build</td></tr>
+        <tr><td>Knox 2.0.0</td><td class="mono">same, via gateway-spi</td><td><b>runtime</b>, after a clean build</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>The mechanism</h3>
+  <p class="col">Maven resolves one version per coordinate by <em>nearest wins</em>. A consumer that
+    pins Jetty 9 declares <span class="mono">org.eclipse.jetty:jetty-server</span> at depth 1, so it
+    beats Hadoop's transitive Jetty 12 at depth 2+. But Hadoop's
+    <span class="mono">org.eclipse.jetty.ee8:*</span> coordinates are <em>uncontested</em> — the
+    consumer has never heard of them — so they arrive at 12.0.37. The result is Jetty 9.4 core plus
+    Jetty 12 ee8 on one classpath, and the ee8 classes reference
+    <span class="mono">Deployable</span>, which 9.4 does not have.</p>
+
+  <p class="note col"><b>This rules out every POM-level mitigation.</b> No version, scope or ordering
+    choice in Hadoop's POMs outranks a consumer's direct declaration. That is a property of Maven,
+    not of this change, and it is why the work moved to relocation rather than dependency tuning.</p>
+
+  <p class="col">Exposure is <b>not</b> predictable by reading a POM. Oozie pins Jetty 9.3.27 and
+    comes through clean, because for Oozie the contested coordinates resolve to 12.0.37 through
+    Hadoop and the stack stays coherent. What decides it is reactor-wide mediation depth. Every cheap
+    static check tried during this work returned a false clean for every project that turned out to
+    be broken.</p>
+</section>
+
+<section>
+  <div class="shead"><h2>The approach</h2><span class="n">hadoop-shaded-jetty</span></div>
+
+  <p class="col">One new module publishes Jetty 12 ee8 pre-relocated under
+    <span class="mono">org.apache.hadoop.thirdparty.org.eclipse.jetty</span>, with a
+    dependency-reduced POM so no <span class="mono">org.eclipse.jetty</span> coordinate reaches
+    consumers. Every Hadoop module that used Jetty imports from the relocated namespace instead.
+    This is the pattern Hadoop already uses for Protobuf and Guava via
+    <span class="mono">hadoop-thirdparty</span>.</p>
+
+  <p class="col">Hadoop's Jetty and the consumer's Jetty then share neither a coordinate nor a
+    package name, so Maven has nothing to mediate and the two implementations coexist as unrelated
+    libraries.</p>
+
+  <h3>The one boundary that matters</h3>
+  <p class="col"><span class="mono">org.eclipse.jetty.toolchain</span> — the servlet API — is
+    deliberately <b>not</b> relocated and not bundled. This is forced, not stylistic:</p>
+  <p class="note col"><b>You cannot relocate a type your callers implement.</b> Downstream code
+    writes <span class="mono">implements AuthenticationHandler</span> and
+    <span class="mono">extends HttpServlet</span>. Rename those and no downstream class satisfies the
+    clause any more. Relocation works for libraries you <em>call</em>; it fails for interfaces you
+    <em>expose</em>. The rule the design encodes is: <b>the container is Hadoop's private business,
+    the spec is the public interface.</b></p>
+
+  <h3>Module definition</h3>
+  <pre><code>&lt;artifactSet&gt;&lt;includes&gt;
+  &lt;include&gt;org.eclipse.jetty:*&lt;/include&gt;
+  &lt;include&gt;org.eclipse.jetty.ee8:*&lt;/include&gt;
+  &lt;include&gt;org.eclipse.jetty.ee8.websocket:*&lt;/include&gt;
+  &lt;include&gt;org.eclipse.jetty.websocket:*&lt;/include&gt;
+&lt;/includes&gt;&lt;/artifactSet&gt;                <span class="cm">&lt;!-- toolchain deliberately absent --&gt;</span>
+&lt;relocations&gt;&lt;relocation&gt;
+  &lt;pattern&gt;org.eclipse.jetty&lt;/pattern&gt;
+  &lt;shadedPattern&gt;org.apache.hadoop.thirdparty.org.eclipse.jetty&lt;/shadedPattern&gt;
+&lt;/relocation&gt;&lt;/relocations&gt;
+&lt;transformers&gt;ServicesResourceTransformer&lt;/transformers&gt;
+&lt;createDependencyReducedPom&gt;true&lt;/createDependencyReducedPom&gt;</code></pre>
+
+  <h3>Why not the alternatives</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Option</th><th>Verdict</th><th>Evidence</th></tr></thead>
+      <tbody>
+        <tr><td>Shade Jetty inside <span class="mono">hadoop-common</span></td>
+          <td><span class="chip fail">fails</span></td>
+          <td>Works in isolation, fails three ways at reactor scale — <span class="mono">WebApps</span> handing an unshaded <span class="mono">WebAppContext</span> to a shaded server; websocket packages missing from the jar; <span class="mono">WebServer</span> needing a shaded context accepted by an unshaded API. <b>Relocation is all-or-nothing across modules that interoperate.</b></td></tr>
+        <tr><td>Different container (Tomcat, Undertow)</td>
+          <td><span class="chip fail">worse</span></td>
+          <td><span class="mono">tomcat-embed-core</span> bundles <b>88 servlet-spec classes inside its own jar</b> — no coordinate to exclude, so it permanently collides with whatever downstream declares. Also removes the Jetty that Tez borrows, and is a rewrite of Hadoop's HTTP layer.</td></tr>
+        <tr><td>Mark Jetty <span class="mono">provided</span>/<span class="mono">optional</span></td>
+          <td><span class="chip warn">shifts cost</span></td>
+          <td>No collision, but every project embedding <span class="mono">HttpServer2</span> must declare exact ee8 coordinates itself, failing at runtime if wrong. Larger downstream ask than a pin bump.</td></tr>
+        <tr><td>Split API from implementation</td>
+          <td><span class="chip warn">unprototyped</span></td>
+          <td>Genuinely attractive and complementary. Hive and Knox reference <span class="mono">HttpServer2</span> in 1 and 2 files respectively — they were collateral damage from a container they never embedded. Would not help Ozone (20 files).</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><h2>What was built</h2><span class="n">74 files, +406 / −432</span></div>
+  <ul class="t col">
+    <li><b>New module <span class="mono">hadoop-shaded-jetty</span></b> — 2,051 relocated classes,
+      4.0 MB, zero unrelocated Jetty classes leaked. Registered as the second module in the root POM
+      so it builds before its consumers.</li>
+    <li><b>Import rewrites across 26 POMs and ~48 Java files</b> — every
+      <span class="mono">org.eclipse.jetty.*</span> import moved to the thirdparty namespace, except
+      the servlet API.</li>
+    <li><b>Two added <span class="mono">&lt;exclude&gt;</span> lines</b> in
+      <span class="mono">hadoop-client-runtime</span> and
+      <span class="mono">hadoop-client-minicluster</span> — see Defect 1.</li>
+    <li><b>A <span class="mono">maven-antrun</span> post-shade step</b> rewriting class names inside
+      four Jetty descriptors — see Defect 2.</li>
+  </ul>
+
+  <h3>Downstream effect, measured</h3>
+  <p class="col">A consumer pinning <span class="mono">jetty-server</span> 9.4.58 and taking
+    <span class="mono">hadoop-common</span> plus <span class="mono">hadoop-hdfs</span>:</p>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Built against</th><th>Jetty majors on its classpath</th><th><span class="mono">HttpServer2</span> loads</th></tr></thead>
+      <tbody>
+        <tr><td>phase-c</td><td class="mono">9.4 <b>and</b> 12.0</td><td><span class="chip fail">no</span> — NoClassDefFoundError</td></tr>
+        <tr><td><b>relocated build</b></td><td class="mono">9.4 only</td><td><span class="chip pass">yes</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="col">Ozone, Hive and Knox are fixed at the source with <b>no downstream change at
+    all</b>. Tez is not, and cannot be — see Lesson 3.</p>
+</section>
+
+<section>
+  <div class="shead"><h2>Testing method</h2><span class="n">how the numbers were produced</span></div>
+  <ul class="t col">
+    <li><b>Two refs, built identically into isolated local repositories</b> —
+      <span class="mono">-Dmaven.repo.local</span> per ref plus a shared read-only
+      <span class="mono">-Dmaven.repo.local.tail</span>. Baseline is phase-c; candidate is phase-c
+      plus the relocation patch. Nothing else differs.</li>
+    <li><b><span class="mono">-fae</span></b> so a failing module does not stop the run, and
+      <b><span class="mono">-Dsurefire.rerunFailingTestsCount=0</span></b> so nothing is retried into
+      passing.</li>
+    <li><b>Failing sets diffed by name, not by count.</b> Matching totals are weak evidence — two
+      different tests can fail on the two refs and still total the same. Every module's failures were
+      compared as sets of test names.</li>
+    <li><b><span class="mono">target/classes</span> and <span class="mono">target/test-classes</span>
+      deleted per module per ref.</b> Maven recompiles on changed sources, not changed dependencies;
+      without this, stale classes link against jars that are gone. See Lesson 5.</li>
+    <li><b>Timed-out modules salvaged from surefire reports</b> rather than discarded — the reports
+      record exactly which classes completed, so a comparison over the classes both refs finished is
+      still sound.</li>
+  </ul>
+  <p class="note col"><b>Scope of the comparison:</b> the 27 testable modules the relocation patch
+    touches. This is not all of Hadoop, and was never intended to be — modules the patch does not
+    touch cannot be affected by it.</p>
+</section>
+
+<section>
+  <div class="shead"><h2>Test results</h2><span class="n">10,039 tests · 0 regressions</span></div>
+
+  <h4>Fully compared — both refs ran the same tests</h4>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Module</th><th class="num">Tests</th><th class="num">Fail</th><th class="num">Err</th><th class="num">Skip</th><th>Relocated</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">hadoop-auth</td><td class="num">192</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-common</td><td class="num">5,499</td><td class="num">41</td><td class="num">0</td><td class="num">380</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-yarn-common</td><td class="num">540</td><td class="num">0</td><td class="num">1</td><td class="num">7</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-hdfs-httpfs</td><td class="num">607</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-kms</td><td class="num">48</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">yarn-server-web-proxy</td><td class="num">54</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">yarn-services-api</td><td class="num">52</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">applicationhistoryservice</td><td class="num">209</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span> †</td></tr>
+        <tr><td class="mono">yarn-server-timelineservice</td><td class="num">85</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">yarn-server-router</td><td class="num">580</td><td class="num">1</td><td class="num">2</td><td class="num">2</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">globalpolicygenerator</td><td class="num">33</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">yarn-server-common</td><td class="num">553</td><td class="num">0</td><td class="num">0</td><td class="num">11</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-nfs</td><td class="num">21</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-hdfs-nfs</td><td class="num">65</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-sls</td><td class="num">32</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">hadoop-resourceestimator</td><td class="num">47</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">mapreduce-client-app</td><td class="num">427</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+        <tr><td class="mono">timelineservice-hbase-tests</td><td class="num">104</td><td class="num">0</td><td class="num">0</td><td class="num">0</td><td><span class="chip pass">identical</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="col" style="font-size:.88rem;color:var(--ink-3)">† This module first reported 5 errors on
+    the relocated ref. That was Defect 2, and the row above is the result after the fix.</p>
+
+  <h4>Partial — capped by timeout, compared over the classes both refs completed</h4>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Module</th><th class="num">Classes both</th><th class="num">Tests</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">hadoop-yarn-client</td><td class="num">10</td><td class="num">52</td><td>no relocated-only failures; 2 classes fail on <b>both</b></td></tr>
+        <tr><td class="mono">yarn-server-nodemanager</td><td class="num">92</td><td class="num">839</td><td>no relocated-only failures; 1 flake (below)</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="col">Both hang on mini-cluster tests (<span class="mono">TestAMRMProxy</span>) on the
+    <b>baseline</b> ref too, so the hang is environmental. <span class="mono">nodemanager</span>
+    shows 33–34 failures and 59–60 errors <em>on the baseline</em>; its noise floor makes it a poor
+    detector regardless.</p>
+  <p class="note col"><b>The one asymmetry, and why it is a flake rather than a regression.</b>
+    <span class="mono">TestFederationInterceptor.testRecoverWithoutAMRMProxyHA</span> failed
+    <em>only on baseline</em> in one run and <em>only on relocated</em> in the next. A test that
+    switches sides between runs is not detecting a code difference, and the assertion
+    (<span class="mono">expected: &lt;1&gt; but was: &lt;0&gt;</span>, an HA recovery count) has no
+    servlet container in its stack.</p>
+
+  <h4>No evidence either way</h4>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Module</th><th>Status</th><th>Why</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">hadoop-auth-examples</td><td><span class="chip none">no tests</span></td><td>zero test sources — sample code</td></tr>
+        <tr><td class="mono">hadoop-client-runtime</td><td><span class="chip none">no tests</span></td><td>zero Java sources — packaging module</td></tr>
+        <tr><td class="mono">hadoop-client-minicluster</td><td><span class="chip none">no tests</span></td><td>zero Java sources — packaging module</td></tr>
+        <tr><td class="mono">applications-catalog-webapp</td><td><span class="chip fail">fails on both</span></td><td>5 errors on baseline <em>and</em> relocated — frontend build chain needs network</td></tr>
+        <tr><td class="mono">yarn-server-resourcemanager</td><td><span class="chip warn">never ran</span></td><td>baseline started, container suspended</td></tr>
+        <tr><td class="mono">hadoop-hdfs</td><td><span class="chip warn">never ran</span></td><td>queued behind resourcemanager</td></tr>
+        <tr><td class="mono">mapreduce-client-jobclient</td><td><span class="chip warn">never ran</span></td><td>queued behind hadoop-hdfs</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Other gates</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Gate</th><th>Result</th></tr></thead>
+      <tbody>
+        <tr><td>Compilation, all 119 modules</td><td><span class="chip pass">passes</span></td></tr>
+        <tr><td><span class="mono">hadoop-client-check-invariants</span></td><td><span class="chip pass">passes</span> — after Defect 1</td></tr>
+        <tr><td><span class="mono">hadoop-client-check-test-invariants</span></td><td><span class="chip pass">passes</span> — after Defect 1</td></tr>
+        <tr><td>Unrelocated Jetty leaked into the artifact</td><td class="mono">0 of 2,051 classes</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><h2>Defects found in the approach</h2><span class="n">the reusable part</span></div>
+  <p class="col">Both defects share one shape, and it is the single most transferable thing in this
+    document: <b>relocation breaks things that refer to Jetty by name in text rather than in
+    bytecode.</b> Neither was visible to compilation, and one was invisible to 6,231 passing tests.</p>
+
+  <div class="defect">
+    <span class="tag">Defect 1 · packaging</span>
+    <h3>Coordinate-based exclusions stop matching</h3>
+    <p><span class="mono">hadoop-client-runtime</span> and
+      <span class="mono">hadoop-client-minicluster</span> exclude Jetty by groupId/artifactId. Once
+      Jetty arrives as one pre-relocated artifact those excludes match nothing, and
+      <span class="mono">BanDuplicateClasses</span> fails the build.</p>
+    <p><b>Fix:</b> two added <span class="mono">&lt;exclude&gt;org.apache.hadoop:hadoop-shaded-jetty&lt;/exclude&gt;</span>
+      lines. <b>Generalisation:</b> audit every packaging rule that names Jetty by coordinate, not
+      just these two.</p>
+  </div>
+
+  <div class="defect">
+    <span class="tag">Defect 2 · runtime · found late</span>
+    <h3>Class names inside Jetty's own descriptors are not relocated</h3>
+    <p><span class="mono">maven-shade-plugin</span> rewrites class files and resource <em>paths</em>,
+      but not class names inside resource <em>content</em>. Jetty names classes as text in
+      <span class="mono">webdefault-ee8.xml</span> — the default web descriptor
+      <b>every <span class="mono">WebAppContext</span> reads</b>:</p>
+    <pre><code>&lt;listener-class&gt;org.eclipse.jetty.ee8.servlet.listener.IntrospectorCleaner&lt;/listener-class&gt;
+&lt;servlet-class&gt;org.eclipse.jetty.ee8.servlet.DefaultServlet&lt;/servlet-class&gt;
+&lt;param-name&gt;org.eclipse.jetty.session.SessionDomain&lt;/param-name&gt;</code></pre>
+    <p>After relocation those classes exist only under the thirdparty prefix. Jetty gets
+      <span class="mono">ClassNotFoundException</span>, the context fails startup, and the webapp
+      answers <b>HTTP 503</b>. Any Hadoop service hosting a UI from a directory would have returned
+      503 in production.</p>
+    <p><b>Caught by</b> <span class="mono">TestApplicationHistoryServer.testHostedUIs</span> — and by
+      nothing else. Compilation, both invariant checks, and 6,231 tests across three modules all
+      passed over it.</p>
+    <p><b>Scope, measured rather than guessed.</b> Of 40 resources in the jar still carrying
+      unrelocated names, 36 are <span class="mono">META-INF/maven/**</span> build metadata and one is
+      a GraalVM native-image config — none read at runtime. Four are functional:
+      <span class="mono">webdefault-ee8.xml</span> and three
+      <span class="mono">configure_*.dtd</span>.</p>
+    <p><b>Fix:</b> a <span class="mono">maven-antrun</span> step after shade rewriting FQCNs in those
+      four files, with <span class="mono">org.eclipse.jetty.toolchain</span> excluded and a negative
+      lookbehind so a name is never prefixed twice. Verified: module went from 1 failure to 209 tests
+      clean, class count unchanged.</p>
+  </div>
+
+  <div class="note col"><b>Still unverified in the fix:</b> the three
+    <span class="mono">configure_*.dtd</span> rewrites were never exercised by any test — nothing in
+    the suite parses Jetty XML config. And the 36 metadata files were left untouched by judgement,
+    not by measurement of their harmlessness.</div>
+</section>
+
+<section>
+  <div class="shead"><h2>Lessons</h2><span class="n">for whoever redoes this</span></div>
+
+  <div class="lesson">
+    <h3>1 · Shading is not verified by compiling, and barely by unit tests</h3>
+    <p class="col">The strongest single finding here. The relocation passed compilation of all 119
+      modules, both invariant checks, and 6,231 tests — and still had a defect that would have
+      returned 503 to every hosted UI. It surfaced only when a test <b>started a real container and
+      deployed a webapp from a directory</b>. Any redo should treat
+      "<span class="mono">WebAppContext</span> actually starts and serves" as a first-class gate,
+      before the broad suites, not after.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>2 · Relocation is all-or-nothing across interoperating modules</h3>
+    <p class="col">Shading Jetty inside <span class="mono">hadoop-common</span> alone works in
+      isolation and fails three separate ways at reactor scale, because package names <em>are</em>
+      the interface between modules — renaming one side renames half a conversation. A separate
+      published artifact that every module imports from is the only shape that holds. This is why the
+      <span class="mono">hadoop-thirdparty</span> pattern exists.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>3 · Relocation cannot fix inheritance, and Tez is the proof</h3>
+    <p class="col">Tez's <span class="mono">ProfileOutputServlet</span> <b>extends</b> Jetty's
+      <span class="mono">DefaultServlet</span>, borrowed from Hadoop's dependency closure. Moving
+      that class puts it further out of reach, so shading makes Tez's diagnosis harder, not its
+      problem smaller. The fix belongs in Tez and is two lines:</p>
+    <pre><code><span class="del">-import org.eclipse.jetty.servlet.DefaultServlet;</span>
+<span class="add">+import javax.servlet.http.HttpServlet;</span>
+<span class="del">-public class ProfileOutputServlet extends DefaultServlet {</span>
+<span class="add">+public class ProfileOutputServlet extends HttpServlet {</span></code></pre>
+    <p class="col">Verified safe by inspection: no <span class="mono">super.</span> call, no
+      <span class="mono">getResource</span>, no <span class="mono">ResourceService</span>, no
+      <span class="mono">ContextHandler</span>, and <span class="mono">doGet</span> overrides
+      completely. This patch is correct independently of what Hadoop decides and is worth sending
+      upstream regardless.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>4 · Relocation changes a reachable signature, and it is not the one you would guess</h3>
+    <p class="col"><span class="mono">HttpServer2.webAppContext</span> the <em>field</em> is
+      unreachable — final class, private constructor. But there is a public accessor,
+      <span class="mono">public WebAppContext getWebAppContext()</span>, whose return type becomes a
+      <span class="mono">thirdparty</span> type under relocation. Hadoop's own httpfs tests call it.
+      <span class="mono">HttpServer2</span> is <span class="mono">@InterfaceAudience.Private</span>
+      so it is defensible, but it belongs in the release note, not in a downstream user's
+      stack trace.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>5 · Maven recompiles on changed sources, not changed dependencies</h3>
+    <p class="col">Comparing two refs by swapping <span class="mono">-Dmaven.repo.local</span> leaves
+      the previous ref's compiled classes in <span class="mono">target/</span>. They link against
+      jars that are no longer there and throw <span class="mono">NoSuchMethodError</span>, which
+      reads exactly like a regression. This cost a full pass of the test run here: a test class
+      compiled during an abandoned experiment surfaced as five errors naming
+      <span class="mono">org.apache.hadoop.shaded.…</span> — a prefix the build under test never
+      produces.</p>
+    <p class="col"><b>The tell is generalisable:</b> if a class name in a failure cannot come from
+      the ref you are testing, suspect the harness before the change. Delete
+      <span class="mono">target/classes</span> and <span class="mono">target/test-classes</span> per
+      module per ref, and audit with:</p>
+    <pre><code>find &lt;worktree&gt; -name '*.class' -path '*/target/*' \
+  -exec grep -l 'org/eclipse/jetty' {} + \
+  | xargs grep -L 'org/apache/hadoop/thirdparty/org/eclipse/jetty'</code></pre>
+  </div>
+
+  <div class="lesson">
+    <h3>6 · Cheap static checks were worse than useless here</h3>
+    <p class="col">Signature comparison, classpath scanning and POM inspection all returned a clean
+      result for <em>every</em> project that turned out to be broken. Only real downstream builds
+      found anything. Any redo should budget for real builds of Tez, Ozone, Hive and Knox rather
+      than expecting a static gate to catch this class of break.</p>
+  </div>
+
+  <div class="lesson">
+    <h3>7 · Totals are weak evidence; diff the failing sets by name</h3>
+    <p class="col">Two different tests can fail on the two refs and still total the same. Every
+      module here was compared as a set of failing test names, and timed-out modules were salvaged
+      from surefire reports — which record exactly which classes completed — rather than discarded.
+      That turned two apparently useless timeouts into real comparisons over 891 tests.</p>
+  </div>
+</section>
+
+<section>
+  <div class="shead"><h2>What was never established</h2><span class="n">open questions</span></div>
+  <ul class="t col">
+    <li><b>Three modules were never tested</b> — <span class="mono">resourcemanager</span>,
+      <span class="mono">hadoop-hdfs</span>, <span class="mono">mapreduce-client-jobclient</span>.
+      They are the largest suites and the run environment was reclaimed three times before reaching
+      them.</li>
+    <li><b>The Oozie question.</b> Oozie is green today <em>because</em> it takes
+      <span class="mono">jetty-server</span> 12.0.37 through Hadoop. Relocation stops Hadoop
+      contributing that, so Oozie falls back to its own 9.3.27 pin. Probably fine — its code targets
+      9.3 — but it was never tested, and projects that currently get their Jetty <em>from</em> Hadoop
+      are exactly the population this fix could disturb.</li>
+    <li><b>No release-path leg.</b> Everything compares trunk-to-trunk. The question a downstream
+      user actually faces is upgrading from a 3.4.x release, and the servlet coordinate also moved
+      once before this change.</li>
+    <li><b>Nine downstream projects is a sample, not proof.</b> Since exposure depends on
+      reactor-wide mediation rather than anything readable in a POM, four confirmed breaks is a lower
+      bound. Atlas and Spark could not be tested at all.</li>
+    <li><b>Governance and release mechanics for a new published artifact</b> were never addressed.
+      The engineering is done; versioning and publication of
+      <span class="mono">hadoop-shaded-jetty</span> are not.</li>
+  </ul>
+</section>
+
+<section>
+  <div class="shead"><h2>Reproducing this</h2><span class="n">if the approach is revived</span></div>
+  <ol class="steps col">
+    <li><b>Rebase the concept, not the patch.</b>
+      <span class="mono">experiments/hadoop-thirdparty-jetty.patch</span> (1,909 lines) targets
+      phase-c at <span class="mono">91ccfd1f</span> and will not apply cleanly to reworked phases.
+      The module POM in <span class="mono">experiments/hadoop-shaded-jetty.pom.xml</span> is the
+      reusable artefact — it carries both fixes and the reasoning as comments.</li>
+    <li><b>Build two refs into isolated repositories</b> and verify the worktree actually checked out
+      (a build run from the wrong directory installs mislabelled artifacts and logs nothing unusual).
+      <span class="mono">RUNBOOK.md</span> documents this and the other traps.</li>
+    <li><b>Gate on a container-starting test first</b> — deploy a
+      <span class="mono">WebAppContext</span> from a directory and fetch a page. This is the check
+      that would have caught Defect 2 in minutes rather than after three modules of clean suites.</li>
+    <li><b>Then run the module suites</b> with per-module <span class="mono">target/</span> deletion,
+      <span class="mono">-fae</span>, no reruns, and by-name failing-set diffs.
+      <span class="mono">experiments/remaining-suites.sh</span> does this.</li>
+    <li><b>Finally, real downstream builds</b> of Tez, Ozone, Hive and Knox against both refs. This
+      is the only step that ever found a downstream break.</li>
+  </ol>
+
+  <h3>Where things are</h3>
+  <div class="tw">
+    <table>
+      <thead><tr><th>Path</th><th>What</th></tr></thead>
+      <tbody>
+        <tr><td class="mono">downstream-check/runs/2026-08-25-phase-c.md</td><td>Full raw evidence record, including retracted claims</td></tr>
+        <tr><td class="mono">downstream-check/RUNBOOK.md</td><td>Prerequisites and every harness trap hit</td></tr>
+        <tr><td class="mono">downstream-check/experiments/</td><td>The patch, the module POM, and the two suite drivers</td></tr>
+        <tr><td class="mono">downstream-check/patches/</td><td>The two-line Tez fix</td></tr>
+        <tr><td class="mono">downstream-check/report/</td><td>The earlier findings report on the downstream breaks</td></tr>
+        <tr><td class="mono">downstream-check/consumer/</td><td>Synthetic out-of-tree consumer used for the linkage probes</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="col">28 commits on <span class="mono">jetty12-downstream-compatibility</span>. Nothing
+    outside <span class="mono">downstream-check/</span> was modified on any branch; phases A, B and C
+    were never touched by this work.</p>
+</section>
+
+<footer>
+  Every number is a difference between two refs built identically into isolated local repositories;
+  a check failing the same way on both sides is reported as telling us nothing.<br>
+  jetty-phase-c 91ccfd1f · JDK 21.0.10 · Maven 3.9.15 · japi-compliance-checker 1.8 ·
+  18 modules fully compared, 2 partial, 3 never run
+</footer>
+
+</div>
