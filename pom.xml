@@ -148,6 +148,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
 
   <modules>
     <module>hadoop-project</module>
+    <module>hadoop-shaded-jetty</module>
     <module>hadoop-project-dist</module>
     <module>hadoop-assemblies</module>
     <module>hadoop-maven-plugins</module>

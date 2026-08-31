@@ -31,11 +31,10 @@
   <description>Apache Hadoop Auth Examples - Java HTTP SPNEGO</description>
 
   <dependencies>
-    <dependency>
-      <groupId>org.eclipse.jetty.toolchain</groupId>
-      <artifactId>jetty-servlet-api</artifactId>
-      <scope>provided</scope>
-    </dependency>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
     <dependency>
       <groupId>org.apache.hadoop</groupId>
       <artifactId>hadoop-auth</artifactId>

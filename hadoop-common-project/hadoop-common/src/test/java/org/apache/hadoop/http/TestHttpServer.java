@@ -32,11 +32,11 @@ import org.apache.hadoop.security.authorize.AccessControlList;
 import org.apache.hadoop.util.JsonUtils;
 
 import com.fasterxml.jackson.core.type.TypeReference;
-import org.eclipse.jetty.server.HttpConfiguration;
-import org.eclipse.jetty.server.ServerConnector;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.HttpConfiguration;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
 import org.apache.hadoop.test.GenericTestUtils;
-import org.eclipse.jetty.server.Handler;
-import org.eclipse.jetty.server.handler.StatisticsHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Handler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.handler.StatisticsHandler;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;

@@ -156,7 +156,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
-import org.eclipse.jetty.util.ExceptionUtil;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ExceptionUtil;
 
 import java.util.function.Supplier;
 import org.slf4j.LoggerFactory;

@@ -33,14 +33,14 @@ import org.apache.hadoop.security.authentication.server.PseudoAuthenticationHand
 import org.apache.hadoop.security.authentication.util.KerberosUtil;
 import org.apache.hadoop.security.token.delegation.AbstractDelegationTokenSecretManager;
 import org.apache.hadoop.test.GenericTestUtils;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.eclipse.jetty.ee8.servlet.FilterHolder;
-import org.eclipse.jetty.ee8.servlet.ServletHolder;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterHolder;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
 import org.slf4j.event.Level;
 
 import javax.security.auth.Subject;

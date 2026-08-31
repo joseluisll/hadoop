@@ -64,8 +64,8 @@ import org.apache.hadoop.yarn.webapp.WebApp;
 import org.apache.hadoop.yarn.webapp.WebApps;
 import org.apache.hadoop.yarn.webapp.YarnJacksonJaxbJsonProvider;
 import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
-import org.eclipse.jetty.ee8.servlet.FilterHolder;
-import org.eclipse.jetty.ee8.webapp.WebAppContext;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterHolder;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
 
 import org.apache.hadoop.classification.VisibleForTesting;
 import org.glassfish.jersey.internal.inject.AbstractBinder;

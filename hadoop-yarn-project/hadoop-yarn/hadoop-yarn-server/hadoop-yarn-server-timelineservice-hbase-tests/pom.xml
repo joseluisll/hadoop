@@ -35,6 +35,10 @@
   </properties>
 
   <dependencies>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
 
     <!-- Since hbase 1.0.1 requires an older version of hadoop we enforce an
          older version of hadoop just for the hbase unit tests. We also need to
@@ -459,17 +463,6 @@
     <!-- 'mvn dependency:analyze' fails to detect use of this direct
          dependency -->
     <!-- Jetty 9 is needed by the ATS code -->
-    <dependency>
-      <groupId>org.eclipse.jetty.ee8</groupId>
-      <artifactId>jetty-ee8-servlet</artifactId>
-      <scope>test</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty.ee8</groupId>
-      <artifactId>jetty-ee8-webapp</artifactId>
-      <scope>test</scope>
-    </dependency>
-
     <dependency>
       <groupId>org.apache.commons</groupId>
       <artifactId>commons-lang3</artifactId>

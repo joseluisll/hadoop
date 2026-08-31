@@ -32,12 +32,12 @@ import org.apache.http.impl.auth.SPNegoScheme;
 import org.apache.http.impl.client.BasicCredentialsProvider;
 import org.apache.http.impl.client.HttpClientBuilder;
 import org.apache.http.util.EntityUtils;
-import org.eclipse.jetty.server.Connector;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.ee8.servlet.FilterHolder;
-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
-import org.eclipse.jetty.ee8.servlet.ServletHolder;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Connector;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterHolder;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
 
 import javax.servlet.DispatcherType;
 import javax.servlet.FilterConfig;

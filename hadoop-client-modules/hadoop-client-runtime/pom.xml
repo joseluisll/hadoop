@@ -176,6 +176,9 @@
                        the tree, so they are no longer named here.
                       -->
                       <exclude>org.eclipse.jetty:jetty-util</exclude>
+                      <!-- Jetty now arrives pre-relocated in one artifact, so the
+                           per-coordinate excludes above no longer match it. -->
+                      <exclude>org.apache.hadoop:hadoop-shaded-jetty</exclude>
                       <exclude>org.eclipse.jetty:jetty-server</exclude>
                       <exclude>org.eclipse.jetty:jetty-session</exclude>
                       <exclude>org.eclipse.jetty.ee8:jetty-ee8-servlet</exclude>

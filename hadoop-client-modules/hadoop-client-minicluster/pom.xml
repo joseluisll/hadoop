@@ -722,6 +722,7 @@
                 <configuration>
                   <artifactSet>
                     <excludes>
+                      <exclude>org.apache.hadoop:hadoop-shaded-jetty</exclude>
                       <!-- Fine to expose our already-shaded deps as dependencies -->
                       <exclude>org.apache.hadoop:hadoop-annotations</exclude>
                       <exclude>org.apache.hadoop:hadoop-client-api</exclude>

@@ -20,9 +20,9 @@ package org.apache.hadoop.http;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import org.eclipse.jetty.server.CustomRequestLog;
-import org.eclipse.jetty.server.RequestLog;
-import org.eclipse.jetty.server.Slf4jRequestLogWriter;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.CustomRequestLog;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.RequestLog;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Slf4jRequestLogWriter;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

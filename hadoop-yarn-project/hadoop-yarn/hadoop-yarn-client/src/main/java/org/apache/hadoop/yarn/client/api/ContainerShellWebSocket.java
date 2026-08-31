@@ -26,11 +26,11 @@ import java.nio.charset.StandardCharsets;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
-import org.eclipse.jetty.ee8.websocket.api.Session;
-import org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketClose;
-import org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketConnect;
-import org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketMessage;
-import org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.Session;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketClose;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketConnect;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.OnWebSocketMessage;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.jline.reader.LineReader;

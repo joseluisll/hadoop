@@ -34,6 +34,10 @@
   </properties>
 
   <dependencies>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
     <dependency>
       <groupId>org.apache.hadoop</groupId>
@@ -65,16 +69,8 @@
       <artifactId>commons-compress</artifactId>
     </dependency>
     <dependency>
-      <groupId>org.eclipse.jetty.toolchain</groupId>
-      <artifactId>jetty-servlet-api</artifactId>
-    </dependency>
-    <dependency>
       <groupId>commons-codec</groupId>
       <artifactId>commons-codec</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-util</artifactId>
     </dependency>
     <dependency>
       <groupId>org.apache.hadoop.thirdparty</groupId>

@@ -52,11 +52,11 @@ import org.apache.hadoop.yarn.server.federation.store.records.SubClusterRegister
 import org.apache.hadoop.yarn.server.federation.store.records.SubClusterState;
 import org.apache.hadoop.yarn.server.federation.utils.FederationStateStoreFacade;
 import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
-import org.eclipse.jetty.ee8.servlet.ServletHolder;
-import org.eclipse.jetty.util.thread.QueuedThreadPool;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;

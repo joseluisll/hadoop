@@ -17,8 +17,8 @@
  */
 package org.apache.hadoop.http;
 
-import org.eclipse.jetty.server.handler.StatisticsHandler;
-import org.eclipse.jetty.util.thread.QueuedThreadPool;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.handler.StatisticsHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;

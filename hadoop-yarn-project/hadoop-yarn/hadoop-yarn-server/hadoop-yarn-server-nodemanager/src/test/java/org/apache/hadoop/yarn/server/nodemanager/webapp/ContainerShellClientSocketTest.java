@@ -18,9 +18,9 @@
 
 package org.apache.hadoop.yarn.server.nodemanager.webapp;
 
-import org.eclipse.jetty.ee8.websocket.api.Session;
-import org.eclipse.jetty.ee8.websocket.api.WebSocketAdapter;
-import org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.Session;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.WebSocketAdapter;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.api.annotations.WebSocket;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

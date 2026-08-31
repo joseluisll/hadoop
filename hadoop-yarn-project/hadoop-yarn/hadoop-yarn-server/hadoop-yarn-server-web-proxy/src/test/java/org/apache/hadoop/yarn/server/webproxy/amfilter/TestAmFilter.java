@@ -44,11 +44,11 @@ import javax.servlet.http.Cookie;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
-import org.eclipse.jetty.ee8.servlet.ServletHolder;
-import org.eclipse.jetty.util.thread.QueuedThreadPool;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 import org.mockito.Mockito;

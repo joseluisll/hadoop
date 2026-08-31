@@ -33,6 +33,10 @@
   <description>Apache Hadoop KMS</description>
 
   <dependencies>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
     <dependency>
       <groupId>org.apache.hadoop</groupId>
       <artifactId>hadoop-minikdc</artifactId>
@@ -69,21 +73,9 @@
       <scope>compile</scope>
     </dependency>
     <dependency>
-      <groupId>org.eclipse.jetty.toolchain</groupId>
-      <artifactId>jetty-servlet-api</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-server</artifactId>
-    </dependency>
-    <dependency>
       <groupId>org.glassfish.jaxb</groupId>
       <artifactId>jaxb-runtime</artifactId>
       <scope>runtime</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty.ee8</groupId>
-      <artifactId>jetty-ee8-webapp</artifactId>
     </dependency>
     <dependency>
       <groupId>org.apache.hadoop</groupId>
@@ -156,11 +148,6 @@
     <dependency>
       <groupId>org.slf4j</groupId>
       <artifactId>jul-to-slf4j</artifactId>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-util</artifactId>
       <scope>compile</scope>
     </dependency>
     <dependency>

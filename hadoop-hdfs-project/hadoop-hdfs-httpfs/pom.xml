@@ -42,6 +42,10 @@
   </properties>
 
   <dependencies>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
     <dependency>
       <groupId>org.mockito</groupId>
       <artifactId>mockito-inline</artifactId>
@@ -63,11 +67,6 @@
       <scope>compile</scope>
     </dependency>
     <dependency>
-      <groupId>org.eclipse.jetty.toolchain</groupId>
-      <artifactId>jetty-servlet-api</artifactId>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
       <groupId>org.apache.hadoop.thirdparty</groupId>
       <artifactId>hadoop-shaded-guava</artifactId>
       <scope>compile</scope>
@@ -78,17 +77,9 @@
       <scope>compile</scope>
     </dependency>
     <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-server</artifactId>
-    </dependency>
-    <dependency>
       <groupId>org.glassfish.jaxb</groupId>
       <artifactId>jaxb-runtime</artifactId>
       <scope>runtime</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty.ee8</groupId>
-      <artifactId>jetty-ee8-webapp</artifactId>
     </dependency>
     <dependency>
       <groupId>org.apache.hadoop</groupId>

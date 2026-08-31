@@ -40,8 +40,8 @@ import org.json.simple.JSONObject;
 import org.json.simple.parser.JSONParser;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.ee8.webapp.WebAppContext;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
 
 import java.io.File;
 import java.io.FileOutputStream;

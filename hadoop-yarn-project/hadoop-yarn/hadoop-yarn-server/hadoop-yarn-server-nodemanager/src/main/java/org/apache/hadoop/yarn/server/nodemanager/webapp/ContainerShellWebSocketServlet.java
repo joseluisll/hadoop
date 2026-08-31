@@ -20,8 +20,8 @@ package org.apache.hadoop.yarn.server.nodemanager.webapp;
 
 import javax.servlet.annotation.WebServlet;
 
-import org.eclipse.jetty.ee8.websocket.server.JettyWebSocketServlet;
-import org.eclipse.jetty.ee8.websocket.server.JettyWebSocketServletFactory;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.server.JettyWebSocketServlet;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.server.JettyWebSocketServletFactory;
 
 /**
  * Container shell web socket interface.

@@ -45,7 +45,7 @@ import org.apache.hadoop.security.http.RestCsrfPreventionFilter;
 import org.apache.hadoop.yarn.api.ApplicationClientProtocol;
 import org.apache.hadoop.yarn.conf.YarnConfiguration;
 import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
-import org.eclipse.jetty.ee8.webapp.WebAppContext;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
 import org.glassfish.jersey.server.ResourceConfig;
 import org.glassfish.jersey.servlet.ServletProperties;
 import org.slf4j.Logger;

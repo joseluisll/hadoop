@@ -37,10 +37,10 @@
 
 
   <dependencies>
-    <dependency>
-      <groupId>org.eclipse.jetty.toolchain</groupId>
-      <artifactId>jetty-servlet-api</artifactId>
-    </dependency>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
     <dependency>
       <groupId>org.apache.hadoop</groupId>
@@ -57,17 +57,6 @@
     <!-- ApplicationHistoryServer uses org.eclipse.jetty.webapp.WebAppContext and
          org.eclipse.jetty.servlet.FilterHolder. Declared provided, matching the
          scope they already resolve at through the provided hadoop-common above. -->
-    <dependency>
-      <groupId>org.eclipse.jetty.ee8</groupId>
-      <artifactId>jetty-ee8-webapp</artifactId>
-      <scope>provided</scope>
-    </dependency>
-
-    <dependency>
-      <groupId>org.eclipse.jetty.ee8</groupId>
-      <artifactId>jetty-ee8-servlet</artifactId>
-      <scope>provided</scope>
-    </dependency>
     <dependency>
       <groupId>org.mockito</groupId>
       <artifactId>mockito-inline</artifactId>

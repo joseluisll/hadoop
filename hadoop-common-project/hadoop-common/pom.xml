@@ -38,6 +38,10 @@
   </properties>
 
   <dependencies>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
     <dependency>
       <groupId>org.apache.hadoop.thirdparty</groupId>
       <artifactId>hadoop-shaded-protobuf_3_25</artifactId>
@@ -127,31 +131,6 @@
       here so the module states which servlet API it compiles against instead of
       depending on which jar happened to come first on the classpath.
     -->
-    <dependency>
-      <groupId>org.eclipse.jetty.toolchain</groupId>
-      <artifactId>jetty-servlet-api</artifactId>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-server</artifactId>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-util</artifactId>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty.ee8</groupId>
-      <artifactId>jetty-ee8-servlet</artifactId>
-      <scope>compile</scope>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty.ee8</groupId>
-      <artifactId>jetty-ee8-webapp</artifactId>
-      <scope>compile</scope>
-    </dependency>
     <dependency>
       <groupId>ch.qos.reload4j</groupId>
       <artifactId>reload4j</artifactId>

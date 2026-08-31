@@ -40,7 +40,7 @@ import org.apache.hadoop.yarn.webapp.WebApp;
 import org.apache.hadoop.yarn.webapp.WebApps;
 import org.apache.hadoop.yarn.webapp.YarnWebParams;
 import org.apache.hadoop.yarn.webapp.util.WebAppUtils;
-import org.eclipse.jetty.ee8.websocket.server.config.JettyWebSocketServletContainerInitializer;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.websocket.server.config.JettyWebSocketServletContainerInitializer;
 
 import javax.servlet.Filter;
 import org.glassfish.jersey.internal.inject.AbstractBinder;

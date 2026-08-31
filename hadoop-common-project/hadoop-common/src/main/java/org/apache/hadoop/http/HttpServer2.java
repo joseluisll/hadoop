@@ -90,33 +90,33 @@ import org.apache.hadoop.util.Lists;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.Shell;
 import org.apache.hadoop.util.StringUtils;
-import org.eclipse.jetty.ee8.nested.ErrorHandler;
-import org.eclipse.jetty.ee8.nested.SessionHandler;
-import org.eclipse.jetty.ee8.servlet.FilterHolder;
-import org.eclipse.jetty.ee8.servlet.FilterMapping;
-import org.eclipse.jetty.ee8.servlet.ServletContextHandler;
-import org.eclipse.jetty.ee8.servlet.ServletHandler;
-import org.eclipse.jetty.ee8.servlet.ServletHolder;
-import org.eclipse.jetty.ee8.servlet.ServletMapping;
-import org.eclipse.jetty.ee8.webapp.WebAppContext;
-import org.eclipse.jetty.http.HttpVersion;
-import org.eclipse.jetty.server.ConnectionFactory;
-import org.eclipse.jetty.server.Connector;
-import org.eclipse.jetty.server.Handler;
-import org.eclipse.jetty.server.HttpConfiguration;
-import org.eclipse.jetty.server.HttpConnectionFactory;
-import org.eclipse.jetty.server.RequestLog;
-import org.eclipse.jetty.server.SecureRequestCustomizer;
-import org.eclipse.jetty.server.Server;
-import org.eclipse.jetty.server.ServerConnector;
-import org.eclipse.jetty.server.SslConnectionFactory;
-import org.eclipse.jetty.server.SymlinkAllowedResourceAliasChecker;
-import org.eclipse.jetty.server.handler.ContextHandlerCollection;
-import org.eclipse.jetty.server.handler.StatisticsHandler;
-import org.eclipse.jetty.util.ArrayUtil;
-import org.eclipse.jetty.util.ExceptionUtil;
-import org.eclipse.jetty.util.ssl.SslContextFactory;
-import org.eclipse.jetty.util.thread.QueuedThreadPool;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.nested.ErrorHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.nested.SessionHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterHolder;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.FilterMapping;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletContextHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletHolder;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.ServletMapping;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.webapp.WebAppContext;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.http.HttpVersion;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ConnectionFactory;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Connector;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Handler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.HttpConfiguration;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.HttpConnectionFactory;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.RequestLog;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.SecureRequestCustomizer;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Server;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.ServerConnector;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.SslConnectionFactory;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.SymlinkAllowedResourceAliasChecker;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.handler.ContextHandlerCollection;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.handler.StatisticsHandler;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ArrayUtil;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ExceptionUtil;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ssl.SslContextFactory;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -177,14 +177,14 @@ public final class HttpServer2 implements FilterContainer {
    * Prefix under which a context init parameter reaches Jetty's DefaultServlet.
    * <p>
    * This is not the package the servlet lives in: ee8 moved the class to
-   * org.eclipse.jetty.ee8.servlet but DefaultServlet#getInitParameter still
+   * org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet but DefaultServlet#getInitParameter still
    * reads the 9.4 name. Spelling it the other way costs nothing at startup and
    * silently drops the setting - dirAllowed then falls back to its default of
    * true and /static starts listing directories - so the prefix is written
    * once here rather than at each call site.
    */
   private static final String DEFAULT_SERVLET_INIT_PREFIX =
-      "org.eclipse.jetty.servlet.Default.";
+      "org.apache.hadoop.thirdparty.org.eclipse.jetty.servlet.Default.";
 
   // The ServletContext attribute where the daemon Configuration
   // gets stored.

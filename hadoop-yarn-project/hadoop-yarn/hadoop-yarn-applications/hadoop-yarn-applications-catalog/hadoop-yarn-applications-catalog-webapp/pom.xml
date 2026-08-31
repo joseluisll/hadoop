@@ -40,6 +40,10 @@
     </properties>
 
   <dependencies>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
     <dependency>
       <groupId>io.swagger</groupId>
       <artifactId>swagger-annotations</artifactId>
@@ -93,27 +97,6 @@
           exclusions on solr-solrj and solr-core below keep the old names,
           because those match what Solr itself depends on.
       -->
-      <dependency>
-          <groupId>org.eclipse.jetty.http2</groupId>
-          <artifactId>jetty-http2-hpack</artifactId>
-          <version>${jetty.version}</version>
-      </dependency>
-      <dependency>
-          <groupId>org.eclipse.jetty.http2</groupId>
-          <artifactId>jetty-http2-client</artifactId>
-          <version>${jetty.version}</version>
-      </dependency>
-      <dependency>
-          <groupId>org.eclipse.jetty.http2</groupId>
-          <artifactId>jetty-http2-common</artifactId>
-          <version>${jetty.version}</version>
-      </dependency>
-      <dependency>
-          <groupId>org.eclipse.jetty.http2</groupId>
-          <artifactId>jetty-http2-client-transport</artifactId>
-          <version>${jetty.version}</version>
-      </dependency>
-
       <dependency>
             <groupId>org.apache.solr</groupId>
             <artifactId>solr-solrj</artifactId>

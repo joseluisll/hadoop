@@ -32,11 +32,10 @@
   </properties>
 
   <dependencies>
-    <dependency>
-      <groupId>org.eclipse.jetty.toolchain</groupId>
-      <artifactId>jetty-servlet-api</artifactId>
-      <scope>compile</scope>
-    </dependency>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
     <!-- 'mvn dependency:analyze' fails to detect use of this dependency -->
     <dependency>
       <groupId>org.apache.hadoop</groupId>
@@ -93,10 +92,6 @@
     <dependency>
       <groupId>org.apache.hadoop.thirdparty</groupId>
       <artifactId>hadoop-shaded-guava</artifactId>
-    </dependency>
-    <dependency>
-      <groupId>org.eclipse.jetty</groupId>
-      <artifactId>jetty-server</artifactId>
     </dependency>
     <dependency>
       <groupId>org.glassfish.jaxb</groupId>

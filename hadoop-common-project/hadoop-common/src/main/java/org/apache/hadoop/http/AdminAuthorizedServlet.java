@@ -23,7 +23,7 @@ import javax.servlet.ServletException;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import org.eclipse.jetty.ee8.servlet.DefaultServlet;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.ee8.servlet.DefaultServlet;
 
 /**
  * General servlet which is admin-authorized.

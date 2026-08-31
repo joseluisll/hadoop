@@ -32,6 +32,10 @@
     <name>Apache Hadoop Resource Estimator Service</name>
     <packaging>jar</packaging>
     <dependencies>
+      <dependency>
+        <groupId>org.apache.hadoop</groupId>
+        <artifactId>hadoop-shaded-jetty</artifactId>
+      </dependency>
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
@@ -69,10 +73,6 @@
             <groupId>org.glassfish.jersey.test-framework.providers</groupId>
             <artifactId>jersey-test-framework-provider-grizzly2</artifactId>
             <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>org.eclipse.jetty.toolchain</groupId>
-            <artifactId>jetty-servlet-api</artifactId>
         </dependency>
         <dependency>
             <groupId>org.glassfish.jersey.core</groupId>

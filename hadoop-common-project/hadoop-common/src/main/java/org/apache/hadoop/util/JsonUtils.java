@@ -28,7 +28,7 @@ import org.apache.hadoop.classification.InterfaceStability;
 
 /**
  * Simple JSON utility to replace usage of the removed
- * {@code org.eclipse.jetty.util.ajax.JSON} class.
+ * {@code org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ajax.JSON} class.
  * Mainly used in tests and is not a public API.
  *
  * Uses Jackson {@link ObjectMapper} under the hood.
@@ -44,7 +44,7 @@ public final class JsonUtils {
 
   /**
    * Parse a JSON string into a Java object of the given type.
-   * This method replaces {@code org.eclipse.jetty.util.ajax.JSON.parse}
+   * This method replaces {@code org.apache.hadoop.thirdparty.org.eclipse.jetty.util.ajax.JSON.parse}
    * which did not throw checked exceptions.
    * @param json the JSON string
    * @param clazz the target class to deserialize into

@@ -17,9 +17,9 @@
  */
 package org.apache.hadoop.http;
 
-import org.eclipse.jetty.server.CustomRequestLog;
-import org.eclipse.jetty.server.RequestLog;
-import org.eclipse.jetty.server.Slf4jRequestLogWriter;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.CustomRequestLog;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.RequestLog;
+import org.apache.hadoop.thirdparty.org.eclipse.jetty.server.Slf4jRequestLogWriter;
 import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
