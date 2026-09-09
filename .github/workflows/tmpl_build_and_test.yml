@@ -39,8 +39,8 @@ on:
         type: string
         description: >-
           Jobs to run, and should be in JSON Array format.
-          Candidates: "build-only", "build-and-test".
-        default: '[ "build-and-test" ]'
+          Candidates: "build-only", "build-and-test", "rat".
+        default: '[ "build-and-test", "rat" ]'
 
 # Default to minimal permissions for workflow.
 permissions:
@@ -157,6 +157,46 @@ jobs:
         id: variables
         run: |
           echo "uid=$(id -u "${USER}")" >> $GITHUB_OUTPUT
+  rat:
+    name: License Check (RAT)
+    if: (!cancelled()) && contains(fromJSON(inputs.jobs), 'rat')
+    # Apache RAT only scans source files for license headers: it needs neither
+    # the native toolchain nor compiled classes, so it runs on the plain runner
+    # rather than the build image and reports back within a couple of minutes.
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout Hadoop repository
+        uses: actions/checkout@v6
+      - name: Setup JDK ${{ inputs.java }}
+        uses: actions/setup-java@v5
+        with:
+          distribution: zulu
+          java-version: ${{ inputs.java }}
+          cache: 'maven'
+          check-latest: false
+      - name: Apache RAT check
+        shell: bash
+        # -Dtar and -Djacoco.skip=false only pull the two profile-gated modules
+        # (hadoop-cloud-storage-dist, hadoop-coverage) into the reactor so that
+        # no module escapes the scan. Only the goal is invoked, so no lifecycle
+        # phase of those profiles is executed.
+        run: |
+          ./mvnw --batch-mode --no-transfer-progress --fail-at-end \
+            -Dtar -Djacoco.skip=false \
+            apache-rat:check
+      - name: Report files with unapproved licenses
+        if: failure()
+        shell: bash
+        run: |
+          echo "Files with unapproved or unknown licenses:"
+          find . -name rat.txt -print0 |
+            xargs -0 --no-run-if-empty grep -h '^ *!' | sort -u || true
+      - name: Upload RAT reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rat-reports-java${{ inputs.java }}-${{ inputs.os }}-${{ inputs.branch }}
+          path: '**/target/rat.txt'
   build-only:
     name: Build Only (Java ${{ inputs.java }}) ${{ inputs.os }}-${{ inputs.branch }}
     if: (!cancelled()) && contains(fromJSON(inputs.jobs), 'build-only')
