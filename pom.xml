@@ -607,6 +607,28 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
         <groupId>org.apache.rat</groupId>
         <artifactId>apache-rat-plugin</artifactId>
        <configuration>
+          <!-- License policy: the Apache License 2.0 is the only approved
+               license for source in this tree. RAT's built-in defaults also
+               approve MIT, CDDL-1.0, OASIS, W3C and others; CDDL-1.0 in
+               particular is ASF Category B and must not appear as source in a
+               release. Third-party source is admitted by a named exclusion
+               below with a matching LICENSE.txt entry, never by a silent
+               family match. -->
+          <addDefaultLicenseMatchers>false</addDefaultLicenseMatchers>
+          <licenses>
+            <license implementation="org.apache.rat.analysis.license.ApacheSoftwareLicense20"/>
+            <license implementation="org.apache.rat.analysis.generation.JavaDocLicenseNotRequired"/>
+            <license implementation="org.apache.rat.analysis.generation.GeneratedLicenseNotRequired"/>
+          </licenses>
+          <licenseFamilies>
+            <licenseFamily implementation="org.apache.rat.license.SimpleLicenseFamily">
+              <familyName>Apache License Version 2.0</familyName>
+            </licenseFamily>
+          </licenseFamilies>
+          <!-- One unapproved file fails the build. -->
+          <numUnapprovedLicenses>0</numUnapprovedLicenses>
+          <!-- .gitignore must not silently define license scope. -->
+          <parseSCMIgnoresAsExcludes>false</parseSCMIgnoresAsExcludes>
           <excludes>
             <exclude>.gitattributes</exclude>
             <exclude>.gitignore</exclude>
