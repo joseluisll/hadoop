@@ -969,6 +969,11 @@
         <version>${jetty.version}</version>
       </dependency>
       <dependency>
+        <groupId>jakarta.servlet.jsp</groupId>
+        <artifactId>jakarta.servlet.jsp-api</artifactId>
+        <version>2.3.6</version>
+      </dependency>
+      <dependency>
         <groupId>jakarta.servlet</groupId>
         <artifactId>jakarta.servlet-api</artifactId>
         <version>4.0.4</version>
