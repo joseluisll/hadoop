@@ -67,8 +67,8 @@
          by the tests but deliberately left undeclared: they already arrive
          through jetty-webapp at the same version and scope, and declaring
          jetty-server directly moves the javax.servlet-api it carries behind
-         the managed jetty-servlet-api on the classpath, which silently changes
-         which servlet API the module resolves. -->
+         jakarta.servlet-api on the classpath, which silently changes which
+         servlet API the module resolves. -->
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-webapp</artifactId>
