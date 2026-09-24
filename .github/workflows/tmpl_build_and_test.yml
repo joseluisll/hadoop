@@ -71,11 +71,13 @@ env:
     -Dmaven.test.failure.ignore=false
     -Dsurefire.rerunFailingTestsCount=2
 
+# Forks can run these jobs on their own runner by setting the repository
+# variable HADOOP_RUNNER to one of its labels. The runner needs Docker.
 jobs:
   # TODO: use common composite actions in .github/actions/
   precondition:
     name: Preparation
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.HADOOP_RUNNER || 'ubuntu-24.04' }}
     outputs:
       build_image_url: ${{ steps.variables.outputs.build_image_url }}
     steps:
@@ -90,7 +92,7 @@ jobs:
           echo "build_image_url=ghcr.io/${REPO_OWNER}/gha-build-${{ inputs.os }}:${{ inputs.branch }}-${{ github.run_id }}" >> $GITHUB_OUTPUT
   build-image:
     name: Build Image ${{ inputs.os }}-${{ inputs.branch }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.HADOOP_RUNNER || 'ubuntu-24.04' }}
     needs: [ precondition ]
     # Security: this does not leak write access for our image repository to
     # forked repos.
@@ -160,7 +162,7 @@ jobs:
   build-only:
     name: Build Only (Java ${{ inputs.java }}) ${{ inputs.os }}-${{ inputs.branch }}
     if: (!cancelled()) && contains(fromJSON(inputs.jobs), 'build-only')
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.HADOOP_RUNNER || 'ubuntu-24.04' }}
     needs: [ precondition, build-image ]
     container:
       image: ${{ needs.precondition.outputs.build_image_url }}
@@ -182,7 +184,7 @@ jobs:
   build-and-test:
     if: (!cancelled()) && contains(fromJSON(inputs.jobs), 'build-and-test')
     name: Test ${{ matrix.comment }} (Java ${{ inputs.java }}) ${{ inputs.os }}-${{ inputs.branch }}
-    runs-on: ubuntu-24.04
+    runs-on: ${{ vars.HADOOP_RUNNER || 'ubuntu-24.04' }}
     needs: [ precondition, build-image ]
     container:
       image: ${{ needs.precondition.outputs.build_image_url }}
