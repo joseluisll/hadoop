@@ -20,20 +20,32 @@
 name: "Build"
 
 # Security: write privileges are safe since this is triggered
-# only by `push` (implying user has write access).
+# only by `push` or `workflow_dispatch` (both imply user has write access).
 on:
   push:
     branches:
       - "**"
+  workflow_dispatch:
 
 jobs:
   default:
+    # Forks can limit pushes that build to a comma-separated list of
+    # branches in the repository variable HADOOP_BUILD_BRANCHES.
+    # Manual runs always build.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || vars.HADOOP_BUILD_BRANCHES == ''
+      || contains(format(',{0},', vars.HADOOP_BUILD_BRANCHES), format(',{0},', github.ref_name))
     permissions:
       packages: write
     name: Run
     uses: ./.github/workflows/tmpl_build_and_test.yml
 
   rockylinux-8-java21-build-only:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || vars.HADOOP_BUILD_BRANCHES == ''
+      || contains(format(',{0},', vars.HADOOP_BUILD_BRANCHES), format(',{0},', github.ref_name))
     permissions:
       packages: write
     name: Run
@@ -44,6 +56,10 @@ jobs:
       jobs: '[ "build-only" ]'
 
   debian-13-java25-build-only:
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      || vars.HADOOP_BUILD_BRANCHES == ''
+      || contains(format(',{0},', vars.HADOOP_BUILD_BRANCHES), format(',{0},', github.ref_name))
     permissions:
       packages: write
     name: Run
