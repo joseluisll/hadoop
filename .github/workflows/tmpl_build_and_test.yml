@@ -143,6 +143,7 @@ jobs:
           cat > /tmp/Dockerfile.gha <<UserSpecificDocker
           FROM ${{ needs.precondition.outputs.build_image_url }}-base
           RUN rm -f /var/log/faillog /var/log/lastlog
+          RUN userdel -r \$(getent passwd ${USER_ID} | cut -d: -f1) 2>/dev/null || :
           RUN groupadd --non-unique -g ${GROUP_ID} ${USER}
           RUN useradd -g ${GROUP_ID} -u ${USER_ID} -k /root -m ${USER}
           RUN echo "${USER} ALL=NOPASSWD: ALL" > "/etc/sudoers.d/hadoop-build-${USER_ID}"
