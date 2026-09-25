@@ -527,6 +527,13 @@ public class TestHttpServer extends HttpServerFunctionalTest {
     // which can be after the client has read the status line, so the counter
     // is given a moment rather than read straight away.
     GenericTestUtils.waitFor(() -> metrics.responses2xx() > before, 50, 10000);
+    // Times are published in milliseconds. Jetty 12 records nanoseconds, so
+    // an unconverted value for even a one-millisecond request reads as a
+    // million here.
+    assertThat(metrics.requestTimeMax())
+        .as("requestTimeMax in ms").isBetween(0L, 60_000L);
+    assertThat(metrics.dispatchedTimeMax())
+        .as("dispatchedTimeMax in ms").isBetween(0L, 60_000L);
   }
 
   @Test
