@@ -37,7 +37,7 @@ Run on the keep branch itself: `TestHttpServer` 39/39, `TestHttpServerLogs` 4/4 
 
 Added afterwards: `1800f323` fixes a units bug in the PR itself. `HttpServer2Metrics` published Jetty 12's nanosecond request and dispatch times under their "(in ms)" names, so they read a million times too high. With the fix, `TestHttpServer2Metrics` passes 2/2 and `TestHttpServer` 39/39, including a real-server check that `requestTimeMax` and `dispatchedTimeMax` are plausible milliseconds. Without the conversion all three checks fail.
 
-## Wave 1: web-facing modules (23), in progress
+## Wave 1: web-facing modules (23), finished 19:28Z (1 h 41 min)
 | Module | Run | Failures | Errors | Skipped |
 |---|---|---|---|---|
 | hadoop-auth | 186 | 0 | 0 | 0 |
@@ -52,9 +52,13 @@ Added afterwards: `1800f323` fixes a units bug in the PR itself. `HttpServer2Met
 | hadoop-yarn-server-applicationhistoryservice | 209 | 0 | 0 | 0 |
 | hadoop-yarn-server-timelineservice | 85 | 0 | 0 | 0 |
 | hadoop-yarn-server-web-proxy | 54 | 0 | 0 | 0 |
-| hadoop-yarn-server-nodemanager, and 10 more | *running* | | | |
+| hadoop-yarn-server-nodemanager | 1238 | 58 | 62 | 57 |
+| hadoop-yarn-server-globalpolicygenerator | 33 | 0 | 0 | 0 |
+| hadoop-resourceestimator | 47 | 0 | 0 | 0 |
 
-### Failing test classes so far (not yet compared with trunk)
+When the hung `TestResourceLocalizationService` test JVM was killed, surefire marked `hadoop-yarn-server-nodemanager` as a build failure ("The forked VM terminated without properly saying goodbye"). Maven then **skipped the 8 modules that depend on it**: hadoop-yarn-client, hadoop-mapreduce-client-shuffle, -app and -hs, hadoop-yarn-server-router, hadoop-yarn-services-api, hadoop-yarn-applications-catalog-webapp and hadoop-sls. They run in wave 1b. From wave 1b on, runs use `--fail-never`, so a failing module no longer skips its dependents.
+
+### Failing test classes (not yet compared with trunk)
 All of the `hadoop-common` failures below are in file-permission, disk-check or native-library tests. None involve HTTP or Jetty.
 - **Root user:** these assert that a directory without permissions cannot be read or deleted, which root can always do.
   - `fs.TestFileUtil`, `fs.TestFsShellCopy`, `fs.TestLocalDirAllocator`, `fs.TestLocalFileSystem`
@@ -62,7 +66,11 @@ All of the `hadoop-common` failures below are in file-permission, disk-check or 
   - `util.TestDiskChecker`, `util.TestBasicDiskValidator`, `util.TestReadWriteDiskValidator`
   - `metrics2.sink.TestRollingFileSystemSinkWithLocal`
 - **No native library:** `util.TestNativeCodeLoader` reports "libhadoop.so testing was required, but libhadoop.so was not loaded".
-- **hadoop-yarn-server-nodemanager** (still running): `TestDirectoryCollection`, `TestLinuxContainerExecutorWithMocks`, `TestNodeStatusUpdater`, `amrmproxy.TestFederationInterceptor`, `launcher.TestContainerLaunch`, `linux.resources.TestCGroupsHandlerImpl`, `linux.runtime.TestDockerContainerRuntime`, `linux.runtime.docker.TestDockerClient`, `logaggregation.TestLogAggregationService`, `scheduler.TestContainerSchedulerOppContainersByResources`, `scheduler.TestContainerSchedulerQueuing` and `health.TestNodeHealthCheckerService`. Not yet examined. Several involve Linux container executors, cgroups and Docker, which depend on the environment.
+- **hadoop-yarn-server-nodemanager**: 19 classes. The only web-layer class, `webapp.TestNMWebServices`, fails before any HTTP request (see Disk health). The rest have not been examined individually yet:
+  - **Linux container executor, Docker and cgroups** (need a real container runtime or cgroup hierarchy): `linux.runtime.TestDockerContainerRuntime` (2 F, 50 E), `linux.runtime.docker.TestDockerClient`, `linux.resources.TestCGroupsHandlerImpl`, `TestLinuxContainerExecutorWithMocks`.
+  - **Disk health**: the NodeManager's disk checker rejects every local directory in this container. `TestDirectoryCollection`, `TestLocalDirsHandlerService` and `health.TestNodeHealthCheckerService` fail on it. `webapp.TestNMWebServices` (2 E, `testContainerLogsWith{New,Old}API`) fails in test setup with `DiskErrorException: No space available in any of the local directories`, before any HTTP request is made.
+  - **Container lifecycle and scheduling**: `containermanager.TestContainerManager` (18 F), `launcher.TestContainerLaunch` (7 F, 6 E), `scheduler.TestContainerSchedulerQueuing` (11 F, 1 E), `scheduler.TestContainerSchedulerOppContainersByResources`, `monitor.TestContainersMonitor`, `logaggregation.TestLogAggregationService`, `TestNodeStatusUpdater`, `TestNodeManagerResync`, `TestNodeManagerReboot`, `TestNodeManagerShutdown`, `amrmproxy.TestFederationInterceptor`. Many launch real processes through the container executor, which likely hits the same environment limits.
+  - All are for the trunk comparison.
 - **Hang:** `localizer.TestResourceLocalizationService`. `testLocalizerHeartbeatWhenAppCleaningUp` busy-waited in `DummyExecutor.waitForLocalizers` (a `Thread.yield()` loop, `TestResourceLocalizationService.java:1112`) for 20 minutes at 100% CPU with no output. JUnit's same-thread timeout cannot interrupt that loop. The test JVM was killed at 19:18Z so the wave could continue. This is a test-side busy wait in the localizer, with no HTTP or Jetty involvement; it will be compared with trunk.
 
 ## Wave 2: hadoop-hdfs, yarn-server-resourcemanager, hadoop-hdfs-rbf, mapreduce-client-jobclient
@@ -79,3 +87,4 @@ Not started.
 - 2026-09-25T18:44Z: wave 1 on module 13 of 23 (nodemanager). 12 modules done; the only failures are the environment-looking ones above.
 - 2026-09-25T19:18Z: nodemanager hung in `TestResourceLocalizationService` (see above). Its test JVM was killed and the module continued.
 - 2026-09-25T19:23Z: metrics units fix `1800f323` pushed to jetty12-keep-behaviour. The keep-branch tree tested from wave 1b on includes it.
+- 2026-09-25T19:28Z: wave 1 finished. 12 modules were clean; hadoop-common has 37 failures (environment); nodemanager has 58 F and 62 E (environment and container executor), plus 1 hang; 8 modules were skipped behind nodemanager. Switched the tree to jetty12-keep-behaviour + trunk; rebuild and wave 1b (hadoop-common plus the 8 skipped modules) started.
