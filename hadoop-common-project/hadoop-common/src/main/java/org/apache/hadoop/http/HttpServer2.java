@@ -175,6 +175,18 @@ public final class HttpServer2 implements FilterContainer {
   public static final boolean HTTP_SNI_HOST_CHECK_ENABLED_DEFAULT = false;
 
   /**
+   * The Jetty {@link UriCompliance.Violation}s the server lets through to
+   * the servlet rather than refusing at the connector. The default is the set
+   * Hadoop's own paths need; an empty value refuses everything Jetty's
+   * DEFAULT mode refuses.
+   */
+  public static final String HTTP_URI_COMPLIANCE_VIOLATIONS_KEY =
+      "hadoop.http.uri.compliance.violations";
+  public static final String HTTP_URI_COMPLIANCE_VIOLATIONS_DEFAULT =
+      "AMBIGUOUS_EMPTY_SEGMENT,AMBIGUOUS_PATH_ENCODING,"
+          + "SUSPICIOUS_PATH_CHARACTERS";
+
+  /**
    * Prefix under which a context init parameter reaches Jetty's DefaultServlet.
    * <p>
    * This is not the package the servlet lives in: ee8 moved the class to
@@ -567,16 +579,18 @@ public final class HttpServer2 implements FilterContainer {
       //    rather than assumed: of every character in that test's filename,
       //    %5C is the only one this violation gates.
       //
-      // All three are allowed back so that Hadoop keeps deciding what a path
-      // means. The ambiguities that let a request read as one path to a filter
-      // and another to a servlet stay rejected: an encoded separator (a%2Fb)
-      // and an encoded dot-segment (a%2E%2E%2Fb) are still refused, .. still
-      // cannot climb out of the context, and a%252Fb still decodes once, to
-      // the literal a%2Fb rather than to a separator.
-      httpConfig.setUriCompliance(UriCompliance.DEFAULT.with("hadoop",
-          UriCompliance.Violation.AMBIGUOUS_EMPTY_SEGMENT,
-          UriCompliance.Violation.AMBIGUOUS_PATH_ENCODING,
-          UriCompliance.Violation.SUSPICIOUS_PATH_CHARACTERS));
+      // All three are allowed back by default so that Hadoop keeps deciding
+      // what a path means. The ambiguities that let a request read as one
+      // path to a filter and another to a servlet stay rejected: an encoded
+      // separator (a%2Fb) and an encoded dot-segment (a%2E%2E%2Fb) are still
+      // refused, .. still cannot climb out of the context, and a%252Fb still
+      // decodes once, to the literal a%2Fb rather than to a separator.
+      //
+      // SUSPICIOUS_PATH_CHARACTERS is wider than %5C: it also admits the
+      // encoded control characters %00, %09, %0A, %0D and %7F. The set is
+      // configurable so that a deployment which does not need them can refuse
+      // them at the connector.
+      httpConfig.setUriCompliance(getUriCompliance(conf));
 
       int backlogSize = conf.getInt(HTTP_SOCKET_BACKLOG_SIZE_KEY,
           HTTP_SOCKET_BACKLOG_SIZE_DEFAULT);
@@ -799,6 +813,39 @@ public final class HttpServer2 implements FilterContainer {
     this.findPort = b.findPort;
     this.portRanges = b.portRanges;
     initializeWebServer(b.name, b.hostName, b.conf, b.pathSpecs);
+  }
+
+  /**
+   * Build the URI compliance mode from
+   * {@link #HTTP_URI_COMPLIANCE_VIOLATIONS_KEY}: Jetty's DEFAULT mode, with
+   * the listed violations allowed.
+   *
+   * @param conf configuration to read.
+   * @return the compliance mode for the server's connectors.
+   * @throws IllegalArgumentException if a listed name is not a violation
+   *     Jetty knows.
+   */
+  @VisibleForTesting
+  static UriCompliance getUriCompliance(Configuration conf) {
+    String[] names = conf.getTrimmedStrings(HTTP_URI_COMPLIANCE_VIOLATIONS_KEY,
+        HTTP_URI_COMPLIANCE_VIOLATIONS_DEFAULT);
+    List<UriCompliance.Violation> allowed = new ArrayList<>();
+    for (String name : names) {
+      try {
+        allowed.add(
+            UriCompliance.Violation.valueOf(StringUtils.toUpperCase(name)));
+      } catch (IllegalArgumentException e) {
+        throw new IllegalArgumentException("Unknown URI compliance violation '"
+            + name + "' in " + HTTP_URI_COMPLIANCE_VIOLATIONS_KEY
+            + "; expected any of "
+            + Arrays.toString(UriCompliance.Violation.values()), e);
+      }
+    }
+    if (allowed.isEmpty()) {
+      return UriCompliance.DEFAULT;
+    }
+    return UriCompliance.DEFAULT.with("hadoop",
+        allowed.toArray(new UriCompliance.Violation[0]));
   }
 
   private void initializeWebServer(String name, String hostName,
