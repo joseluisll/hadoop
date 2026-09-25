@@ -28,8 +28,8 @@ import org.eclipse.jetty.util.thread.QueuedThreadPool;
 import org.junit.jupiter.api.Test;
 
 /**
- * The HttpServer2 time metrics are published in milliseconds, as they were
- * on Jetty 9.4, although Jetty 12's StatisticsHandler records nanoseconds.
+ * HttpServer2Metrics publishes what it published on Jetty 9.4: the same
+ * metric names, and times in milliseconds.
  */
 public class TestHttpServer2Metrics {
 
@@ -61,5 +61,21 @@ public class TestHttpServer2Metrics {
     assertEquals(4000, metrics.dispatchedTimeTotal());
     assertEquals(250.0, metrics.dispatchedTimeMean(), 1e-9);
     assertEquals(0.5, metrics.dispatchedTimeStdDev(), 1e-9);
+  }
+
+  /**
+   * Jetty 12 has nothing to source the async metrics from. They are still
+   * published, so the names monitoring reads do not vanish, and read 0: what
+   * they read on 9.4 for every servlet Hadoop serves.
+   */
+  @Test
+  public void testAsyncMetricsAreStillPublished() {
+    HttpServer2Metrics metrics = new HttpServer2Metrics(
+        mock(StatisticsHandler.class), 0, mock(QueuedThreadPool.class), 1, 1);
+    assertEquals(0, metrics.asyncDispatches());
+    assertEquals(0, metrics.asyncRequests());
+    assertEquals(0, metrics.asyncRequestsWaiting());
+    assertEquals(0, metrics.asyncRequestsWaitingMax());
+    assertEquals(0, metrics.expires());
   }
 }

@@ -38,8 +38,10 @@ import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
  * same thing under a different name, and are read as such here so the metric
  * names Hadoop emits do not move. Its four async counters and its count of
  * expired async requests have no counterpart, because the core no longer sees
- * servlet async activity, so those five metrics are no longer emitted rather
- * than reported as a constant.
+ * servlet async activity. Those five are still published, as 0, so that the
+ * metric names do not disappear from JMX and from the sinks that monitoring
+ * reads them through. 0 is also what they read on Jetty 9.4 for every servlet
+ * Hadoop itself serves, none of which starts an async request.
  *
  * Jetty 12 also records every time statistic in nanoseconds, where 9.4
  * recorded milliseconds. The metrics below are documented, and have always
@@ -56,6 +58,23 @@ public class HttpServer2Metrics {
   private final int acceptorThreads;
   private final int selectorThreads;
 
+  @Metric("number of requested that have been asynchronously dispatched;"
+      + " always 0 since Jetty 12")
+  public int asyncDispatches() {
+    return 0;
+  }
+  @Metric("total number of async requests; always 0 since Jetty 12")
+  public int asyncRequests() {
+    return 0;
+  }
+  @Metric("currently waiting async requests; always 0 since Jetty 12")
+  public int asyncRequestsWaiting() {
+    return 0;
+  }
+  @Metric("maximum number of waiting async requests; always 0 since Jetty 12")
+  public int asyncRequestsWaitingMax() {
+    return 0;
+  }
   @Metric("number of dispatches")
   public int dispatched() {
     return handler.getHandleTotal();
@@ -83,6 +102,11 @@ public class HttpServer2Metrics {
   @Metric("total time spent in dispatch handling (in ms)")
   public long dispatchedTimeTotal() {
     return nanosToMillis(handler.getHandleTimeTotal());
+  }
+  @Metric("number of async requests requests that have expired;"
+      + " always 0 since Jetty 12")
+  public int expires() {
+    return 0;
   }
   @Metric("number of requests")
   public int requests() {
