@@ -35,6 +35,8 @@ Status: **in progress**. This file is updated as each test wave finishes and rep
 ## Keep-path commits (`jetty12-keep-behaviour`)
 Run on the keep branch itself: `TestHttpServer` 39/39, `TestHttpServerLogs` 4/4 and `TestCommonConfigurationFields` 4/4 pass. Each of the four commits compiles on its own, tests included.
 
+Added afterwards: `1800f323` fixes a units bug in the PR itself. `HttpServer2Metrics` published Jetty 12's nanosecond request and dispatch times under their "(in ms)" names, so they read a million times too high. With the fix, `TestHttpServer2Metrics` passes 2/2 and `TestHttpServer` 39/39, including a real-server check that `requestTimeMax` and `dispatchedTimeMax` are plausible milliseconds. Without the conversion all three checks fail.
+
 ## Wave 1: web-facing modules (23), in progress
 | Module | Run | Failures | Errors | Skipped |
 |---|---|---|---|---|
@@ -76,3 +78,4 @@ Not started.
 - 2026-09-25T17:48Z: full build and shadedclient passed; wave 1 started.
 - 2026-09-25T18:44Z: wave 1 on module 13 of 23 (nodemanager). 12 modules done; the only failures are the environment-looking ones above.
 - 2026-09-25T19:18Z: nodemanager hung in `TestResourceLocalizationService` (see above). Its test JVM was killed and the module continued.
+- 2026-09-25T19:32Z: metrics units fix `1800f323` pushed to jetty12-keep-behaviour. The keep-branch tree tested from wave 1b on includes it.
