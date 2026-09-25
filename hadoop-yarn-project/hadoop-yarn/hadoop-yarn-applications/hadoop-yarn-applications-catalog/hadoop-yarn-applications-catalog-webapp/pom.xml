@@ -75,6 +75,18 @@
         <artifactId>jetty-client</artifactId>
         <version>${solr.jetty.version}</version>
       </dependency>
+      <!--
+        The rest of Solr's Jetty - the server side solr-core and
+        solr-test-framework bring, and the http2 modules - on the same
+        release, so no 9.4 artifact keeps the version Solr was built with.
+      -->
+      <dependency>
+        <groupId>org.eclipse.jetty</groupId>
+        <artifactId>jetty-bom</artifactId>
+        <version>${solr.jetty.version}</version>
+        <type>pom</type>
+        <scope>import</scope>
+      </dependency>
     </dependencies>
   </dependencyManagement>
 
