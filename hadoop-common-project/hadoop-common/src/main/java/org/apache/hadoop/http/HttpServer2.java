@@ -553,7 +553,7 @@ public final class HttpServer2 implements FilterContainer {
       httpConfig.setRequestHeaderSize(requestHeaderSize);
       httpConfig.setResponseHeaderSize(responseHeaderSize);
       httpConfig.setSendServerVersion(false);
-      // Jetty 12 rejects two kinds of path at the connector that 9.4 handed to
+      // Jetty 12 rejects three kinds of path at the connector that 9.4 handed to
       // the servlet, with a bare 400 and no body, so the request never reaches
       // the code that knows what a Hadoop path is:
       //
@@ -566,14 +566,19 @@ public final class HttpServer2 implements FilterContainer {
       //    it separates paths on Windows; on HDFS it is just a character in a
       //    name, and TestWebHdfsUrl creates files containing one. Measured
       //    rather than assumed: of every character in that test's filename,
-      //    %5C is the only one this violation gates.
+      //    %5C is the only one this violation gates. The same violation also
+      //    covers the encoded control characters, %00 to %1F and %7F (Jetty's
+      //    HttpURI), so those are let through as well. Jetty 9.4 let all of
+      //    them through too: its default compliance mode, RFC7230, checked
+      //    none of the ambiguous or suspicious path rules.
       //
       // All three are allowed back so that Hadoop keeps deciding what a path
       // means. The ambiguities that let a request read as one path to a filter
       // and another to a servlet stay rejected: an encoded separator (a%2Fb)
       // and an encoded dot-segment (a%2E%2E%2Fb) are still refused, .. still
       // cannot climb out of the context, and a%252Fb still decodes once, to
-      // the literal a%2Fb rather than to a separator.
+      // the literal a%2Fb rather than to a separator. Everything this allows,
+      // 9.4 allowed; the reverse is not true.
       httpConfig.setUriCompliance(UriCompliance.DEFAULT.with("hadoop",
           UriCompliance.Violation.AMBIGUOUS_EMPTY_SEGMENT,
           UriCompliance.Violation.AMBIGUOUS_PATH_ENCODING,
