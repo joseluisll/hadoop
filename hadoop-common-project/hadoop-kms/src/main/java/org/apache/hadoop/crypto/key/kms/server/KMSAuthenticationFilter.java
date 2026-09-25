@@ -22,6 +22,7 @@ import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.crypto.key.kms.KMSDelegationToken;
 import org.apache.hadoop.http.HtmlQuoting;
+import org.apache.hadoop.security.authentication.server.AuthenticationFilter;
 import org.apache.hadoop.security.authentication.server.KerberosAuthenticationHandler;
 import org.apache.hadoop.security.authentication.server.PseudoAuthenticationHandler;
 import org.apache.hadoop.security.token.delegation.web.DelegationTokenAuthenticationFilter;
@@ -98,9 +99,11 @@ public class KMSAuthenticationFilter
   private static class KMSResponse extends HttpServletResponseWrapper {
     public int statusCode;
     public String msg;
+    private final ServletRequest request;
 
-    public KMSResponse(ServletResponse response) {
+    public KMSResponse(ServletRequest request, ServletResponse response) {
       super((HttpServletResponse)response);
+      this.request = request;
     }
 
     @Override
@@ -115,7 +118,11 @@ public class KMSAuthenticationFilter
       this.msg = msg;
 
       // Jetty 12 never puts a reason phrase on the wire, so the detail is
-      // left to sendError, which writes it into the response body.
+      // left to sendError, which writes it into the response body - for any
+      // method, as the reason phrase was, once the error is marked.
+      request.setAttribute(
+          AuthenticationFilter.ERROR_MESSAGE_FOR_ANY_METHOD_ATTRIBUTE,
+          Boolean.TRUE);
       super.sendError(sc, HtmlQuoting.quoteHtmlChars(msg));
     }
 
@@ -148,7 +155,7 @@ public class KMSAuthenticationFilter
   @Override
   public void doFilter(ServletRequest request, ServletResponse response,
       FilterChain filterChain) throws IOException, ServletException {
-    KMSResponse kmsResponse = new KMSResponse(response);
+    KMSResponse kmsResponse = new KMSResponse(request, response);
     super.doFilter(request, kmsResponse, filterChain);
 
     if (kmsResponse.statusCode != HttpServletResponse.SC_OK &&

@@ -90,6 +90,7 @@ import org.apache.hadoop.util.Lists;
 import org.apache.hadoop.util.ReflectionUtils;
 import org.apache.hadoop.util.Shell;
 import org.apache.hadoop.util.StringUtils;
+import org.eclipse.jetty.ee8.nested.Request;
 import org.eclipse.jetty.ee8.nested.SessionHandler;
 import org.eclipse.jetty.ee8.servlet.ErrorPageErrorHandler;
 import org.eclipse.jetty.ee8.servlet.FilterHolder;
@@ -806,20 +807,7 @@ public final class HttpServer2 implements FilterContainer {
       throws IOException {
 
     Preconditions.checkNotNull(webAppContext);
-    // Jetty only builds an error page for GET, HEAD and POST, so an error on a
-    // PUT or a DELETE goes back with no body at all. That did not show on 9.4
-    // because the detail also travelled in the reason phrase, which Jetty 12
-    // no longer puts on the wire, and losing both leaves a client with nothing
-    // but the status code.
-    // Subclasses the handler a WebAppContext installs for itself, so that
-    // <error-page> and <exception-type> mappings from a webapp's web.xml keep
-    // working; a plain ErrorHandler here would silently drop them.
-    ErrorPageErrorHandler errorHandler = new ErrorPageErrorHandler() {
-      @Override
-      public boolean errorPageForMethod(String method) {
-        return true;
-      }
-    };
+    ErrorPageErrorHandler errorHandler = new ReasonBodyErrorHandler();
     errorHandler.setShowStacks(LOG.isTraceEnabled());
     webAppContext.setErrorHandler(errorHandler);
 
@@ -1059,6 +1047,7 @@ public final class HttpServer2 implements FilterContainer {
       logContext.setSessionHandler(handler);
       logContext.addAliasCheck(
           new SymlinkAllowedResourceAliasChecker(logContext.getCoreContextHandler()));
+      logContext.setErrorHandler(new ReasonBodyErrorHandler());
       setContextAttributes(logContext, conf);
       addNoCacheFilter(logContext);
       defaultContexts.put(logContext, true);
@@ -1079,6 +1068,7 @@ public final class HttpServer2 implements FilterContainer {
     staticContext.setSessionHandler(handler);
     staticContext.addAliasCheck(new SymlinkAllowedResourceAliasChecker(
         staticContext.getCoreContextHandler()));
+    staticContext.setErrorHandler(new ReasonBodyErrorHandler());
     setContextAttributes(staticContext, conf);
     defaultContexts.put(staticContext, true);
   }
@@ -1587,6 +1577,49 @@ public final class HttpServer2 implements FilterContainer {
           "Jetty reported no error but did not bind " + listener);
     }
     LOG.info("Jetty bound to port " + listener.getLocalPort());
+  }
+
+  /**
+   * The error handler for every context HttpServer2 sets up.
+   * <p>
+   * Jetty writes an error page only for GET, POST and HEAD; an error on any
+   * other method goes back with no body, on 9.4 and on 12 alike. On 9.4 that
+   * did not lose anything that mattered, because the few places whose message
+   * a caller acts on - the authentication and CSRF filters - also put it in
+   * the reason phrase, which every response has. Jetty 12 sends no custom
+   * reason phrase, so those places mark their errors with
+   * {@link AuthenticationFilter#ERROR_MESSAGE_FOR_ANY_METHOD_ATTRIBUTE}, and
+   * this handler writes the error page for a marked error whatever the method.
+   * Every other error is answered as Jetty 9.4 answered it: no body, and no
+   * error-page dispatch, for methods other than GET, POST and HEAD.
+   * <p>
+   * Extends the handler a WebAppContext installs for itself, so that
+   * &lt;error-page&gt; and &lt;exception-type&gt; mappings from a webapp's
+   * web.xml keep working; a plain ErrorHandler would silently drop them.
+   */
+  static final class ReasonBodyErrorHandler extends ErrorPageErrorHandler {
+
+    @Override
+    public boolean errorPageForMethod(String method) {
+      // Whether the error is marked is only known in handle, which Jetty only
+      // calls when this says yes. handle keeps to Jetty's own choice for
+      // unmarked errors.
+      return true;
+    }
+
+    @Override
+    public void handle(String target, Request baseRequest,
+        HttpServletRequest request, HttpServletResponse response)
+        throws IOException, ServletException {
+      if (super.errorPageForMethod(request.getMethod())
+          || request.getAttribute(
+              AuthenticationFilter.ERROR_MESSAGE_FOR_ANY_METHOD_ATTRIBUTE)
+              != null) {
+        super.handle(target, baseRequest, request, response);
+      } else {
+        baseRequest.setHandled(true);
+      }
+    }
   }
 
   /**

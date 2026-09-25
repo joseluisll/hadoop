@@ -28,10 +28,12 @@ import org.apache.hadoop.net.ServerSocketUtil;
 import org.apache.hadoop.security.Groups;
 import org.apache.hadoop.security.ShellBasedUnixGroupsMapping;
 import org.apache.hadoop.security.UserGroupInformation;
+import org.apache.hadoop.security.authentication.server.AuthenticationFilter;
 import org.apache.hadoop.security.authorize.AccessControlList;
 import org.apache.hadoop.util.JsonUtils;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import org.apache.commons.io.IOUtils;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.ServerConnector;
 import org.apache.hadoop.test.GenericTestUtils;
@@ -58,12 +60,14 @@ import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.core.MediaType;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
 import java.io.PrintWriter;
 import java.lang.reflect.Field;
 import java.net.HttpURLConnection;
 import java.net.InetAddress;
 import java.net.URI;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Enumeration;
 import java.util.HashMap;
@@ -180,6 +184,26 @@ public class TestHttpServer extends HttpServerFunctionalTest {
     }
   }
 
+  /**
+   * Refuses every request with a message, the way the authentication and CSRF
+   * filters do; with ?mark=true it marks the refusal the way they mark theirs.
+   */
+  @SuppressWarnings("serial")
+  public static class RefusingServlet extends HttpServlet {
+    static final String DETAIL = "refused-for-a-reason";
+
+    @Override
+    protected void service(HttpServletRequest request,
+        HttpServletResponse response) throws IOException {
+      if (Boolean.parseBoolean(request.getParameter("mark"))) {
+        request.setAttribute(
+            AuthenticationFilter.ERROR_MESSAGE_FOR_ANY_METHOD_ATTRIBUTE,
+            Boolean.TRUE);
+      }
+      response.sendError(HttpServletResponse.SC_FORBIDDEN, DETAIL);
+    }
+  }
+
   @BeforeAll
   public static void setup() throws Exception {
     Configuration conf = new Configuration();
@@ -194,6 +218,7 @@ public class TestHttpServer extends HttpServerFunctionalTest {
     server.addServlet("longheader", "/longheader", LongHeaderServlet.class);
     server.addServlet("owncontenttype", "/owncontenttype",
         OwnContentTypeServlet.class);
+    server.addServlet("refusing", "/refusing", RefusingServlet.class);
     server.addJerseyResourcePackage(
         JerseyResource.class.getPackage().getName(), "/jersey/*");
     server.start();
@@ -335,6 +360,51 @@ public class TestHttpServer extends HttpServerFunctionalTest {
       assertEquals(type, conn.getContentType(),
           "the cleared charset came back for " + type);
       conn.disconnect();
+    }
+  }
+
+  /**
+   * An error on a method Jetty writes no error page for goes back as it did on
+   * Jetty 9.4 - with no body - unless it is marked as one whose message the
+   * caller has to read. On 9.4 that message was in the reason phrase; Jetty 12
+   * sends none, so a marked error gets the error page whatever the method.
+   */
+  @Test
+  public void testErrorBodyOnlyForMarkedErrorsOnOtherMethods()
+      throws Exception {
+    for (String method : new String[] {"PUT", "DELETE"}) {
+      HttpURLConnection conn = refusal(method, false);
+      assertEquals(HttpServletResponse.SC_FORBIDDEN, conn.getResponseCode());
+      assertEquals(0, conn.getContentLength(),
+          "an unmarked " + method + " error grew a body");
+      conn.disconnect();
+
+      conn = refusal(method, true);
+      assertEquals(HttpServletResponse.SC_FORBIDDEN, conn.getResponseCode());
+      assertThat(errorBody(conn))
+          .as("a marked " + method + " error lost its message")
+          .contains(RefusingServlet.DETAIL);
+      conn.disconnect();
+    }
+    // GET keeps the error page Jetty always wrote for it, marked or not.
+    HttpURLConnection conn = refusal("GET", false);
+    assertEquals(HttpServletResponse.SC_FORBIDDEN, conn.getResponseCode());
+    assertThat(errorBody(conn)).contains(RefusingServlet.DETAIL);
+    conn.disconnect();
+  }
+
+  private static HttpURLConnection refusal(String method, boolean mark)
+      throws IOException {
+    URL url = new URL(baseUrl, "/refusing?mark=" + mark);
+    HttpURLConnection conn = (HttpURLConnection) url.openConnection();
+    conn.setRequestMethod(method);
+    conn.connect();
+    return conn;
+  }
+
+  private static String errorBody(HttpURLConnection conn) throws IOException {
+    try (InputStream in = conn.getErrorStream()) {
+      return in == null ? "" : IOUtils.toString(in, StandardCharsets.UTF_8);
     }
   }
 
