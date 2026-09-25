@@ -78,4 +78,4 @@ Not started.
 - 2026-09-25T17:48Z: full build and shadedclient passed; wave 1 started.
 - 2026-09-25T18:44Z: wave 1 on module 13 of 23 (nodemanager). 12 modules done; the only failures are the environment-looking ones above.
 - 2026-09-25T19:18Z: nodemanager hung in `TestResourceLocalizationService` (see above). Its test JVM was killed and the module continued.
-- 2026-09-25T19:32Z: metrics units fix `1800f323` pushed to jetty12-keep-behaviour. The keep-branch tree tested from wave 1b on includes it.
+- 2026-09-25T19:23Z: metrics units fix `1800f323` pushed to jetty12-keep-behaviour. The keep-branch tree tested from wave 1b on includes it.
