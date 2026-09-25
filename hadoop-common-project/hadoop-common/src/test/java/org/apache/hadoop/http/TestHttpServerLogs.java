@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.File;
 import java.net.HttpURLConnection;
 import java.net.InetSocketAddress;
 import java.net.URL;
@@ -64,6 +65,33 @@ public class TestHttpServerLogs extends HttpServerFunctionalTest {
     URL url = new URL("http://" + NetUtils.getHostPortString(inetSocketAddress) + "/logs");
     HttpURLConnection conn = (HttpURLConnection)url.openConnection();
     assertEquals(HttpStatus.SC_OK, conn.getResponseCode());
+  }
+
+  /**
+   * Jetty 12 will not start a context on a base resource that is not there,
+   * so a hadoop.log.dir that is not a directory leaves /logs out rather than
+   * failing the daemon. The server has to come up, and /logs has to answer
+   * 404 without serving anything from the root context in its place.
+   */
+  @Test
+  public void testLogsSkippedWhenLogDirIsMissing() throws Exception {
+    String logDir = System.getProperty("hadoop.log.dir");
+    System.setProperty("hadoop.log.dir",
+        new File(logDir, "no-such-dir").getAbsolutePath());
+    try {
+      Configuration conf = new Configuration();
+      conf.setBoolean(
+          CommonConfigurationKeysPublic.HADOOP_HTTP_LOGS_ENABLED, true);
+      startServer(conf);
+    } finally {
+      System.setProperty("hadoop.log.dir", logDir);
+    }
+    for (String path : new String[] {"/logs", "/logs/", "/logs/any.log"}) {
+      HttpURLConnection conn =
+          (HttpURLConnection) new URL(baseUrl + path).openConnection();
+      assertEquals(HttpStatus.SC_NOT_FOUND, conn.getResponseCode(), path);
+    }
+    server.stop();
   }
 
   /**
