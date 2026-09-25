@@ -433,6 +433,30 @@ public class TestHttpServer extends HttpServerFunctionalTest {
     }
   }
 
+  /**
+   * Jetty 12 only writes an error page for GET, HEAD and POST, and no longer
+   * sends the reason phrase that used to carry the detail, so a PUT or a
+   * DELETE that fails would reach the client with nothing but a status. Every
+   * context the server builds answers with a body, the webapp's servlets and
+   * /static alike.
+   */
+  @Test
+  public void testErrorsHaveBodiesForEveryMethod() throws Exception {
+    for (String method : new String[] {"PUT", "DELETE"}) {
+      for (String path : new String[] {"/echo", "/static/test.css"}) {
+        HttpURLConnection conn =
+            (HttpURLConnection) new URL(baseUrl, path).openConnection();
+        conn.setRequestMethod(method);
+        String what = method + " " + path;
+        assertThat(conn.getResponseCode()).as(what)
+            .isGreaterThanOrEqualTo(HttpServletResponse.SC_BAD_REQUEST);
+        assertNotNull(conn.getErrorStream(), what + " error had no body");
+        assertThat(conn.getErrorStream().read()).as(what + " error body")
+            .isGreaterThanOrEqualTo(0);
+      }
+    }
+  }
+
   @Test
   public void testUnknownUriComplianceViolationIsRefused() {
     Configuration conf = new Configuration();

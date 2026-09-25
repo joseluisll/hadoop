@@ -66,6 +66,27 @@ public class TestHttpServerLogs extends HttpServerFunctionalTest {
     assertEquals(HttpStatus.SC_OK, conn.getResponseCode());
   }
 
+  /**
+   * An error on /logs carries a body for every method, as it does on the
+   * webapp; Jetty on its own only writes one for GET, HEAD and POST.
+   */
+  @Test
+  public void testLogsErrorHasBodyForPut() throws Exception {
+    Configuration conf = new Configuration();
+    conf.setBoolean(
+        CommonConfigurationKeysPublic.HADOOP_HTTP_LOGS_ENABLED, true);
+    startServer(conf);
+    HttpURLConnection conn =
+        (HttpURLConnection) new URL(baseUrl + "/logs/").openConnection();
+    conn.setRequestMethod("PUT");
+    assertTrue(conn.getResponseCode() >= 400,
+        "PUT /logs/ answered " + conn.getResponseCode());
+    assertNotNull(conn.getErrorStream(), "PUT /logs/ error had no body");
+    assertTrue(conn.getErrorStream().read() >= 0,
+        "PUT /logs/ error had an empty body");
+    server.stop();
+  }
+
   @Test
   public void testLogsDisabled() throws Exception {
     Configuration conf = new Configuration();

@@ -848,19 +848,25 @@ public final class HttpServer2 implements FilterContainer {
         allowed.toArray(new UriCompliance.Violation[0]));
   }
 
-  private void initializeWebServer(String name, String hostName,
-      Configuration conf, String[] pathSpecs)
-      throws IOException {
-
-    Preconditions.checkNotNull(webAppContext);
-    // Jetty only builds an error page for GET, HEAD and POST, so an error on a
-    // PUT or a DELETE goes back with no body at all. That did not show on 9.4
-    // because the detail also travelled in the reason phrase, which Jetty 12
-    // no longer puts on the wire, and losing both leaves a client with nothing
-    // but the status code.
-    // Subclasses the handler a WebAppContext installs for itself, so that
-    // <error-page> and <exception-type> mappings from a webapp's web.xml keep
-    // working; a plain ErrorHandler here would silently drop them.
+  /**
+   * The error handler every context the server builds for itself gets.
+   * <p>
+   * Jetty only builds an error page for GET, HEAD and POST, so an error on a
+   * PUT or a DELETE goes back with no body at all. That did not show on 9.4
+   * because the detail also travelled in the reason phrase, which Jetty 12
+   * no longer puts on the wire, and losing both leaves a client with nothing
+   * but the status code. Installed on /logs and /static as well as on the
+   * webapp, so that a refusal has the same shape whichever of them answers.
+   * <p>
+   * Subclasses the handler a WebAppContext installs for itself, so that
+   * &lt;error-page&gt; and &lt;exception-type&gt; mappings from a webapp's
+   * web.xml keep working; a plain ErrorHandler would silently drop them.
+   * Each context gets its own instance, since the handler is a bean of the
+   * context it is set on.
+   *
+   * @return a new error handler.
+   */
+  private static ErrorPageErrorHandler newErrorHandler() {
     ErrorPageErrorHandler errorHandler = new ErrorPageErrorHandler() {
       @Override
       public boolean errorPageForMethod(String method) {
@@ -868,7 +874,15 @@ public final class HttpServer2 implements FilterContainer {
       }
     };
     errorHandler.setShowStacks(LOG.isTraceEnabled());
-    webAppContext.setErrorHandler(errorHandler);
+    return errorHandler;
+  }
+
+  private void initializeWebServer(String name, String hostName,
+      Configuration conf, String[] pathSpecs)
+      throws IOException {
+
+    Preconditions.checkNotNull(webAppContext);
+    webAppContext.setErrorHandler(newErrorHandler());
 
     int maxThreads = conf.getInt(HTTP_MAX_THREADS_KEY, -1);
     // If HTTP_MAX_THREADS is not configured, QueueThreadPool() will use the
@@ -1097,6 +1111,7 @@ public final class HttpServer2 implements FilterContainer {
         params.put(DEFAULT_SERVLET_INIT_PREFIX + "aliases", "true");
       }
       logContext.setDisplayName("logs");
+      logContext.setErrorHandler(newErrorHandler());
       SessionHandler handler = new SessionHandler();
       handler.setHttpOnly(true);
       handler.getSessionCookieConfig().setSecure(true);
@@ -1113,6 +1128,7 @@ public final class HttpServer2 implements FilterContainer {
     staticContext.setResourceBase(appDir + "/static");
     staticContext.addServlet(WebServlet.class, "/*");
     staticContext.setDisplayName("static");
+    staticContext.setErrorHandler(newErrorHandler());
     @SuppressWarnings("unchecked")
     Map<String, String> params = staticContext.getInitParams();
     params.put(DEFAULT_SERVLET_INIT_PREFIX + "dirAllowed", "false");
