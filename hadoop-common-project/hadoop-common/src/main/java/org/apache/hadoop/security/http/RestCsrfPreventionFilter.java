@@ -36,7 +36,7 @@ import javax.servlet.http.HttpServletResponse;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.conf.Configuration;
-import org.apache.hadoop.util.HttpExceptionUtils;
+import org.apache.hadoop.security.authentication.server.AuthenticationFilter;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -271,22 +271,19 @@ public class RestCsrfPreventionFilter implements Filter {
     }
 
     @Override
+    @SuppressWarnings("deprecation")
     public void sendError(int code, String message) throws IOException {
-      // Reported as the JSON envelope HttpExceptionUtils writes, rather than
-      // handed to sendError for the container to render.
-      //
-      // The message used to travel in the reason phrase. Jetty 12 does not
-      // send one, and what sendError leaves in its place is the container's
-      // HTML error page - which WebHdfsFileSystem refuses on its content type
-      // and reports as a bare "Bad Request", losing the one thing the caller
-      // needed to know. The envelope is what the rest of Hadoop's HTTP
-      // surface already answers refusals with, and what its clients parse.
-      //
-      // Only the servlet side moves. The two Netty implementations of
-      // HttpInteraction that serve the DataNode build their own responses and
-      // never went through a reason phrase.
-      HttpExceptionUtils.createServletExceptionResponse(httpResponse, code,
-          new IOException(message));
+      // The message also travels in the reason phrase where the container
+      // still sends one: Jetty 9.4 does, for setStatus(int, String), and
+      // other projects run this filter on it. Jetty 12 does not. There the
+      // message reaches the caller in the error page sendError writes, and
+      // marking it asks HttpServer2's error handler to write that page for a
+      // PUT or a DELETE too, where Jetty otherwise sends no body at all.
+      httpResponse.setStatus(code, message);
+      httpRequest.setAttribute(
+          AuthenticationFilter.ERROR_MESSAGE_FOR_ANY_METHOD_ATTRIBUTE,
+          Boolean.TRUE);
+      httpResponse.sendError(code, message);
     }
   }
 }
