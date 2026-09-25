@@ -29,6 +29,8 @@ import org.apache.hadoop.security.Groups;
 import org.apache.hadoop.security.ShellBasedUnixGroupsMapping;
 import org.apache.hadoop.security.UserGroupInformation;
 import org.apache.hadoop.security.authorize.AccessControlList;
+import org.apache.hadoop.metrics2.MetricsRecordBuilder;
+import org.apache.hadoop.test.MetricsAsserts;
 import org.apache.hadoop.util.JsonUtils;
 
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -495,6 +497,21 @@ public class TestHttpServer extends HttpServerFunctionalTest {
     assertThat(conn.getResponseCode())
         .as(what + " must not be served")
         .isNotEqualTo(HttpServletResponse.SC_OK);
+  }
+
+  /**
+   * Jetty 12 has no source for the async and expiry counters, but anything
+   * that reads them by name has to keep resolving: they stay registered,
+   * reporting 0.
+   */
+  @Test
+  public void testDeprecatedAsyncMetricsStillRegistered() throws Exception {
+    MetricsRecordBuilder rb = MetricsAsserts.getMetrics(
+        "HttpServer2-" + server.getConnectorAddress(0).getPort());
+    for (String name : new String[] {"AsyncDispatches", "AsyncRequests",
+        "AsyncRequestsWaiting", "AsyncRequestsWaitingMax", "Expires"}) {
+      MetricsAsserts.assertGauge(name, 0, rb);
+    }
   }
 
   @Test

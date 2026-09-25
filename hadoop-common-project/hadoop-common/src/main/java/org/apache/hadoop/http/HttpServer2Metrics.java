@@ -32,12 +32,15 @@ import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
  * and expose them as Hadoop Metrics.
  *
  * Jetty 12 rebuilt StatisticsHandler around the core request lifecycle. The
- * dispatch counters it used to publish are now handle counters measuring the
- * same thing under a different name, and are read as such here so the metric
- * names Hadoop emits do not move. Its four async counters and its count of
- * expired async requests have no counterpart, because the core no longer sees
- * servlet async activity, so those five metrics are no longer emitted rather
- * than reported as a constant.
+ * dispatch counters it used to publish are now handle counters, and are read
+ * as such here so the metric names Hadoop emits do not move. For a request
+ * handled synchronously the two are the same; a servlet async re-dispatch,
+ * which 9.4 counted as a further dispatch, is not counted any more.
+ *
+ * Its four async counters and its count of expired async requests have no
+ * counterpart, because the core no longer sees servlet async activity. Those
+ * five metrics are still registered, so that anything that reads them by
+ * name keeps resolving, but they are deprecated and always report 0.
  */
 @InterfaceAudience.Private
 @InterfaceStability.Unstable
@@ -77,6 +80,54 @@ public class HttpServer2Metrics {
   @Metric("total time spent in dispatch handling (in ms)")
   public long dispatchedTimeTotal() {
     return handler.getHandleTimeTotal();
+  }
+  /**
+   * @return always 0.
+   * @deprecated Jetty 12 does not count async dispatches.
+   */
+  @Deprecated
+  @Metric("deprecated, always 0: Jetty 12 does not count async dispatches")
+  public int asyncDispatches() {
+    return 0;
+  }
+  /**
+   * @return always 0.
+   * @deprecated Jetty 12 does not count async requests.
+   */
+  @Deprecated
+  @Metric("deprecated, always 0: Jetty 12 does not count async requests")
+  public int asyncRequests() {
+    return 0;
+  }
+  /**
+   * @return always 0.
+   * @deprecated Jetty 12 does not count waiting async requests.
+   */
+  @Deprecated
+  @Metric("deprecated, always 0: Jetty 12 does not count waiting async"
+      + " requests")
+  public int asyncRequestsWaiting() {
+    return 0;
+  }
+  /**
+   * @return always 0.
+   * @deprecated Jetty 12 does not count waiting async requests.
+   */
+  @Deprecated
+  @Metric("deprecated, always 0: Jetty 12 does not count waiting async"
+      + " requests")
+  public int asyncRequestsWaitingMax() {
+    return 0;
+  }
+  /**
+   * @return always 0.
+   * @deprecated Jetty 12 does not count expired async requests.
+   */
+  @Deprecated
+  @Metric("deprecated, always 0: Jetty 12 does not count expired async"
+      + " requests")
+  public int expires() {
+    return 0;
   }
   @Metric("number of requests")
   public int requests() {
