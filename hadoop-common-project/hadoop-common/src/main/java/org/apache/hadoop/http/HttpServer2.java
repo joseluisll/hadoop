@@ -1027,21 +1027,24 @@ public final class HttpServer2 implements FilterContainer {
     boolean logsEnabled = conf.getBoolean(
         CommonConfigurationKeys.HADOOP_HTTP_LOGS_ENABLED,
         CommonConfigurationKeys.HADOOP_HTTP_LOGS_ENABLED_DEFAULT);
-    // Jetty 9.4 let a context start on a base resource that was not there and
-    // served 404s from it. Jetty 12 rejects it in ContextHandler#doStart, which
-    // turns a missing log directory into a server that will not come up at all,
-    // so the context is left out rather than allowed to fail the daemon. The
-    // endpoint answers 404 either way.
-    if (logDir != null && logsEnabled && !new File(logDir).isDirectory()) {
-      LOG.warn("Not adding the /logs context: hadoop.log.dir is set to {},"
-          + " which is not a directory.", logDir);
-      logsEnabled = false;
-    }
     if (logDir != null && logsEnabled) {
       ServletContextHandler logContext =
           new ServletContextHandler(parent, "/logs");
-      logContext.setResourceBase(logDir);
-      logContext.addServlet(AdminAuthorizedServlet.class, "/*");
+      if (new File(logDir).isDirectory()) {
+        logContext.setResourceBase(logDir);
+        logContext.addServlet(AdminAuthorizedServlet.class, "/*");
+      } else {
+        // Jetty 9.4 let a context start on a base resource that was not there
+        // and served 404s from it, behind the same admin check. Jetty 12
+        // rejects a missing base resource in ContextHandler#doStart, which
+        // would stop the daemon coming up at all. So the context keeps its
+        // place, its filters and its admin check, and only the resource base
+        // is left out: a non-admin is still refused and an admin still gets
+        // a 404, as before.
+        LOG.warn("hadoop.log.dir is set to {}, which is not a directory;"
+            + " /logs will answer 404.", logDir);
+        logContext.addServlet(MissingLogDirServlet.class, "/*");
+      }
       if (conf.getBoolean(
           CommonConfigurationKeys.HADOOP_JETTY_LOGS_SERVE_ALIASES,
           CommonConfigurationKeys.DEFAULT_HADOOP_JETTY_LOGS_SERVE_ALIASES)) {
@@ -1584,6 +1587,25 @@ public final class HttpServer2 implements FilterContainer {
           "Jetty reported no error but did not bind " + listener);
     }
     LOG.info("Jetty bound to port " + listener.getLocalPort());
+  }
+
+  /**
+   * Serves /logs when hadoop.log.dir is not a directory: the admin check
+   * {@link AdminAuthorizedServlet} makes, then the 404 its DefaultServlet
+   * would have answered with for a resource that is not there. Public only so
+   * that the container can instantiate it.
+   */
+  @InterfaceAudience.Private
+  public static class MissingLogDirServlet extends HttpServlet {
+    private static final long serialVersionUID = 1L;
+
+    @Override
+    protected void doGet(HttpServletRequest request,
+        HttpServletResponse response) throws IOException {
+      if (hasAdministratorAccess(getServletContext(), request, response)) {
+        response.sendError(HttpServletResponse.SC_NOT_FOUND);
+      }
+    }
   }
 
   /**

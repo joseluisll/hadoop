@@ -56,6 +56,7 @@ import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletRequestWrapper;
 import javax.servlet.http.HttpServletResponse;
 import javax.ws.rs.core.MediaType;
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.lang.reflect.Field;
@@ -728,7 +729,59 @@ public class TestHttpServer extends HttpServerFunctionalTest {
     }
     myServer.stop();
   }
-  
+
+  /**
+   * With hadoop.log.dir pointing nowhere, /logs still sits behind the admin
+   * check: a non-admin is refused and an admin is told there is nothing there,
+   * which is what Jetty 9.4 answered. Jetty 12 will not start a context on a
+   * missing base resource, and dropping the context instead would let the
+   * request fall through to the root webapp without the check.
+   */
+  @Test
+  public void testLogsWithMissingLogDirStillCheckAdminAccess()
+      throws Exception {
+    Configuration conf = new Configuration();
+    conf.setBoolean(CommonConfigurationKeys.HADOOP_SECURITY_AUTHORIZATION,
+        true);
+    conf.set(HttpServer2.FILTER_INITIALIZER_PROPERTY,
+        DummyFilterInitializer.class.getName());
+    // The group mapping is a process-wide singleton, created by whichever
+    // test gets there first; give it the mapping the other tests expect.
+    conf.set(CommonConfigurationKeys.HADOOP_SECURITY_GROUP_MAPPING,
+        MyGroupsProvider.class.getName());
+    Groups.getUserToGroupsMappingService(conf);
+
+    String savedLogDir = System.getProperty("hadoop.log.dir");
+    System.setProperty("hadoop.log.dir",
+        new File(GenericTestUtils.getTestDir(), "no-such-log-dir")
+            .getAbsolutePath());
+    HttpServer2 myServer;
+    try {
+      myServer = new HttpServer2.Builder().setName("test")
+          .addEndpoint(new URI("http://localhost:0")).setFindPort(true)
+          .setConf(conf).setACL(new AccessControlList("userA")).build();
+    } finally {
+      if (savedLogDir == null) {
+        System.clearProperty("hadoop.log.dir");
+      } else {
+        System.setProperty("hadoop.log.dir", savedLogDir);
+      }
+    }
+    myServer.setAttribute(HttpServer2.CONF_CONTEXT_ATTRIBUTE, conf);
+    myServer.start();
+    try {
+      String logsURL = "http://"
+          + NetUtils.getHostPortString(myServer.getConnectorAddress(0))
+          + "/logs/";
+      assertEquals(HttpURLConnection.HTTP_NOT_FOUND,
+          getHttpStatusCode(logsURL, "userA"));
+      assertEquals(HttpURLConnection.HTTP_FORBIDDEN,
+          getHttpStatusCode(logsURL, "userE"));
+    } finally {
+      myServer.stop();
+    }
+  }
+
   @Test
   public void testRequestQuoterWithNull() throws Exception {
     HttpServletRequest request = Mockito.mock(HttpServletRequest.class);
