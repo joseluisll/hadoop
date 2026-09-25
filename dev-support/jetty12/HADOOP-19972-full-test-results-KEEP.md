@@ -28,7 +28,27 @@ Status: **run 2 in progress**. Run 1 was stopped at 19:31Z because most of its f
 - **Commands:** `./mvnw test -fn -Dmaven.test.failure.ignore=true -Drequire.test.libhadoop=true -Dcheckstyle.skip -Dspotbugs.skip -Dmaven.javadoc.skip`, one wave of modules at a time. `-fn` means a failing module no longer causes its dependents to be skipped. Every failing test class is then re-run on plain trunk in the same environment.
 
 ## Run 2: results
-Not started yet: the build is running.
+### Build
+`install -DskipTests` (whole reactor) as `builder`: **PASS** in 13 min 26 s. `libhadoop.so` is built with `-Pnative` in hadoop-common.
+
+### Environment check
+Before the full run, ten of the classes that failed in run 1 for environmental reasons were re-run in the run-2 environment. **All pass: 10 classes, 285 tests, 0 failures, 0 errors.**
+
+| Class | Run 1 cause | Run 2 |
+|---|---|---|
+| `util.TestNativeCodeLoader` | no libhadoop | 1/1 |
+| `util.TestDiskChecker` | root | 14/14 |
+| `util.TestBasicDiskValidator` | root | 14/14 |
+| `fs.TestFileUtil` | root | 50/50 |
+| `fs.TestLocalDirAllocator` | root | 48/48 |
+| `nodemanager.TestDirectoryCollection` | disk "90% full" | 9/9 |
+| `nodemanager.TestLocalDirsHandlerService` | disk "90% full" | 3/3 |
+| `nodemanager.health.TestNodeHealthCheckerService` | disk "90% full" | 3/3 |
+| `nodemanager.webapp.TestNMWebServices` | disk "90% full" | 19/19 |
+| `nodemanager.containermanager.linux.runtime.TestDockerContainerRuntime` | root ("uid: 0 below threshold") | 124/124 |
+
+### Steps
+The steps run in order: shadedclient, wave 1 (the 23 web-facing modules), wave 2 (hadoop-hdfs, yarn-server-resourcemanager, hadoop-hdfs-rbf and mapreduce-client-jobclient), then wave 3 (all remaining modules). A watchdog kills any test JVM that makes no progress for 20 minutes, after taking a thread dump, and records it here as a hang. Results follow as each step finishes.
 
 ---
 
@@ -95,3 +115,4 @@ All of the `hadoop-common` failures below are in file-permission, disk-check or 
 - 2026-09-25T19:28Z: wave 1 finished. 12 modules were clean; hadoop-common has 37 failures (environment); nodemanager has 58 F and 62 E (environment and container executor), plus 1 hang; 8 modules were skipped behind nodemanager. Switched the tree to jetty12-keep-behaviour + trunk; rebuild and wave 1b (hadoop-common plus the 8 skipped modules) started.
 - 2026-09-25T19:31Z: run 1 stopped at the user's request; most failures were environmental. Wave 1b was cancelled.
 - 2026-09-25T19:36Z: run 2 set up: non-root `builder` user, tree on /dev/shm, `libhadoop.so` via `-Pnative`. Full build started.
+- 2026-09-25T19:55Z: run 2 build passed; libhadoop built; the environment check passed (10 classes, 285 tests). Started shadedclient and waves 1 to 3, plus the hang watchdog.
