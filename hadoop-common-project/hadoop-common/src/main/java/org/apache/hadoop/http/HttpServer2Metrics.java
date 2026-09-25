@@ -17,6 +17,8 @@
  */
 package org.apache.hadoop.http;
 
+import java.util.concurrent.TimeUnit;
+
 import org.eclipse.jetty.server.handler.StatisticsHandler;
 import org.eclipse.jetty.util.thread.QueuedThreadPool;
 
@@ -38,6 +40,10 @@ import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
  * expired async requests have no counterpart, because the core no longer sees
  * servlet async activity, so those five metrics are no longer emitted rather
  * than reported as a constant.
+ *
+ * Jetty 12 also records every time statistic in nanoseconds, where 9.4
+ * recorded milliseconds. The metrics below are documented, and have always
+ * been published, in milliseconds, so they are converted on the way out.
  */
 @InterfaceAudience.Private
 @InterfaceStability.Unstable
@@ -64,19 +70,19 @@ public class HttpServer2Metrics {
   }
   @Metric("maximum time spend in dispatch handling (in ms)")
   public long dispatchedTimeMax() {
-    return handler.getHandleTimeMax();
+    return nanosToMillis(handler.getHandleTimeMax());
   }
   @Metric("mean time spent in dispatch handling (in ms)")
   public double dispatchedTimeMean() {
-    return handler.getHandleTimeMean();
+    return nanosToMillis(handler.getHandleTimeMean());
   }
   @Metric("standard deviation for dispatch handling (in ms)")
   public double dispatchedTimeStdDev() {
-    return handler.getHandleTimeStdDev();
+    return nanosToMillis(handler.getHandleTimeStdDev());
   }
   @Metric("total time spent in dispatch handling (in ms)")
   public long dispatchedTimeTotal() {
-    return handler.getHandleTimeTotal();
+    return nanosToMillis(handler.getHandleTimeTotal());
   }
   @Metric("number of requests")
   public int requests() {
@@ -92,19 +98,19 @@ public class HttpServer2Metrics {
   }
   @Metric("maximum time spend handling requests (in ms)")
   public long requestTimeMax() {
-    return handler.getRequestTimeMax();
+    return nanosToMillis(handler.getRequestTimeMax());
   }
   @Metric("mean time spent handling requests (in ms)")
   public double requestTimeMean() {
-    return handler.getRequestTimeMean();
+    return nanosToMillis(handler.getRequestTimeMean());
   }
   @Metric("standard deviation for request handling (in ms)")
   public double requestTimeStdDev() {
-    return handler.getRequestTimeStdDev();
+    return nanosToMillis(handler.getRequestTimeStdDev());
   }
   @Metric("total time spend in all request handling (in ms)")
   public long requestTimeTotal() {
-    return handler.getRequestTimeTotal();
+    return nanosToMillis(handler.getRequestTimeTotal());
   }
   @Metric("number of requests with 1xx response status")
   public int responses1xx() {
@@ -202,5 +208,13 @@ public class HttpServer2Metrics {
 
   void remove() {
     DefaultMetricsSystem.removeSourceName("HttpServer2-" + port);
+  }
+
+  private static long nanosToMillis(long nanos) {
+    return TimeUnit.NANOSECONDS.toMillis(nanos);
+  }
+
+  private static double nanosToMillis(double nanos) {
+    return nanos / TimeUnit.MILLISECONDS.toNanos(1);
   }
 }
