@@ -60,7 +60,8 @@ All of the `hadoop-common` failures below are in file-permission, disk-check or 
   - `util.TestDiskChecker`, `util.TestBasicDiskValidator`, `util.TestReadWriteDiskValidator`
   - `metrics2.sink.TestRollingFileSystemSinkWithLocal`
 - **No native library:** `util.TestNativeCodeLoader` reports "libhadoop.so testing was required, but libhadoop.so was not loaded".
-- **hadoop-yarn-server-nodemanager** (still running): `TestLinuxContainerExecutorWithMocks`, `TestNodeStatusUpdater`, `amrmproxy.TestFederationInterceptor`. Not yet examined.
+- **hadoop-yarn-server-nodemanager** (still running): `TestDirectoryCollection`, `TestLinuxContainerExecutorWithMocks`, `TestNodeStatusUpdater`, `amrmproxy.TestFederationInterceptor`, `launcher.TestContainerLaunch`, `linux.resources.TestCGroupsHandlerImpl`, `linux.runtime.TestDockerContainerRuntime`, `linux.runtime.docker.TestDockerClient`, `logaggregation.TestLogAggregationService`, `scheduler.TestContainerSchedulerOppContainersByResources`, `scheduler.TestContainerSchedulerQueuing` and `health.TestNodeHealthCheckerService`. Not yet examined. Several involve Linux container executors, cgroups and Docker, which depend on the environment.
+- **Hang:** `localizer.TestResourceLocalizationService`. `testLocalizerHeartbeatWhenAppCleaningUp` busy-waited in `DummyExecutor.waitForLocalizers` (a `Thread.yield()` loop, `TestResourceLocalizationService.java:1112`) for 20 minutes at 100% CPU with no output. JUnit's same-thread timeout cannot interrupt that loop. The test JVM was killed at 19:18Z so the wave could continue. This is a test-side busy wait in the localizer, with no HTTP or Jetty involvement; it will be compared with trunk.
 
 ## Wave 2: hadoop-hdfs, yarn-server-resourcemanager, hadoop-hdfs-rbf, mapreduce-client-jobclient
 Not started.
@@ -74,3 +75,4 @@ Not started.
 ## Progress log
 - 2026-09-25T17:48Z: full build and shadedclient passed; wave 1 started.
 - 2026-09-25T18:44Z: wave 1 on module 13 of 23 (nodemanager). 12 modules done; the only failures are the environment-looking ones above.
+- 2026-09-25T19:18Z: nodemanager hung in `TestResourceLocalizationService` (see above). Its test JVM was killed and the module continued.
