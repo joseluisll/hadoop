@@ -17,27 +17,41 @@
 
 # HADOOP-19972 — full build and test results (keep path)
 
-Status: **in progress**. This file is updated as each test wave finishes and replaced by a final summary when the run is complete.
+Status: **run 2 in progress**. Run 1 was stopped at 19:31Z because most of its failures came from the test environment, not the code (see "Run 1: superseded" below). Run 2 starts over in a corrected environment. This file is updated as each step finishes.
 
-## What is tested
-- **Build, shadedclient and wave 1:** `jetty-phase-c` @ `056c5623` merged with apache/trunk @ `90f0d1da`. That is PR [apache/hadoop#8704](https://github.com/apache/hadoop/pull/8704) as CI would merge it.
-- **From wave 2 on:** `jetty12-keep-behaviour` merged with the same trunk. It is the PR plus the four keep-path commits, which change only `hadoop-common`, so `hadoop-common` is re-run on this tree.
-- **Environment:** a Claude Code cloud container with 4 CPUs, 15 GB RAM and JDK 21.0.10, using the repo's `./mvnw` (Maven 3.9.15). Tests run **as root**, and **without native libraries** (`libhadoop.so` is not built).
-- **Command:** `./mvnw test -fae -Dmaven.test.failure.ignore=true -Dcheckstyle.skip -Dspotbugs.skip -Dmaven.javadoc.skip`, one wave of modules at a time. Every failing test class is then re-run on plain trunk, to separate regressions from failures trunk already has.
+## Run 2: what is tested
+- **Tree:** `jetty12-keep-behaviour` @ `618f27c5`, merged with apache/trunk @ `90f0d1da`. That is PR [apache/hadoop#8704](https://github.com/apache/hadoop/pull/8704) (`jetty-phase-c` @ `056c5623`), plus the four keep-path commits and the metrics units fix `1800f323`.
+- **Environment:** a Claude Code cloud container with 4 CPUs, 15 GB RAM and JDK 21.0.10, using the repo's `./mvnw` (Maven 3.9.15). Three corrections from run 1:
+  1. **Non-root.** Maven and every test JVM run as an unprivileged user (`builder`, uid 1001), as in Hadoop's CI image.
+  2. **Disk headroom.** The tree is on `/dev/shm` (a 16 GB tmpfs, nearly empty). On the container's root disk, Java sees 24.7 GB usable out of 252 GB total, which reads as 90.2% full. The NodeManager's disk health checker (`max-disk-utilization-per-disk-percentage` = 90.0) therefore rejected every local directory.
+  3. **Native library.** `libhadoop.so` is built with `-Pnative` in hadoop-common, and tests run with `-Drequire.test.libhadoop=true`, as CI's native build does. Every module's test JVM finds it through `LD_LIBRARY_PATH`. The C/C++ HDFS client (`hadoop-hdfs-native-client`'s libhdfs++) is not built natively: it needs Boost 1.86 and protobuf 3.25 with abseil compiled from source, and its tests are C/C++ tests that do not involve Jetty.
+- **Commands:** `./mvnw test -fn -Dmaven.test.failure.ignore=true -Drequire.test.libhadoop=true -Dcheckstyle.skip -Dspotbugs.skip -Dmaven.javadoc.skip`, one wave of modules at a time. `-fn` means a failing module no longer causes its dependents to be skipped. Every failing test class is then re-run on plain trunk in the same environment.
 
-## Build and packaging
+## Run 2: results
+Not started yet: the build is running.
+
+---
+
+# Run 1: superseded
+Run 1 tested `jetty-phase-c` @ `056c5623` merged with apache/trunk @ `90f0d1da`, **as root, on the container's root disk, without native libraries**. The build (119/119 modules) and the shadedclient checks passed; their results are below. The unit test failures were dominated by the environment:
+- **Root:** tests that expect a permission denial got none: hadoop-common's disk-checker and file-permission tests. In the NodeManager, `TestDockerContainerRuntime` failed with "uid: 0 below threshold: 1" (50 errors), and `TestNodeManagerReboot` expected a non-root user cache.
+- **Disk "90% full":** the NodeManager rejected all local directories. This caused `TestDirectoryCollection`, `TestLocalDirsHandlerService`, `TestNodeHealthCheckerService`, `TestNMWebServices` (before any HTTP request) and `TestLinuxContainerExecutorWithMocks` to fail, and probably most container-lifecycle failures that followed.
+- **No `libhadoop.so`:** `TestNativeCodeLoader` failed. Without `-Drequire.test.libhadoop`, Maven passes the literal `${require.test.libhadoop}`, which the test reads as "required".
+- A hang in `TestResourceLocalizationService` had to be killed. That made Maven treat the NodeManager as failed and skip its 8 dependents.
+
+## Run 1: build and packaging
 | Check | Result |
 |---|---|
 | `install -DskipTests`, whole reactor | **PASS**: 119/119 modules, 17 min 48 s |
 | shadedclient: `hadoop-client-check-invariants` and `-check-test-invariants` | **PASS** |
 | shadedclient: `hadoop-client-integration-tests` | **PASS**: `ITUseMiniCluster` 2/2 and `ITUseHadoopCodecs` 3/3 |
 
-## Keep-path commits (`jetty12-keep-behaviour`)
+## Keep-path commits (`jetty12-keep-behaviour`): tests on the branch itself
 Run on the keep branch itself: `TestHttpServer` 39/39, `TestHttpServerLogs` 4/4 and `TestCommonConfigurationFields` 4/4 pass. Each of the four commits compiles on its own, tests included.
 
 Added afterwards: `1800f323` fixes a units bug in the PR itself. `HttpServer2Metrics` published Jetty 12's nanosecond request and dispatch times under their "(in ms)" names, so they read a million times too high. With the fix, `TestHttpServer2Metrics` passes 2/2 and `TestHttpServer` 39/39, including a real-server check that `requestTimeMax` and `dispatchedTimeMax` are plausible milliseconds. Without the conversion all three checks fail.
 
-## Wave 1: web-facing modules (23), finished 19:28Z (1 h 41 min)
+## Run 1, wave 1: web-facing modules (as root, no native, root disk)
 | Module | Run | Failures | Errors | Skipped |
 |---|---|---|---|---|
 | hadoop-auth | 186 | 0 | 0 | 0 |
@@ -73,18 +87,11 @@ All of the `hadoop-common` failures below are in file-permission, disk-check or 
   - All are for the trunk comparison.
 - **Hang:** `localizer.TestResourceLocalizationService`. `testLocalizerHeartbeatWhenAppCleaningUp` busy-waited in `DummyExecutor.waitForLocalizers` (a `Thread.yield()` loop, `TestResourceLocalizationService.java:1112`) for 20 minutes at 100% CPU with no output. JUnit's same-thread timeout cannot interrupt that loop. The test JVM was killed at 19:18Z so the wave could continue. This is a test-side busy wait in the localizer, with no HTTP or Jetty involvement; it will be compared with trunk.
 
-## Wave 2: hadoop-hdfs, yarn-server-resourcemanager, hadoop-hdfs-rbf, mapreduce-client-jobclient
-Not started.
-
-## Wave 3: all remaining modules
-Not started.
-
-## Comparison with trunk
-Not started.
-
-## Progress log
+# Progress log
 - 2026-09-25T17:48Z: full build and shadedclient passed; wave 1 started.
 - 2026-09-25T18:44Z: wave 1 on module 13 of 23 (nodemanager). 12 modules done; the only failures are the environment-looking ones above.
 - 2026-09-25T19:18Z: nodemanager hung in `TestResourceLocalizationService` (see above). Its test JVM was killed and the module continued.
 - 2026-09-25T19:23Z: metrics units fix `1800f323` pushed to jetty12-keep-behaviour. The keep-branch tree tested from wave 1b on includes it.
 - 2026-09-25T19:28Z: wave 1 finished. 12 modules were clean; hadoop-common has 37 failures (environment); nodemanager has 58 F and 62 E (environment and container executor), plus 1 hang; 8 modules were skipped behind nodemanager. Switched the tree to jetty12-keep-behaviour + trunk; rebuild and wave 1b (hadoop-common plus the 8 skipped modules) started.
+- 2026-09-25T19:31Z: run 1 stopped at the user's request; most failures were environmental. Wave 1b was cancelled.
+- 2026-09-25T19:36Z: run 2 set up: non-root `builder` user, tree on /dev/shm, `libhadoop.so` via `-Pnative`. Full build started.
