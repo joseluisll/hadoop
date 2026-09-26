@@ -62,17 +62,24 @@ commit per change, with focused tests.
 | 2 | `/topology` 200-truncated → 410 (efb2fe80) | **Revert**; propose as a separate JIRA | aba2b9da |
 | 3 | RENEW refusal → JSON envelope (cae23348, 11565602) | **Revert** to trunk's throw | e27d587a |
 | 4 | Error page for every method, webapp only (cae23348, 5c57e6e5) | **Narrow**: body only for errors whose phrase was lost; same on all contexts | b9136180 |
-| 5 | `UriCompliance` with 3 violations allowed (e8c1b4a5, 590adb9c, 05230755) | **Keep** (strictly narrower than 9.4); fix comment; release-note it; optional config key | 73bb1b5f (comment only) |
-| 6 | `/logs` dropped when log dir missing (cae23348) | **Revert** to 9.4 answers (403 non-admin / 404 admin) | 173fa546 |
+| 5 | `UriCompliance` with 3 violations allowed (e8c1b4a5, 590adb9c, 05230755) | **Keep** (strictly narrower than 9.4); fix comment; release-note it; config key | 73bb1b5f (comment), f14e02fc (key) |
+| 6 | `/logs` dropped when log dir missing (cae23348) | **Revert** to 9.4 answers (403 non-admin / 404 admin) | 173fa546, d3e56649 (POST) |
 | 7 | 5 async metrics deleted; `dispatched*` re-sourced (cae23348) | **Revert** the deletion (publish as 0); keep the re-sourcing; **fix nanosecond regression** | 82ac101e, f2a9c13d |
 
-Two further problems turned up along the way; see §8.
+Four further problems turned up along the way; see §8.
 
 * A **regression the review missed**: eight time metrics are published in
   nanoseconds under "(in ms)" descriptions. Fixed in f2a9c13d.
 * `AuthenticationFilter`'s `setStatus(code, reason)` had been removed. It is
   now **restored**, which is harmless on Jetty 12 and keeps the phrase for
   other containers. Done in b9136180.
+* The app catalog war had been moved from Jetty 9.4.58 to 9.4.44. Fixed in
+  607376b9.
+* New clients quoted Jetty's whole error page as the reason. Fixed in
+  a2c576a9.
+
+Every revert was then checked on live clusters against trunk on Jetty 9.4,
+request by request (§11).
 
 ---
 
@@ -112,8 +119,10 @@ lines 520-541 and `HttpExceptionUtils.getResponseDetail`, from a5141ec9 and
 The one remaining gap is F2: a refused **PUT or DELETE** (for example WebHDFS
 `MKDIRS`) has no body on Jetty 12, so the message would be lost entirely.
 That is covered by the narrowed error handler of §4, which the filter asks for
-by setting a request attribute. Result: the same body and content type as
-trunk for every method, only without the phrase.
+by setting a request attribute. Result: for GET and POST, the same body and
+content type as trunk, only without the phrase; for PUT and DELETE, which had
+no body on trunk, the HTML error page that now carries the message instead of
+the phrase (measured on a live cluster, §11).
 
 Trunk's Jetty-specific `setStatusWithReason` is replaced by the Servlet-API
 `setStatus(code, message)`, which on 9.4 delegates to it (F3) and on Jetty 12
@@ -318,37 +327,60 @@ perimeter.
 * This analysis is from source. No reproducer was attempted, and none is
   claimed.
 
+**Measured on live clusters** (WebHDFS `GETFILESTATUS`, trunk on Jetty 9.4
+against this branch; the 404s are JSON `FileNotFoundException`s, which show the
+decoded path):
+
+| Path segment | trunk | branch |
+|---|---|---|
+| `//tmp//j12//hello.txt`, `a%25b`, `a%5Cb`, `sp%20ace`, `plus+sign`, `semi%3Bcolon`, `semi;colon`, CJK, `a%252Fb`, `a%0Ab`, `a%7Fb`, `../` | 200 or 404 | the same |
+| `tmp%2Fj12/hello.txt` | **200** (decoded to a separator) | **400** Ambiguous URI path separator |
+| `%2E`, `%2E%2E` | 404 (taken literally) | 400 Ambiguous URI path segment |
+| `a%C0%AFb`, `a%E2%82b` | 404 | 400 Bad UTF-8 encoding |
+| `a%u0041b` | 404 | 400 UTF-16 encoding |
+| `..;`, `a%00b`, `a%GGb` | 400 | 400 (Jetty 12 error page) |
+
+Only `%2F` worked on trunk and is refused now; the other refusals replace a
+404 for a name that could not exist.
+
 **Option A, keep (recommended).**
 
 * Correct the comment. Done in 73bb1b5f, with no behaviour change.
+* Make the set configurable. Done in f14e02fc:
+  `hadoop.http.uri.compliance.violations`, documented in `core-default.xml`,
+  defaults to the three violations above, refuses an unknown name at startup,
+  and an empty value applies Jetty's DEFAULT mode.
 * Release-note it: "Requests whose path contains `%2F`, `%2E` segments,
   `%uXXXX`, malformed UTF-8 or percent-encoding, user-info or a fragment are
   now rejected with 400 at the connector."
-* Optionally add a documented key, for example
-  `hadoop.http.uri.compliance.violations` (not prototyped). It would default
-  to the three, and let an operator tighten the setting (drop
-  `SUSPICIOUS_PATH_CHARACTERS` if no file names contain `\`) or loosen it (to
-  Jetty's `LEGACY` for a client that sends `%2F`).
-* Add a test that `%0A` is still accepted, or deliberately stop accepting it.
-  Whichever is chosen should be a decision rather than a side effect.
+* The key lets an operator tighten the setting (drop
+  `SUSPICIOUS_PATH_CHARACTERS` if no file names contain `\`) or loosen it for
+  a client that sends `%2F` (see Option B for what that takes).
+* `%0A` and `%7F` are still accepted, as on trunk: measured above, and
+  covered by the key's tests in f14e02fc.
 
 **Option B, revert to 9.4.** `UriCompliance.LEGACY`, or `UNSAFE` plus
 `AMBIGUOUS_PATH_PARAMETER`, comes closest. That would re-admit `%2F` and
-`%2E` ambiguity for no functional gain, and `testAmbiguousPathsAreStillRejected`
-(from 590adb9c) would fail. Not recommended. Whether the ee8 servlet layer
-would even accept ambiguous URIs through `getPathInfo` under `LEGACY` is
-**unverified**.
+`%2E` ambiguity for everyone, and `testAmbiguousPathsAreStillRejected`
+(from 590adb9c) would fail. Not recommended as the default. The one piece of
+it that did something on trunk, `%2F`, is available per deployment instead:
+adding `AMBIGUOUS_PATH_SEPARATOR` to `hadoop.http.uri.compliance.violations`
+lets it through the connector and the ee8 servlet layer. Measured on a live
+NameNode: `tmp%2Fj12/hello.txt` and `j12%2Fhello.txt` then answer 200 with the
+file's status, as on trunk, while `%2E%2E` stays refused. `core-default.xml`
+says so.
 
 **Narrower middle.** Allow `%5C` but not control characters. Jetty offers no
 finer switch than the whole violation, so this would need a
 `HttpConfiguration.Customizer` that rejects encoded controls. That is
 stricter than trunk, so it is a behaviour change of its own.
 
-**Downstream.** A client that sends `%2F` in a WebHDFS path, or relies on
-`..;`, now gets 400 from the connector with no body. Knox and other gateways
-that re-encode paths are the most likely to notice; see §9.
+**Downstream.** A client that sends `%2F` in a WebHDFS path now gets 400
+from the connector with Jetty's error page, where trunk decoded it to a
+separator and answered 200. `..;` was already refused on trunk. Knox and
+other gateways that re-encode paths are the most likely to notice; see §9.
 
-**Recommendation: A (keep), plus a release note and an optional config key.**
+**Recommendation: A (keep), plus a release note; the config key is done.**
 Effort: small. Risk: low.
 
 ## 6. `/logs` dropped when `hadoop.log.dir` is missing
@@ -368,7 +400,9 @@ everyone, with no ACL check**, and whatever the root webapp maps under
 **Option B, revert.** Possible with no loss. Keep the context, its filters and
 its admin check, and leave only the base resource out, which F7 allows. A
 small `MissingLogDirServlet` then runs `hasAdministratorAccess` and answers
-404. The answers are exactly trunk's. A new test
+404. The answers are exactly trunk's, for POST too: trunk's DefaultServlet
+answers a POST as a GET, and d3e56649 makes the servlet do the same rather
+than answer HttpServlet's 405. A new test
 (`testLogsWithMissingLogDirStillCheckAdminAccess`) covers admin → 404 and
 non-admin → 403. It also sets up the `Groups` singleton the same way the
 neighbouring test does, because an earlier version of it poisoned
@@ -403,12 +437,15 @@ behaviour back.
 names.
 
 **Option B, revert.** The names can be restored, the values cannot. Publishing
-them as `0` keeps every name resolvable. It is also *what 9.4 reported for
-Hadoop's own daemons*: no Hadoop servlet starts an async request (a `git grep`
-for `startAsync`, `AsyncContext`, `@Suspended` and `asyncSupported` over main
-code finds none). An embedder that did use servlet async would read 0 where it
-used to read a count. The descriptions say "always 0 since Jetty 12". The
-nanosecond fix converts on the way out.
+them as `0` keeps every name resolvable. The value does change: no Hadoop
+servlet starts an async request itself (a `git grep` for `startAsync`,
+`AsyncContext`, `@Suspended` and `asyncSupported` over main code finds none),
+but Jetty 9.4's DefaultServlet sends static files asynchronously, and each of
+those counted. On the live 9.4 cluster the NameNode read `AsyncRequests` 3 and
+`AsyncRequestsWaitingMax` 1 after serving a few web UI files; on Jetty 12 they
+read 0. The descriptions say "always 0 since Jetty 12", and a dashboard that
+graphs them sees a flat line rather than a missing series. The nanosecond fix
+converts on the way out.
 
 **Recommendation: B for the names (82ac101e), keep the `dispatched*`
 re-sourcing, and fix the units (f2a9c13d).** Effort: trivial. Risk: none.
@@ -428,9 +465,24 @@ Covered by the new `TestHttpServer2Metrics`.
   the topology commit. If efb2fe80 is dropped upstream rather than reverted,
   the hunk must move to 279a1b3b.
 * **The ErrorHandler lost `showStacks` parity on the default contexts.**
-  Moot: the prototype leaves `/logs` and `/static` at Jetty's default
-  (`showStacks=true` in both versions: 9.4 `ErrorHandler.java:70`, 12
+  Moot: `/logs` and `/static` now get the narrowed handler of §4, but keep
+  Jetty's default `showStacks=true` (9.4 `ErrorHandler.java:70`, 12
   `ee8/nested/ErrorHandler.java:62`), exactly as trunk did.
+* **The app catalog was moved to an older Jetty.** 279a1b3b put the catalog
+  webapp on `solr.jetty.version` = 9.4.44.v20210927, the release Solr 8.11.2
+  was built against, so `app.war` shipped a 2021 Jetty where trunk shipped
+  9.4.58, and the module's test classpath mixed the two. Nothing needed
+  9.4.44. 607376b9 sets 9.4.58.v20250814 and imports the jetty-bom of the same
+  release, so every Jetty artifact in the module resolves to it; the war then
+  holds only 9.4.58 jars, and the module's 19 tests pass.
+* **Client messages quoted the whole error page.** The body readers of
+  a5141ec9/1cad208f flattened Jetty's error page, so a refused WebHDFS mkdir
+  read `message=Error 400 Missing Required Header… HTTP ERROR 400 Missing
+  Required Header… URI: … STATUS: 400 MESSAGE: … SERVLET: …`, against
+  trunk's `message=Missing Required Header for CSRF Vulnerability
+  Protection`; so did a GET or POST refusal from a 9.4 server. a2c576a9 takes
+  the page's MESSAGE row, which Jetty renders on 9.4 and 12 alike, and gives
+  back exactly trunk's text (measured, §11).
 
 ## 9. Downstream impact
 
@@ -519,8 +571,10 @@ There are three ways a change here can reach a downstream:
   * No downstream code was found emitting `%2F`, `%2E%2E`, `%5C` or `%25` in
     a WebHDFS or HttpFS path.
   * **Whether Knox forwards `%2F` to the NameNode still encoded is
-    UNVERIFIED.** If it does, those requests get 400 on the branch. This is
-    the strongest argument for the optional config key in §5.
+    UNVERIFIED.** If it does, those requests get 400 on the branch by
+    default. Adding `AMBIGUOUS_PATH_SEPARATOR` to
+    `hadoop.http.uri.compliance.violations` restores trunk's answer (§5,
+    measured).
 * **A side effect of the forced reader change, not one of the seven.**
   `KMSClientProvider` now reads a 403's reason from the body (1cad208f).
   * Ranger KMS runs on Tomcat, which never sends a reason phrase. So trunk's
@@ -546,16 +600,30 @@ There are three ways a change here can reach a downstream:
 2. **Narrow** 4 (error bodies only where the phrase was lost, on every
    context).
 3. **Keep and document** 5 (`UriCompliance`): fix the comment, add a release
-   note, and optionally add a config key.
+   note, and make it configurable (done).
 4. **Revert the deletion** in 7 and **fix the nanosecond regression**.
 
-With these, what remains different from trunk on the wire is:
+With these, what remains different from trunk on the wire - measured by
+recording the same 85 requests against a trunk (Jetty 9.4) cluster and this
+branch (§11) - is:
 
 * **forced:** no custom reason phrase;
-* **compensation for that:** marked PUT/DELETE refusals from the auth and
-  CSRF filters carry an HTML body;
-* **stricter URI parsing:** as listed in §5;
-* **metrics:** the five async metrics read a constant 0.
+* **compensation for that:** marked PUT/DELETE refusals from the
+  authentication, KMS and CSRF filters carry an HTML body, and a refused image
+  transfer carries its reason as `text/plain`;
+* **stricter URI parsing:** as listed in §5, with `%2F` recoverable through
+  `hadoop.http.uri.compliance.violations`;
+* **metrics:** the five async metrics read a constant 0; the default number
+  of acceptor threads is Jetty 12's (1 on a 16-core host, where 9.4 chose 2),
+  still set by `hadoop.http.acceptor.count`;
+* **Jetty's own output:** the error page and the `/logs` listing are Jetty
+  12's markup; static files gain `charset=utf-8` and `Vary: Accept-Encoding`;
+  error responses now carry a `Date` header, twice, as trunk's 200s already
+  did (Jetty's and `NoCacheFilter`'s);
+* **client messages:** a new client reads a refusal's reason from the body
+  when the phrase is canonical, so against a Jetty 12 server it reports the
+  same text trunk reported; an old client reports the canonical phrase, for
+  example `Bad Request` (forced).
 
 Each of these needs a release note on the JIRA. It is worth flagging the
 change **Incompatible** because of the reason phrase alone: every client that
@@ -577,6 +645,12 @@ On top of `jetty-phase-c` (056c5623), as prototyped:
 | 7 | aba2b9da | topology back to trunk (§2) |
 | 8 | 73bb1b5f | `UriCompliance` comment (§5) |
 | 9 | (this document) | |
+| 10 | 607376b9 | app catalog on Jetty 9.4.58, not 9.4.44 (§8) |
+| 11 | f14e02fc | `hadoop.http.uri.compliance.violations` (§5) |
+| 12 | d3e56649 | POST to `/logs` with a missing log dir (§6) |
+| 13 | ab1a3774 | async metrics comment corrected (§7) |
+| 14 | a2c576a9 | client messages take the error page's MESSAGE row (§8) |
+| 15 | 107c4897 | `core-default.xml`: how to accept `%2F` again (§5) |
 
 Before these go upstream, squash them into the commits they amend:
 
@@ -585,6 +659,8 @@ Before these go upstream, squash them into the commits they amend:
 * 7 by dropping efb2fe80 and keeping its `pom.xml` hunk in 279a1b3b.
 * 1, 3 and 4 into cae23348.
 * 4 also into 5c57e6e5.
+* 10 into 279a1b3b; 11 and 15 into 590adb9c/05230755 (the `UriCompliance`
+  commits); 12 with 1; 13 with 3; 14 into a5141ec9.
 
 That would leave the PR's history without the elective changes ever
 appearing.
@@ -627,7 +703,52 @@ fixups were squashed in:
 Not run: the full module suites, the YARN web tests (`TestRMWithCSRFFilter`
 and the like), and the HttpFS tests. The prototypes do not touch YARN or
 HttpFS code, but both run `AuthenticationFilter`, so a full `hadoop-common`
-and HttpFS run belongs in the PR's CI.
+and HttpFS run belongs in the PR's CI. They were run in round 3.
+
+**Round 3, the review (2026-09-26).** WSL2 Ubuntu 24.04, JDK 17, Maven
+3.9.16, each tree built in full with its own local repository.
+
+* *CI.* The fork's Build workflow ran the full module suites on 70176f41
+  (the prototypes): 3,076 test classes, 25,589 tests, no failures; two flakes
+  that passed on rerun, `TestFileCorruption` (block report) and
+  `TestRouterAsyncHandlerQueueOverflow`, neither on the HTTP path. No test
+  class was lost against phase-a. The Java 21 and 25 build-only jobs passed.
+* *Live, trunk against branch.* Distributions of phase-a (Jetty 9.4.58) and
+  the branch ran the same single-node cluster (NN, DN, RM, NM, JHS, KMS,
+  HttpFS) with REST CSRF on for WebHDFS and the RM, enforced for every user
+  agent. 85 requests were recorded on each and diffed, and each
+  distribution's Java client ran against each server. The results are the
+  tables of §5 and the list of §10: every revert answers as trunk does, bar
+  the phrase and the bodies that replace it. JMX shows the same 37
+  HttpServer2 metric names, times in milliseconds.
+* *Tests CI excludes*
+  (`.github/gha-tests/exclude-tests.txt`), run locally without reruns:
+  about 1,900 tests over hdfs, httpfs, rbf, YARN, MapReduce, SLS and tools.
+  The web-facing ones pass, among them `TestFSMainOperationsWebHdfs`,
+  `TestWebHdfsTimeouts`, `TestHttpFSWithHttpFSFileSystem`, `TestWebApp`,
+  `TestRMFailover`, `TestJobEndNotifier`, `TestClusterMRNotification`,
+  `TestMRJobsWithHistoryService` and `TestBootstrapStandbyWithQJM`. Every
+  failure either fails the same way on phase-a (`TestRPC`,
+  `TestProcfsBasedProcessTree`, `TestCapacityOverTimePolicy`,
+  `TestRouterWebServicesREST`, `TestFederationWebApp`,
+  `TestDirectoryScanner`, `TestViewFileSystemHdfs`, `TestFileCreation`,
+  `TestBlockTokenWithShortCircuitRead`, `TestBalancerRPCDelay`) or passes
+  when run alone (`TestAMRMClient`, `TestYarnFederationWithFairScheduler`).
+* *Repetition.* The classes the prototypes touch - hadoop-auth's filters,
+  `TestHttpServer` and its neighbours, the CSRF, token, KMS and topology
+  tests, `TestWebHdfsWithRestCsrfPreventionFilter`, `TestRMWithCSRFFilter`,
+  `TestNMContainerWebSocket` - ran five times without reruns: 1,445
+  executions, no failures.
+* *Not covered by CI.* The shaded client's `ITUseMiniCluster` and
+  `ITUseHadoopCodecs` pass, and the catalog webapp's 19 tests pass.
+* *After commits 10-15* (§10): hadoop-auth 59, hadoop-common 105
+  (including the URI compliance key, the `/logs` POST and the error-page
+  message tests), hadoop-kms 35, hadoop-hdfs-httpfs 37, all pass. In
+  hadoop-hdfs 130 of 131 passed; `TestWebHDFS.testWebHdfsGetBlockLocations`
+  failed once when sharing a fork with other classes, and the full class then
+  passed twice alone, as it does on phase-a. On the live cluster a refused
+  WebHDFS mkdir now reads `message=Missing Required Header for CSRF
+  Vulnerability Protection` with a new client, the same as trunk.
 
 **One failure on the way, since fixed.** The first version of the `/logs`
 test left the process-wide `Groups` singleton on the shell mapping when it
@@ -637,10 +758,10 @@ admin only through `groupC`, got 403). The test now sets up
 
 ## 12. Not verified
 
-* Nothing here was probed on a live cluster. The claims are from source and
-  from the unit and integration tests listed above.
-* Whether the ee8 servlet layer passes ambiguous URIs under
-  `UriCompliance.LEGACY` (§5 Option B).
+* Kerberos/SPNEGO and TLS were exercised by unit tests only; the live
+  clusters of §11 ran simple authentication over plain HTTP.
+* Whether the ee8 servlet layer passes every ambiguous URI under
+  `UriCompliance.LEGACY` (§5 Option B). `%2F` alone was measured, and passes.
 * That `getHandleTime*` matches 9.4's dispatch time numerically for Hadoop's
   servlets (§7). It is argued from the code only.
 * How individual token renewers react to a typed `AccessControlException`
