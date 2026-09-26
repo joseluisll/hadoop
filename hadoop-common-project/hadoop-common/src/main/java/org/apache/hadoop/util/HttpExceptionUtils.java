@@ -37,6 +37,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * HTTP utility class to help propagate server side exception to the client
@@ -340,12 +342,24 @@ public class HttpExceptionUtils {
   }
 
   /**
+   * The MESSAGE row of the error page Jetty renders for sendError - the same
+   * on 9.4 and on 12 - which holds the reason and nothing else.
+   */
+  private static final Pattern ERROR_PAGE_MESSAGE = Pattern.compile(
+      "<th>\\s*MESSAGE:\\s*</th>\\s*<td>(.*?)</td>",
+      Pattern.CASE_INSENSITIVE | Pattern.DOTALL);
+
+  /**
    * Reduces a response body to something readable in a log line. A container
-   * that renders sendError as an HTML page buries the message in markup; strip
-   * it out rather than quoting the page.
+   * that renders sendError as an HTML page buries the message in markup. From
+   * Jetty's error page take the message row alone, which is the text the
+   * reason phrase used to carry; from any other page strip the markup rather
+   * than quoting the page.
    */
   private static String toPlainText(String body) {
-    String text = body;
+    Matcher message = ERROR_PAGE_MESSAGE.matcher(body);
+    String text = message.find() && !message.group(1).trim().isEmpty()
+        ? message.group(1) : body;
     if (text.indexOf('<') >= 0) {
       text = text.replaceAll("(?s)<(script|style)\\b.*?</\\1>", " ")
           .replaceAll("(?s)<[^>]*>", " ");

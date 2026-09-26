@@ -37,8 +37,6 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -282,8 +280,65 @@ public class TestHttpExceptionUtils {
         + "</body>\n</html>\n";
     String detail = HttpExceptionUtils.getResponseDetail(
         connectionReturning(page, "Forbidden"));
-    assertTrue(detail.contains("the real reason"), detail);
-    assertFalse(detail.contains("<"), "markup survived: " + detail);
+    assertEquals("the real reason", detail);
+  }
+
+  /**
+   * Jetty's error page repeats the reason in its title, its heading and its
+   * MESSAGE row, next to the URI, the status and the servlet. The detail is
+   * the MESSAGE row alone - what the reason phrase carried on Jetty 9.4 - not
+   * the whole page flattened into one line.
+   */
+  @Test
+  public void testResponseDetailTakesTheMessageOfAJettyErrorPage()
+      throws Exception {
+    // as served by a NameNode on Jetty 12 for a PUT refused by the CSRF filter
+    String page = "<html>\n<head>\n<meta http-equiv=\"Content-Type\""
+        + " content=\"text/html;charset=ISO-8859-1\"/>\n"
+        + "<title>Error 400 Missing Required Header for CSRF Vulnerability"
+        + " Protection</title>\n</head>\n<body><h2>HTTP ERROR 400 Missing"
+        + " Required Header for CSRF Vulnerability Protection</h2>\n<table>\n"
+        + "<tr><th>URI:</th><td>/webhdfs/v1/tmp/dir</td></tr>\n"
+        + "<tr><th>STATUS:</th><td>400</td></tr>\n"
+        + "<tr><th>MESSAGE:</th><td>Missing Required Header for CSRF"
+        + " Vulnerability Protection</td></tr>\n"
+        + "<tr><th>SERVLET:</th><td>webservices-driver</td></tr>\n"
+        + "</table>\n\n</body>\n</html>\n";
+    assertEquals("Missing Required Header for CSRF Vulnerability Protection",
+        HttpExceptionUtils.getResponseDetail(
+            connectionReturning(page, "Bad Request", "text/html")));
+
+    // validateResponse, which rewinds the body after the JSON parse fails,
+    // reports the same text
+    HttpURLConnection conn =
+        connectionReturning(page, "Bad Request", "text/html");
+    when(conn.getResponseCode()).thenReturn(HttpURLConnection.HTTP_BAD_REQUEST);
+    LambdaTestUtils.interceptAndValidateMessageContains(IOException.class,
+        Arrays.asList("message [Missing Required Header for CSRF"
+            + " Vulnerability Protection]"),
+        () -> HttpExceptionUtils.validateResponse(conn,
+            HttpURLConnection.HTTP_OK));
+  }
+
+  @Test
+  public void testResponseDetailUnescapesTheMessage() throws Exception {
+    String page = "<table><tr><th>MESSAGE:</th>"
+        + "<td>User &lt;dr.who&gt; can&#39;t &amp; won&#39;t</td></tr></table>";
+    assertEquals("User <dr.who> can't & won't",
+        HttpExceptionUtils.getResponseDetail(
+            connectionReturning(page, "Forbidden", "text/html")));
+  }
+
+  /** A page with no MESSAGE row, another container's, is still stripped. */
+  @Test
+  public void testResponseDetailStripsAPageWithoutAMessageRow()
+      throws Exception {
+    String page = "<html><body><h1>HTTP Status 403 - Forbidden</h1>"
+        + "<p><b>Message</b> Anonymous requests are disallowed</p>"
+        + "</body></html>";
+    assertEquals("HTTP Status 403 - Forbidden Message Anonymous requests are"
+        + " disallowed", HttpExceptionUtils.getResponseDetail(
+            connectionReturning(page, "Forbidden", "text/html")));
   }
 
   @Test
