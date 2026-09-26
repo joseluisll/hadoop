@@ -66,7 +66,7 @@ commit per change, with focused tests.
 | 6 | `/logs` dropped when log dir missing (cae23348) | **Revert** to 9.4 answers (403 non-admin / 404 admin) | 173fa546, d3e56649 (POST) |
 | 7 | 5 async metrics deleted; `dispatched*` re-sourced (cae23348) | **Revert** the deletion (publish as 0); keep the re-sourcing; **fix nanosecond regression** | 82ac101e, f2a9c13d |
 
-Four further problems turned up along the way; see §8.
+Six further problems turned up along the way; see §8.
 
 * A **regression the review missed**: eight time metrics are published in
   nanoseconds under "(in ms)" descriptions. Fixed in f2a9c13d.
@@ -77,9 +77,13 @@ Four further problems turned up along the way; see §8.
   607376b9.
 * New clients quoted Jetty's whole error page as the reason. Fixed in
   a2c576a9.
+* Jetty 12 refuses a client's TLS renegotiation, which Jetty 9.4 allowed.
+  Kept, with an opt-in key, in 366c3f6c.
+* A refused image transfer logged an extra warning. Fixed in 32e54c49.
 
 Every revert was then checked on live clusters against trunk on Jetty 9.4,
-request by request (§11).
+request by request: first with simple authentication over HTTP, then with
+Kerberos/SPNEGO over TLS, and with HA and federation (§11).
 
 ---
 
@@ -483,6 +487,37 @@ Covered by the new `TestHttpServer2Metrics`.
   Protection`; so did a GET or POST refusal from a 9.4 server. a2c576a9 takes
   the page's MESSAGE row, which Jetty renders on 9.4 and 12 alike, and gives
   back exactly trunk's text (measured, §11).
+* **TLS renegotiation is refused.** Found on the secure live cluster (§11).
+  * After a client-initiated TLS 1.2 renegotiation, every Jetty HTTPS
+    endpoint on trunk (NameNode, SecondaryNameNode, RM, NM, JobHistory, KMS,
+    HttpFS) answered the request that followed on the same connection. On the
+    branch every one of them closed the connection. The DataNode's HTTPS is
+    served by Netty and behaved the same on both.
+  * This is a Jetty default, not a Hadoop change. 9.4's `SslContextFactory`
+    constructor sets `_renegotiationAllowed = true`; 12.1's leaves it
+    `false` (read from the 9.4.58 and 12.1.12 `jetty-util` class files).
+    `HttpServer2` never set it.
+  * Refusing is the usual hardening against the renegotiation denial of
+    service of CVE-2011-1473. Java and curl clients do not renegotiate on
+    their own, so no Hadoop client is affected. Only a client that asks for
+    renegotiation explicitly would notice.
+  * **Kept, with an opt-in (366c3f6c).**
+    `hadoop.http.ssl.renegotiation.allowed`, documented in
+    `core-default.xml`, defaults to `false` and restores trunk's behaviour
+    when `true`. `HttpServer2` now sets the value either way,
+    so it no longer depends on Jetty's default. As with `%2F` (§5), the
+    stricter behaviour is the default and trunk's is one setting away. Tests
+    in `TestSSLHttpServer` renegotiate over TLS 1.2 against a server with the
+    default (connection closed) and one with the key set (200). With the
+    setter removed, the second test fails.
+* **An extra warning per refused image transfer.** A request `/imagetransfer`
+  refuses reaches `ImageServlet#sendError` twice: where the refusal is found,
+  and again from the `doGet`/`doPut` catch that wraps it as "GetImage failed"
+  or "PutImage failed". The second call found the response committed (by the
+  first, which wrote the reason to the client) and logged `WARN Could not
+  report …`, on top of Jetty's warning for the rethrown exception. On the
+  live NameNode a refused GET left two warnings where trunk left one.
+  32e54c49 logs the second report at DEBUG. The client's answer is unchanged.
 
 ## 9. Downstream impact
 
@@ -602,17 +637,24 @@ There are three ways a change here can reach a downstream:
 3. **Keep and document** 5 (`UriCompliance`): fix the comment, add a release
    note, and make it configurable (done).
 4. **Revert the deletion** in 7 and **fix the nanosecond regression**.
+5. **Keep and document** Jetty 12's refusal of TLS renegotiation, with an
+   opt-in key (§8, done).
 
 With these, what remains different from trunk on the wire - measured by
-recording the same 85 requests against a trunk (Jetty 9.4) cluster and this
-branch (§11) - is:
+recording the same requests against trunk (Jetty 9.4) and this branch on
+three clusters: 85 over plain HTTP, 190 with Kerberos/SPNEGO over TLS, 127
+with HA and federation (§11) - is:
 
 * **forced:** no custom reason phrase;
 * **compensation for that:** marked PUT/DELETE refusals from the
   authentication, KMS and CSRF filters carry an HTML body, and a refused image
   transfer carries its reason as `text/plain`;
 * **stricter URI parsing:** as listed in §5, with `%2F` recoverable through
-  `hadoop.http.uri.compliance.violations`;
+  `hadoop.http.uri.compliance.violations`; the Router refuses `%2F` too;
+* **TLS:** a client's renegotiation of a TLS 1.2 session closes the
+  connection, recoverable through `hadoop.http.ssl.renegotiation.allowed`
+  (§8). Protocols, cipher suites and certificates are the same on every
+  port;
 * **metrics:** the five async metrics read a constant 0; the default number
   of acceptor threads is Jetty 12's (1 on a 16-core host, where 9.4 chose 2),
   still set by `hadoop.http.acceptor.count`;
@@ -623,7 +665,12 @@ branch (§11) - is:
 * **client messages:** a new client reads a refusal's reason from the body
   when the phrase is canonical, so against a Jetty 12 server it reports the
   same text trunk reported; an old client reports the canonical phrase, for
-  example `Bad Request` (forced).
+  example `Bad Request` (forced). Measured with trunk's CLI against the
+  branch: `dfsadmin -fetchImage` as a non-admin prints `Forbidden` where
+  trunk printed "Only Namenode, Secondary Namenode, and administrators may
+  access this servlet", and `hdfs dfs -ls swebhdfs://…` without a ticket
+  prints `Unauthorized` where trunk printed `Authentication required`. The
+  branch's CLI prints trunk's text against either server.
 
 Each of these needs a release note on the JIRA. It is worth flagging the
 change **Incompatible** because of the reason phrase alone: every client that
@@ -651,6 +698,8 @@ On top of `jetty-phase-c` (056c5623), as prototyped:
 | 13 | ab1a3774 | async metrics comment corrected (§7) |
 | 14 | a2c576a9 | client messages take the error page's MESSAGE row (§8) |
 | 15 | 107c4897 | `core-default.xml`: how to accept `%2F` again (§5) |
+| 16 | 366c3f6c | `hadoop.http.ssl.renegotiation.allowed` (§8) |
+| 17 | 32e54c49 | image transfer's second refusal report at DEBUG (§8) |
 
 Before these go upstream, squash them into the commits they amend:
 
@@ -661,6 +710,8 @@ Before these go upstream, squash them into the commits they amend:
 * 4 also into 5c57e6e5.
 * 10 into 279a1b3b; 11 and 15 into 590adb9c/05230755 (the `UriCompliance`
   commits); 12 with 1; 13 with 3; 14 into a5141ec9.
+* 16 into cae23348 (the upgrade, which inherited Jetty 12's default); 17 into
+  80cbf48f, which added `ImageServlet#sendError`.
 
 That would leave the PR's history without the elective changes ever
 appearing.
@@ -750,6 +801,121 @@ and HttpFS run belongs in the PR's CI. They were run in round 3.
   WebHDFS mkdir now reads `message=Missing Required Header for CSRF
   Vulnerability Protection` with a new client, the same as trunk.
 
+**Round 4, live with Kerberos over TLS, and with HA and federation
+(2026-09-26).** The same two distributions, phase-a (Jetty 9.4.58) and the
+branch at ea8ed4b0, on WSL2 with JDK 17. Each cluster was started fresh for
+each build, the same requests were recorded and diffed after masking ids,
+times and tokens, and each distribution's Java CLI ran against both.
+
+* *Secure cluster.*
+  * Setup: a MiniKdc (Kerby, as Hadoop's own tests use); Kerberos
+    authentication and service-level authorization on; admin-only
+    instrumentation servlets; SPNEGO on every web endpoint through
+    `AuthenticationFilterInitializer`, anonymous access off, one cookie
+    secret; `HTTPS_ONLY` for HDFS, YARN and the JobHistory server; KMS and
+    HttpFS on TLS; SASL data transfer; an encryption zone keyed by the KMS.
+    `alice` is an administrator, `bob` is not.
+  * 190 requests through `curl --negotiate`:
+    * SPNEGO accepted and refused: anonymous, a bad token, Basic, a forged
+      cookie, a reused cookie, `user.name`;
+    * `/jmx`, `/conf`, `/logs`, `/stacks` and `/logLevel` on all eight
+      daemons, for an admin and a non-admin;
+    * the delegation-token lifecycle on WebHDFS, HttpFS, KMS and the RM: get,
+      use, renew by the renewer and by someone else, cancel, use after cancel;
+    * WebHDFS OPEN and CREATE redirected to the DataNode;
+    * `/imagetransfer` for the NameNode principal, an admin, another user
+      and anonymous;
+    * KMS key operations, including a DELETE its ACL refuses; HttpFS `doas`;
+      RM application state; NM and JobHistory;
+    * TLS 1.0 to 1.3, every cipher suite one at a time, ALPN, renegotiation,
+      the certificate, a mismatched SNI and Host, plain HTTP to an HTTPS
+      port.
+  * 37 CLI commands per distribution:
+    * `swebhdfs://` through the NameNode and HttpFS;
+    * encryption-zone reads and writes over RPC and WebHDFS;
+    * `hadoop key` list, create, roll and a refused delete;
+    * `fetchdt` get, print, renew and cancel, with the token used before and
+      after the cancel;
+    * `dfsadmin -fetchImage`, `daemonlog` over HTTPS, `yarn` and `mapred`.
+  * Results:
+    * 75 of the 190 answers are identical after masking. Every other one
+      has the same status code and differs only as §10 lists: 46 by the reason
+      phrase alone; marked PUT refusals gaining an error page that carries the
+      full message; `Date` on error responses; `charset` and `Vary` on static
+      pages; instance ids, timings and random key material.
+    * TLS is identical on all eight ports - TLS 1.2 only (the
+      `hadoop.ssl.enabled.protocols` default), the same ten cipher suites, the
+      same certificate, SNI and Host mismatches answered alike - except for
+      renegotiation (§8).
+    * 62 of the 75 CLI runs are identical across servers. The rest differ in
+      object hashes and token sequence numbers, and in the old-client messages
+      of §10.
+    * The SecondaryNameNode checkpointed over HTTPS and SPNEGO on both, five
+      times each. The only class error in any daemon log is the same on both:
+      the NodeManager's `SecureIOUtils` failing to initialise without
+      libhadoop (see the limits below).
+* *HA and federation cluster*, with simple authentication.
+  * Setup: ZooKeeper, a JournalNode, nameservice `ns1` as an HA pair with a
+    ZKFC each, `ns2` on a third NameNode, one DataNode serving both, an RBF
+    Router with a ZooKeeper state store and mount points `/ns1`, `/ns2` and
+    `/tmp`, an RM pair with ZooKeeper recovery, a NodeManager with recovery,
+    and the JobHistory server. The second NameNode was bootstrapped from the
+    first over `/imagetransfer`.
+  * 127 requests, in four states: steady, after a graceful NameNode
+    failover, after a kill -9 of the active NameNode, and after a kill -9 of
+    the active RM. They cover:
+    * `/isActive` on NameNodes and RMs (200 active, 405 standby);
+    * WebHDFS reads and writes on the standby (403 with a
+      `StandbyException` envelope), the standby's `getimage` and
+      `NameNodeStatus`;
+    * the standby RM: `/ws/v1/cluster/info` answered, other paths 307 "This
+      is standby RM", also followed;
+    * `/getJournal` refusals on the JournalNode;
+    * the Router: `federationhealth`, JMX, and WebHDFS list, open, create,
+      mkdirs, delete and rename across nameservices, redirects to the
+      DataNode, a missing mount point, a bad op and `%2F`.
+  * Events, the same on both builds:
+    * graceful failover in 1 s;
+    * kill -9 of the active NameNode: the standby took over in 2 s;
+    * kill -9 of the active RM: the other took over in 10-11 s, and a
+      SleepJob running across it completed successfully;
+    * a `webhdfs://ns1` reader, reading once a second through both NameNode
+      failovers, lost exactly one read, at the kill, on both;
+    * the restarted NameNode came back as standby, and its checkpoint was
+      uploaded to the active over `/imagetransfer`. The only failed uploads
+      were an attempt at the NameNode just killed (connection refused, seen
+      on both builds across the runs), and a 409 from the active for a
+      checkpoint too soon after the last, which the standby treats as
+      routine.
+  * Results:
+    * 89 of the 127 answers are identical after masking. The rest differ in
+      reason phrases, Jetty's markup, `charset` and `Vary`, instance ids, and
+      the Router's 400 for `%2F` (§5).
+    * Two answers first differed by timing, each on one build in one run: the
+      Router refuses writes in its first 30 s of safe mode, and has no active
+      namenode for a moment after a failover. The harness now waits for both.
+      The CLI differed only in the same way: the first write through a fresh
+      Router finds no DataNode report yet, whichever client runs first.
+* *Limits of the environment, the same on both builds.*
+  * The distributions were built without native code. A secure NodeManager
+    reads container logs and map output through `SecureIOUtils`, which needs
+    libhadoop. So log aggregation was off on the secure cluster, and the
+    secure MapReduce job failed in its reduce's shuffle on both. Its maps ran,
+    and the RM and JobHistory pages had a real application to serve.
+  * With `hadoop.security.authorization` on, the MapReduce AM refused
+    `TaskUmbilicalProtocol` on both builds, so the job ran with it off in its
+    own configuration.
+  * `hadoop jar …jobclient-tests.jar` is broken on trunk: `MapredTestDriver`
+    still registers `TestTextInputFormat`, whose `main` the JUnit 5 migration
+    commented out. SleepJob was therefore called directly. This is a separate
+    bug.
+* *After commits 16-17* (§10):
+  * hadoop-common: `TestSSLHttpServer` 8 (two new), `TestSSLHttpServerMTLS`
+    2, `TestHttpServer` 39, `TestCommonConfigurationFields` 4;
+  * hadoop-hdfs: `TestTransferFsImage` 4, `TestGetImageServlet` 1;
+  * all pass. With the renegotiation setter removed, the test for the key
+    fails.
+
 **One failure on the way, since fixed.** The first version of the `/logs`
 test left the process-wide `Groups` singleton on the shell mapping when it
 ran first. `testAuthorizationOfDefaultServlets` then failed (`userC`, an
@@ -758,8 +924,13 @@ admin only through `groupC`, got 403). The test now sets up
 
 ## 12. Not verified
 
-* Kerberos/SPNEGO and TLS were exercised by unit tests only; the live
-  clusters of §11 ran simple authentication over plain HTTP.
+* A cluster that is secure and HA-federated at once. Kerberos/SPNEGO over
+  TLS, and HA with federation, were run live but on separate clusters
+  (§11, round 4); the Router and the JournalNode ran without Kerberos.
+* Secure log aggregation, the secure shuffle, and a secure MapReduce job end
+  to end. They need a native build (§11, round 4).
+* `hadoop.http.ssl.renegotiation.allowed=true` on a live cluster. The key is
+  covered by `TestSSLHttpServer`; the live clusters ran the default.
 * Whether the ee8 servlet layer passes every ambiguous URI under
   `UriCompliance.LEGACY` (§5 Option B). `%2F` alone was measured, and passes.
 * That `getHandleTime*` matches 9.4's dispatch time numerically for Hadoop's
