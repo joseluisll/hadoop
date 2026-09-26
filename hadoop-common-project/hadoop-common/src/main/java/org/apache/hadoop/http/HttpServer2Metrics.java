@@ -40,8 +40,10 @@ import org.apache.hadoop.metrics2.lib.DefaultMetricsSystem;
  * expired async requests have no counterpart, because the core no longer sees
  * servlet async activity. Those five are still published, as 0, so that the
  * metric names do not disappear from JMX and from the sinks that monitoring
- * reads them through. 0 is also what they read on Jetty 9.4 for every servlet
- * Hadoop itself serves, none of which starts an async request.
+ * reads them through. That is a change in value: on Jetty 9.4 they were not
+ * always 0, because its DefaultServlet sent static files - the web UI's
+ * pages, scripts and stylesheets - asynchronously, and each of those counted
+ * as an async request. No Hadoop servlet starts one itself.
  *
  * Jetty 12 also records every time statistic in nanoseconds, where 9.4
  * recorded milliseconds. The metrics below are documented, and have always
