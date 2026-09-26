@@ -1690,6 +1690,17 @@ public final class HttpServer2 implements FilterContainer {
         response.sendError(HttpServletResponse.SC_NOT_FOUND);
       }
     }
+
+    /**
+     * Jetty's DefaultServlet, which serves /logs when the directory is there,
+     * answers a POST as a GET, so the admin check and the 404 apply to it too
+     * rather than HttpServlet's 405.
+     */
+    @Override
+    protected void doPost(HttpServletRequest request,
+        HttpServletResponse response) throws IOException {
+      doGet(request, response);
+    }
   }
 
   /**

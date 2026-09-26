@@ -911,9 +911,23 @@ public class TestHttpServer extends HttpServerFunctionalTest {
           getHttpStatusCode(logsURL, "userA"));
       assertEquals(HttpURLConnection.HTTP_FORBIDDEN,
           getHttpStatusCode(logsURL, "userE"));
+      // DefaultServlet answers a POST as a GET, so it gets the same answers.
+      assertEquals(HttpURLConnection.HTTP_NOT_FOUND,
+          postStatusCode(logsURL, "userA"));
+      assertEquals(HttpURLConnection.HTTP_FORBIDDEN,
+          postStatusCode(logsURL, "userE"));
     } finally {
       myServer.stop();
     }
+  }
+
+  private static int postStatusCode(String urlstring, String userName)
+      throws IOException {
+    URL url = new URL(urlstring + "?user.name=" + userName);
+    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+    connection.setRequestMethod("POST");
+    connection.connect();
+    return connection.getResponseCode();
   }
 
   @Test
