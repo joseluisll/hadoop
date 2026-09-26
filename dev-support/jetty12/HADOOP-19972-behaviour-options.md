@@ -700,6 +700,7 @@ On top of `jetty-phase-c` (056c5623), as prototyped:
 | 15 | 107c4897 | `core-default.xml`: how to accept `%2F` again (§5) |
 | 16 | 366c3f6c | `hadoop.http.ssl.renegotiation.allowed` (§8) |
 | 17 | 32e54c49 | image transfer's second refusal report at DEBUG (§8) |
+| 18 | b09d201c | the URI compliance default split without `core-default.xml` (§11) |
 
 Before these go upstream, squash them into the commits they amend:
 
@@ -711,7 +712,7 @@ Before these go upstream, squash them into the commits they amend:
 * 10 into 279a1b3b; 11 and 15 into 590adb9c/05230755 (the `UriCompliance`
   commits); 12 with 1; 13 with 3; 14 into a5141ec9.
 * 16 into cae23348 (the upgrade, which inherited Jetty 12's default); 17 into
-  80cbf48f, which added `ImageServlet#sendError`.
+  80cbf48f, which added `ImageServlet#sendError`; 18 with 11.
 
 That would leave the PR's history without the elective changes ever
 appearing.
@@ -915,6 +916,33 @@ times and tokens, and each distribution's Java CLI ran against both.
   * hadoop-hdfs: `TestTransferFsImage` 4, `TestGetImageServlet` 1;
   * all pass. With the renegotiation setter removed, the test for the key
     fails.
+
+**Round 5, CI on commits 1-17 (fork run 36227652395).** Three test jobs
+failed, all but one test for the same reason, a bug in f14e02fc:
+
+* `Configuration#getTrimmedStrings(name, default...)` returns an unset key's
+  default without splitting it, and `getUriCompliance` passed the default as
+  one comma-separated string. A `Configuration` that does not load
+  `core-default.xml` leaves the key unset, got the single name
+  `AMBIGUOUS_EMPTY_SEGMENT,AMBIGUOUS_PATH_ENCODING,SUSPICIOUS_PATH_CHARACTERS`,
+  and the HTTP server refused to start.
+* That failed `TestHttpFSServerWebServer` (9), `TestRBFMetrics` (7),
+  `TestMetricsBase` (1), `TestStateStoreFileSystem` (14),
+  `TestRouterHttpServerXFrame` (1), and `testAllWithNoXmlDefaults` in
+  `TestDistributedFileSystem` and `TestViewDistributedFileSystem`. The
+  daemons, and the live clusters of rounds 3 and 4, load `core-default.xml`
+  and were not affected. An embedder that builds its `Configuration` without
+  defaults would have been. The local runs after commits 10-15 did not catch
+  it.
+* b09d201c splits the default the same way as a configured value. A new
+  test, `testUriComplianceDefaultWithoutCoreDefault`, checks that a
+  `Configuration` with and without `core-default.xml` gets the same three
+  violations, and fails without the fix. With it, every class above passes
+  locally, as do `TestHttpServer` (40) and `TestSSLHttpServer` (8).
+* The one other failure, `TestStandbyCheckpoints.testPutFsimagePartFailed`,
+  failed its first run and passed its rerun; surefire lists it as a flake.
+  It asserts on checkpoint timing, and passes alone locally. The only change
+  near it, 32e54c49, changes a log level.
 
 **One failure on the way, since fixed.** The first version of the `/logs`
 test left the process-wide `Groups` singleton on the shell mapping when it
