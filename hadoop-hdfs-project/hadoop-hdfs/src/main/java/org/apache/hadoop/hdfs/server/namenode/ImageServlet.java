@@ -712,8 +712,13 @@ public class ImageServlet extends HttpServlet {
     // client then sees a bare status code and no reason at all. Writing the
     // body here keeps the detail, and does not depend on how the container
     // renders errors.
+    // A refusal reaches here twice: once where it is found, and again from
+    // doGet's or doPut's catch, which wraps it as "GetImage failed" or
+    // "PutImage failed". The first call has already answered the client, and
+    // the exception rethrown after the second is logged by the container, so
+    // the second report adds nothing worth a warning.
     if (response.isCommitted()) {
-      LOG.warn("Could not report \"{}\": the response is already committed.",
+      LOG.debug("Could not report \"{}\": the response is already committed.",
           message);
       return;
     }
