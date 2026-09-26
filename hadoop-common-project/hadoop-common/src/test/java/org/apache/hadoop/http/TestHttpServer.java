@@ -34,6 +34,7 @@ import org.apache.hadoop.util.JsonUtils;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.commons.io.IOUtils;
+import org.eclipse.jetty.http.UriCompliance;
 import org.eclipse.jetty.server.HttpConfiguration;
 import org.eclipse.jetty.server.ServerConnector;
 import org.apache.hadoop.test.GenericTestUtils;
@@ -69,6 +70,7 @@ import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.EnumSet;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -502,6 +504,23 @@ public class TestHttpServer extends HttpServerFunctionalTest {
     } finally {
       noBackslash.stop();
     }
+  }
+
+  /**
+   * A Configuration built without core-default.xml, as MiniDFSCluster and
+   * the Router and HttpFS tests build theirs, leaves the key unset. It must
+   * get the same violations as one that loads core-default.xml.
+   */
+  @Test
+  public void testUriComplianceDefaultWithoutCoreDefault() {
+    Set<UriCompliance.Violation> expected = EnumSet.of(
+        UriCompliance.Violation.AMBIGUOUS_EMPTY_SEGMENT,
+        UriCompliance.Violation.AMBIGUOUS_PATH_ENCODING,
+        UriCompliance.Violation.SUSPICIOUS_PATH_CHARACTERS);
+    assertEquals(expected,
+        HttpServer2.getUriCompliance(new Configuration(false)).getAllowed());
+    assertEquals(expected,
+        HttpServer2.getUriCompliance(new Configuration()).getAllowed());
   }
 
   @Test

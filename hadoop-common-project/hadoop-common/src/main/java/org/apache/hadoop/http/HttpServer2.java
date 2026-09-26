@@ -848,8 +848,12 @@ public final class HttpServer2 implements FilterContainer {
    */
   @VisibleForTesting
   static UriCompliance getUriCompliance(Configuration conf) {
-    String[] names = conf.getTrimmedStrings(HTTP_URI_COMPLIANCE_VIOLATIONS_KEY,
-        HTTP_URI_COMPLIANCE_VIOLATIONS_DEFAULT);
+    // Split the default too: getTrimmedStrings(name, default) hands back an
+    // unset key's default unsplit, and a Configuration built without
+    // core-default.xml leaves the key unset.
+    String[] names = StringUtils.getTrimmedStrings(conf.get(
+        HTTP_URI_COMPLIANCE_VIOLATIONS_KEY,
+        HTTP_URI_COMPLIANCE_VIOLATIONS_DEFAULT));
     List<UriCompliance.Violation> allowed = new ArrayList<>();
     for (String name : names) {
       try {
