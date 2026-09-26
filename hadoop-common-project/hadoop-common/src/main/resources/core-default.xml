@@ -4605,6 +4605,11 @@ are idle beyond the keepalive window.
       violation names of org.eclipse.jetty.http.UriCompliance.Violation are
       accepted, but widen what reaches the servlets; an unknown name stops the
       server from starting.
+
+      Jetty 9.4 also decoded an encoded separator (%2F) in a path to a '/',
+      which this default refuses with 400. A deployment whose clients or
+      gateways send one can add AMBIGUOUS_PATH_SEPARATOR to the list to get
+      that behaviour back.
     </description>
   </property>
 
