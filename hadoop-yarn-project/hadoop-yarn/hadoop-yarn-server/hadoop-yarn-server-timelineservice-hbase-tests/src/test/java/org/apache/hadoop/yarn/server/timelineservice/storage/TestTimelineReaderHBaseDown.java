@@ -181,6 +181,9 @@ public class TestTimelineReaderHBaseDown {
       waitForHBaseDown(htr);
 
       util.startMiniHBaseCluster(1, 1);
+      // let the restarted region server finish opening its regions, so the
+      // shutdown below cannot interrupt an open and abort it (HBASE-30460)
+      util.waitUntilNoRegionsInTransition();
       GenericTestUtils.waitFor(() -> {
         try {
           htr.getTimelineStorageMonitor().checkStorageIsUp();
