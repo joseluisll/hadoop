@@ -87,15 +87,12 @@ public class TestZKDelegationTokenSecretManager {
 
   @BeforeEach
   public void setup() throws Exception {
-    // Fail instead of hanging if the cache never initializes.
-    ZKDelegationTokenSecretManager.setCacheInitTimeoutMs(10000);
     zkServer = new TestingServer();
     zkServer.start();
   }
 
   @AfterEach
   public void tearDown() throws Exception {
-    ZKDelegationTokenSecretManager.setCacheInitTimeoutMs(0);
     if (zkServer != null) {
       zkServer.close();
     }
@@ -556,7 +553,13 @@ public class TestZKDelegationTokenSecretManager {
     ZKDelegationTokenSecretManager.setCurator(curatorFramework);
     DelegationTokenManager tm1 = null;
     try {
-      tm1 = new DelegationTokenManager(conf, new Text("foo"));
+      try {
+        tm1 = new DelegationTokenManager(conf, new Text("foo"));
+      } finally {
+        // The curator is only read in the constructor; restore the default
+        // so later tests do not see a closed client.
+        ZKDelegationTokenSecretManager.setCurator(null);
+      }
 
       // When the init method is called,
       // the ZKDelegationTokenSecretManager#startThread method will be called,
@@ -573,8 +576,6 @@ public class TestZKDelegationTokenSecretManager {
       if (tm1 != null) {
         tm1.destroy();
       }
-      // Restore the default curator so later tests do not see a closed client.
-      ZKDelegationTokenSecretManager.setCurator(null);
       curatorFramework.close();
     }
   }
@@ -624,8 +625,16 @@ public class TestZKDelegationTokenSecretManager {
     curatorFramework.start();
     ZKDelegationTokenSecretManager.setCurator(curatorFramework);
 
-    DelegationTokenManager tm1 = new DelegationTokenManager(conf, new Text("foo"));
-    DelegationTokenManager tm2 = new DelegationTokenManager(conf, new Text("bar"));
+    DelegationTokenManager tm1;
+    DelegationTokenManager tm2;
+    try {
+      tm1 = new DelegationTokenManager(conf, new Text("foo"));
+      tm2 = new DelegationTokenManager(conf, new Text("bar"));
+    } finally {
+      // The curator is only read in the constructor; restore the default
+      // so later tests do not see a closed client.
+      ZKDelegationTokenSecretManager.setCurator(null);
+    }
     ExecutorService executorService = null;
     try {
       // When the init method is called,
@@ -660,8 +669,6 @@ public class TestZKDelegationTokenSecretManager {
       }
       tm1.destroy();
       tm2.destroy();
-      // Restore the default curator so later tests do not see a closed client.
-      ZKDelegationTokenSecretManager.setCurator(null);
       curatorFramework.close();
     }
   }

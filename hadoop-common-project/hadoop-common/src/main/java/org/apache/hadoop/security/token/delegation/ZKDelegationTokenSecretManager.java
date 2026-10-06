@@ -137,14 +137,6 @@ public abstract class ZKDelegationTokenSecretManager<TokenIdent extends Abstract
   private static final ThreadLocal<CuratorFramework> CURATOR_TL =
       new ThreadLocal<CuratorFramework>();
 
-  // Bound on the wait for the initial cache load; 0 waits indefinitely.
-  private static volatile long cacheInitTimeoutMs = 0;
-
-  @VisibleForTesting
-  static void setCacheInitTimeoutMs(long timeoutMs) {
-    cacheInitTimeoutMs = timeoutMs;
-  }
-
   public static void setCurator(CuratorFramework curator) {
     CURATOR_TL.set(curator);
   }
@@ -155,6 +147,8 @@ public abstract class ZKDelegationTokenSecretManager<TokenIdent extends Abstract
   }
 
   private final boolean isExternalClient;
+  // Bound on the wait for the initial cache load.
+  private final long cacheInitTimeoutMs;
   protected final CuratorFramework zkClient;
   private SharedCount delTokSeqCounter;
   private SharedCount keyIdSeqCounter;
@@ -179,6 +173,11 @@ public abstract class ZKDelegationTokenSecretManager<TokenIdent extends Abstract
         ZK_DTSM_TOKEN_SEQNUM_BATCH_SIZE_DEFAULT);
     isTokenWatcherEnabled = conf.getBoolean(ZK_DTSM_TOKEN_WATCHER_ENABLED,
         ZK_DTSM_TOKEN_WATCHER_ENABLED_DEFAULT);
+    // Wait as long as Curator would keep retrying a single ZooKeeper call.
+    cacheInitTimeoutMs = (long) conf.getInt(ZK_DTSM_ZK_SESSION_TIMEOUT,
+        ZK_DTSM_ZK_SESSION_TIMEOUT_DEFAULT)
+        * (conf.getInt(ZK_DTSM_ZK_NUM_RETRIES,
+            ZK_DTSM_ZK_NUM_RETRIES_DEFAULT) + 1);
     
     String workPath = conf.get(ZK_DTSM_ZNODE_WORKING_PATH, ZK_DTSM_ZNODE_WORKING_PATH_DEAFULT);
     String nameSpace = workPath + "/" + ZK_DTSM_NAMESPACE;
@@ -436,13 +435,11 @@ public abstract class ZKDelegationTokenSecretManager<TokenIdent extends Abstract
   private void awaitCacheInitialized(CountDownLatch initialized,
       String cacheName) throws IOException {
     try {
-      if (cacheInitTimeoutMs > 0) {
-        if (!initialized.await(cacheInitTimeoutMs, TimeUnit.MILLISECONDS)) {
-          throw new IOException("Timed out after " + cacheInitTimeoutMs
-              + " ms waiting for " + cacheName + " cache initialization");
-        }
-      } else {
-        initialized.await();
+      if (!initialized.await(cacheInitTimeoutMs, TimeUnit.MILLISECONDS)) {
+        // Keep the pre-HADOOP-19966 behaviour rather than failing the start:
+        // lookups for entries missing from the cache fall back to ZooKeeper.
+        LOG.warn("The {} cache was not initialized within {} ms; continuing"
+            + " with a partially loaded cache.", cacheName, cacheInitTimeoutMs);
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
