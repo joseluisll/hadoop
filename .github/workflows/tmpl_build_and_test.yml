@@ -71,13 +71,11 @@ env:
     -Dmaven.test.failure.ignore=false
     -Dsurefire.rerunFailingTestsCount=2
 
-# Forks can run these jobs on their own runner by setting the repository
-# variable HADOOP_RUNNER to one of its labels. The runner needs Docker.
 jobs:
   # TODO: use common composite actions in .github/actions/
   precondition:
     name: Preparation
-    runs-on: ${{ vars.HADOOP_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     outputs:
       build_image_url: ${{ steps.variables.outputs.build_image_url }}
     steps:
@@ -92,7 +90,7 @@ jobs:
           echo "build_image_url=ghcr.io/${REPO_OWNER}/gha-build-${{ inputs.os }}:${{ inputs.branch }}-${{ github.run_id }}" >> $GITHUB_OUTPUT
   build-image:
     name: Build Image ${{ inputs.os }}-${{ inputs.branch }}
-    runs-on: ${{ vars.HADOOP_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     needs: [ precondition ]
     # Security: this does not leak write access for our image repository to
     # forked repos.
@@ -140,10 +138,9 @@ jobs:
         run: |
           USER_ID=$(id -u "${USER}")
           GROUP_ID=$(id -g "${USER}")
-          cat > "${RUNNER_TEMP}/Dockerfile.gha" <<UserSpecificDocker
+          cat > /tmp/Dockerfile.gha <<UserSpecificDocker
           FROM ${{ needs.precondition.outputs.build_image_url }}-base
           RUN rm -f /var/log/faillog /var/log/lastlog
-          RUN userdel -r \$(getent passwd ${USER_ID} | cut -d: -f1) 2>/dev/null || :
           RUN groupadd --non-unique -g ${GROUP_ID} ${USER}
           RUN useradd -g ${GROUP_ID} -u ${USER_ID} -k /root -m ${USER}
           RUN echo "${USER} ALL=NOPASSWD: ALL" > "/etc/sudoers.d/hadoop-build-${USER_ID}"
@@ -153,7 +150,7 @@ jobs:
         uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./dev-support/docker/
-          file: ${{ runner.temp }}/Dockerfile.gha
+          file: /tmp/Dockerfile.gha
           push: true
           tags: ${{ needs.precondition.outputs.build_image_url }}
       - name: Set up Outputs
@@ -163,7 +160,7 @@ jobs:
   build-only:
     name: Build Only (Java ${{ inputs.java }}) ${{ inputs.os }}-${{ inputs.branch }}
     if: (!cancelled()) && contains(fromJSON(inputs.jobs), 'build-only')
-    runs-on: ${{ vars.HADOOP_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     needs: [ precondition, build-image ]
     container:
       image: ${{ needs.precondition.outputs.build_image_url }}
@@ -185,7 +182,7 @@ jobs:
   build-and-test:
     if: (!cancelled()) && contains(fromJSON(inputs.jobs), 'build-and-test')
     name: Test ${{ matrix.comment }} (Java ${{ inputs.java }}) ${{ inputs.os }}-${{ inputs.branch }}
-    runs-on: ${{ vars.HADOOP_RUNNER || 'ubuntu-24.04' }}
+    runs-on: ubuntu-24.04
     needs: [ precondition, build-image ]
     container:
       image: ${{ needs.precondition.outputs.build_image_url }}
