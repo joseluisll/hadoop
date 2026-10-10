@@ -1,0 +1,78 @@
+diff --git a/hadoop-hdfs-project/hadoop-hdfs/src/test/java/org/apache/hadoop/hdfs/TestGetFileChecksum.java b/hadoop-hdfs-project/hadoop-hdfs/src/test/java/org/apache/hadoop/hdfs/TestGetFileChecksum.java
+index c850c6f8f48..fe7a3e1675d 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs/src/test/java/org/apache/hadoop/hdfs/TestGetFileChecksum.java
++++ b/hadoop-hdfs-project/hadoop-hdfs/src/test/java/org/apache/hadoop/hdfs/TestGetFileChecksum.java
+@@ -17,15 +17,27 @@
+  */
+ package org.apache.hadoop.hdfs;
+ 
++import static org.junit.jupiter.api.Assertions.assertEquals;
+ import static org.junit.jupiter.api.Assertions.fail;
+ import static org.junit.jupiter.api.Assertions.assertTrue;
+ 
+ import java.io.IOException;
++import java.util.EnumSet;
+ 
+ import org.apache.hadoop.conf.Configuration;
+ import org.apache.hadoop.fs.FSDataOutputStream;
+ import org.apache.hadoop.fs.FileChecksum;
++import org.apache.hadoop.fs.CreateFlag;
++import org.apache.hadoop.fs.FileSystem;
+ import org.apache.hadoop.fs.Path;
++import org.apache.hadoop.fs.permission.FsPermission;
++import org.apache.hadoop.hdfs.client.HdfsClientConfigKeys;
++import org.apache.hadoop.hdfs.protocol.ClientProtocol;
++import org.apache.hadoop.hdfs.protocol.HdfsFileStatus;
++import org.apache.hadoop.hdfs.protocol.LocatedBlock;
++import org.apache.hadoop.hdfs.server.datanode.DataNode;
++import org.apache.hadoop.hdfs.server.datanode.Replica;
++import org.apache.hadoop.io.EnumSetWritable;
+ import org.junit.jupiter.api.AfterEach;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+@@ -92,4 +104,45 @@ public void testGetFileChecksum() throws Exception {
+     testGetFileChecksum(new Path("/foo"), BLOCKSIZE / 4);
+     testGetFileChecksum(new Path("/bar"), BLOCKSIZE / 4 - 1);
+   }
++
++  /**
++   * HDFS-17992: a zero-length file that keeps one empty, finalized block must
++   * get the same COMPOSITE_CRC checksum as a zero-length file without blocks.
++   */
++  @Test
++  public void testCompositeCrcOfZeroLengthFileWithEmptyBlock()
++      throws Exception {
++    DFSClient client = dfs.getClient();
++    ClientProtocol nn = client.getNamenode();
++    String src = "/zeroLengthWithEmptyBlock";
++    HdfsFileStatus stat = nn.create(src, FsPermission.getFileDefault(),
++        client.getClientName(),
++        new EnumSetWritable<>(EnumSet.of(CreateFlag.CREATE)), true,
++        (short) 1, BLOCKSIZE, null, null, null);
++    LocatedBlock lb = nn.addBlock(src, client.getClientName(), null, null,
++        stat.getFileId(), null, null);
++    // Give the block a real, empty, finalized replica, as lease recovery does
++    // when a writer dies after setting up the pipeline but before sending data.
++    DataNode dn = cluster.getDataNode(lb.getLocations()[0].getIpcPort());
++    Replica replica =
++        cluster.getFsDatasetTestUtils(dn).createFinalizedReplica(lb.getBlock());
++    dn.notifyNamenodeReceivedBlock(lb.getBlock(), null,
++        replica.getStorageUuid(), false);
++    while (!nn.complete(src, client.getClientName(), lb.getBlock(),
++        stat.getFileId())) {
++      Thread.sleep(100);
++    }
++    assertEquals(1, client.getLocatedBlocks(src, 0).locatedBlockCount());
++    assertEquals(0, dfs.getFileStatus(new Path(src)).getLen());
++
++    Path noBlocks = new Path("/zeroLengthWithoutBlocks");
++    dfs.create(noBlocks).close();
++
++    Configuration crcConf = new Configuration(conf);
++    crcConf.set(HdfsClientConfigKeys.DFS_CHECKSUM_COMBINE_MODE_KEY, "COMPOSITE_CRC");
++    try (FileSystem crcFs = FileSystem.newInstance(dfs.getUri(), crcConf)) {
++      assertEquals(crcFs.getFileChecksum(noBlocks),
++          crcFs.getFileChecksum(new Path(src)));
++    }
++  }
+ }

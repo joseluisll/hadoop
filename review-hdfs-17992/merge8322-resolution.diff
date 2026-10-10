@@ -1,0 +1,26 @@
+diff --git a/hadoop-hdfs-project/hadoop-hdfs-client/src/main/java/org/apache/hadoop/hdfs/FileChecksumHelper.java b/hadoop-hdfs-project/hadoop-hdfs-client/src/main/java/org/apache/hadoop/hdfs/FileChecksumHelper.java
+index 7ad31c50eca..acac75c310d 100644
+--- a/hadoop-hdfs-project/hadoop-hdfs-client/src/main/java/org/apache/hadoop/hdfs/FileChecksumHelper.java
++++ b/hadoop-hdfs-project/hadoop-hdfs-client/src/main/java/org/apache/hadoop/hdfs/FileChecksumHelper.java
+@@ -22,6 +22,7 @@
+ import org.apache.hadoop.fs.MD5MD5CRC32CastagnoliFileChecksum;
+ import org.apache.hadoop.fs.MD5MD5CRC32GzipFileChecksum;
+ import org.apache.hadoop.fs.Options.ChecksumCombineMode;
++import org.apache.hadoop.fs.Options.ChecksumOpt;
+ import org.apache.hadoop.fs.PathIOException;
+ import org.apache.hadoop.hdfs.protocol.BlockChecksumOptions;
+ import org.apache.hadoop.hdfs.protocol.BlockChecksumType;
+@@ -252,6 +253,13 @@ void compute() throws IOException {
+      *     matches what previous hdfs versions return.
+      */
+     FileChecksum makeEmptyFileChecksum() {
++      if (combineMode == ChecksumCombineMode.COMPOSITE_CRC) {
++        // For COMPOSITE_CRC mode return a zero CRC with the client's
++        // configured checksum type rather than a legacy MD5MD5CRC value.
++        ChecksumOpt checksumOpt = client.getConf().getDefaultChecksumOpt();
++        return new CompositeCrcFileChecksum(
++            0, checksumOpt.getChecksumType(), checksumOpt.getBytesPerChecksum());
++      }
+       // Explicitly specified here in case the default DataOutputBuffer
+       // buffer length value is changed in future. This matters because the
+       // fixed value 32 has to be used to repeat the magic value for previous
