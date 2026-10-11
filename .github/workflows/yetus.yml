@@ -51,6 +51,10 @@ env:
 jobs:
   yetus:
     name: Yetus precommit (${{ matrix.platform }})
+    # A run that starts after its PR was merged gets the base branch as
+    # github.ref instead of refs/pull/<N>/merge, and Yetus cannot tell which
+    # PR to test. Skip it.
+    if: startsWith(github.ref, 'refs/pull/')
     runs-on: ubuntu-24.04
     # GitHub-hosted runners stop a job after 6 hours.
     timeout-minutes: 360
