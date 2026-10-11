@@ -211,6 +211,10 @@
                 </exclusion>
                 <exclusion>
                     <groupId>org.eclipse.jetty</groupId>
+                    <artifactId>jetty-alpn-java-client</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.eclipse.jetty</groupId>
                     <artifactId>jetty-alpn-server</artifactId>
                 </exclusion>
                 <exclusion>
@@ -301,6 +305,10 @@
                 <exclusion>
                     <groupId>org.eclipse.jetty.http2</groupId>
                     <artifactId>http2-http-client-transport</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.eclipse.jetty</groupId>
+                    <artifactId>jetty-alpn-java-client</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>org.eclipse.jetty</groupId>
