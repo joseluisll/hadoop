@@ -109,7 +109,11 @@ jobs:
           retention-days: 7
 
   run-aws-integration:
-    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+    # Fork-only: run only for Hadoop JIRA branches (HADOOP-, HDFS-, YARN-, MAPREDUCE-).
+    if: >-
+      github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository &&
+      (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
+      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-'))
     # Security: write privileges are needed to update PR status and upload test results.
     # Package write is for building toolchain container images on demand, but ghcr.io access is
     # scoped to the repository the actions run on.
