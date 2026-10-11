@@ -1,0 +1,80 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Fork-only: when a pull request is merged into PREPARATION, build
+# <branch>-upstream with .github/scripts/make-upstream-branch.sh and push it,
+# ready for an apache/hadoop pull request. PRs that only change .github/ are
+# skipped.
+
+name: "Upstream branch"
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [PREPARATION]
+
+permissions:
+  contents: write
+
+jobs:
+  upstream-branch:
+    name: Build upstream branch
+    # Only merged PRs from Hadoop JIRA branches (HADOOP-, HDFS-, YARN-,
+    # MAPREDUCE-) that live in this repository.
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
+      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-'))
+    runs-on: ubuntu-24.04
+    env:
+      FEATURE: ${{ github.event.pull_request.head.ref }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
+      MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+    steps:
+      - name: Checkout the merged PREPARATION
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          fetch-depth: 0
+      - name: Build and push the upstream branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # The PR's head, even if its branch was deleted on merge.
+          git fetch --quiet origin "refs/pull/${PR_NUMBER}/head"
+          feature_commit=$(git rev-parse FETCH_HEAD)
+          # PREPARATION as it was just before this PR was merged.
+          base_commit=$(git rev-parse "${MERGE_COMMIT}^1")
+          # Keep a copy of the script: it checks out apache/hadoop trunk.
+          script="${RUNNER_TEMP}/make-upstream-branch.sh"
+          cp .github/scripts/make-upstream-branch.sh "${script}"
+          status=0
+          BASE_COMMIT="${base_commit}" FEATURE_COMMIT="${feature_commit}" \
+            bash "${script}" "${FEATURE}" || status=$?
+          if [[ ${status} -eq 3 ]]; then
+            echo "::notice::${FEATURE} only changes .github/; no upstream branch needed."
+            exit 0
+          elif [[ ${status} -ne 0 ]]; then
+            exit "${status}"
+          fi
+          # Pushed with GITHUB_TOKEN, so it does not start the Build workflow
+          # that apache/hadoop's own files would run on that branch.
+          git push --force origin "${FEATURE}-upstream"
+          echo "::notice::Pushed ${FEATURE}-upstream for an apache/hadoop pull request."
