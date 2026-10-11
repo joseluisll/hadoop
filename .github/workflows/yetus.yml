@@ -28,6 +28,8 @@ name: "Yetus"
 on:
   pull_request:
     types: [opened, reopened, synchronize]
+    # Fork-only: only PRs into PREPARATION.
+    branches: [PREPARATION]
 
 permissions:
   contents: read
