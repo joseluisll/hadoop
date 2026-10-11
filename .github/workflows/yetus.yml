@@ -1,0 +1,123 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+
+name: "Yetus"
+
+# Runs the same precommit as the ASF Jenkins job in dev-support/Jenkinsfile:
+# the same Yetus build, the Ubuntu Noble run on every PR, and the optional
+# Rocky Linux 8 and Debian 13 runs that jenkins.sh only carries out when a PR
+# changes C/C++ code or the build platform.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: yetus-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  # a7d29a6 changed GitHub PR patch downloads in a way that fails in Actions.
+  YETUS_REPOSITORY: ayushtkn/yetus
+  YETUS_VERSION: 730e8612d10cee53777e9a0f08fcceda205f0e0a
+  # Prebuilt build images that apache/hadoop's "Image Cache" workflow
+  # publishes from dev-support/docker on trunk. Reusing them avoids building
+  # the whole toolchain image on every run.
+  BUILD_IMAGE_PREFIX: ghcr.io/apache/hadoop/gha-build-
+  BUILD_IMAGE_SUFFIX: -image-cache:trunk-static
+
+jobs:
+  yetus:
+    name: Yetus precommit (${{ matrix.platform }})
+    runs-on: ubuntu-24.04
+    # GitHub-hosted runners stop a job after 6 hours.
+    timeout-minutes: 360
+    continue-on-error: ${{ matrix.optional == '1' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-noble
+            os: ubuntu_24
+            optional: "0"
+          - platform: rockylinux-8
+            os: rockylinux_8
+            optional: "1"
+          - platform: debian-13
+            os: debian_13
+            optional: "1"
+    env:
+      WORKSPACE: ${{ github.workspace }}
+      YETUS: yetus
+      SOURCEDIR: ${{ github.workspace }}/src
+      PATCHDIR: ${{ github.workspace }}/out
+      DOCKERFILE: ${{ github.workspace }}/yetus-base/Dockerfile
+      IS_OPTIONAL: ${{ matrix.optional }}
+      CHANGE_URL: ${{ github.event.pull_request.html_url }}
+      PATCH_OR_ISSUE: ${{ github.event.pull_request.html_url }}
+      BRANCH_NAME: ${{ github.event.pull_request.base.ref }}
+      BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_USER: ${{ github.actor }}
+    steps:
+      - name: Checkout Hadoop
+        uses: actions/checkout@v4
+        with:
+          path: src
+          fetch-depth: 0
+      - name: Checkout Yetus
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ env.YETUS_REPOSITORY }}
+          ref: ${{ env.YETUS_VERSION }}
+          path: yetus
+      - name: Use the Apache trunk build image
+        # Yetus builds whatever --dockerfile names as its base image. A single
+        # FROM line makes that build a pull of the published image, and only
+        # when jenkins.sh actually runs Yetus for this platform.
+        run: |
+          mkdir -p "$(dirname "${DOCKERFILE}")"
+          echo "FROM ${BUILD_IMAGE_PREFIX}${{ matrix.os }}${BUILD_IMAGE_SUFFIX}" > "${DOCKERFILE}"
+          cat "${DOCKERFILE}"
+      - name: Run Yetus
+        run: |
+          git -C "$SOURCEDIR" fetch origin "${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}" || true
+          bash "$SOURCEDIR/dev-support/jenkins.sh" run_ci
+      - name: Send GitHub status if it was missed
+        # YETUS-1059; Jenkins does this for the Ubuntu Noble run only.
+        if: always() && matrix.optional == '0'
+        run: bash "$SOURCEDIR/dev-support/jenkins.sh" github_status_recovery
+      - name: Clean up Yetus processes
+        if: always()
+        run: bash "$SOURCEDIR/dev-support/jenkins.sh" cleanup_ci_proc
+      - name: Upload Yetus report
+        # Like Jenkins: always for Ubuntu Noble, on failure for the optional
+        # platforms.
+        if: always() && (matrix.optional == '0' || failure())
+        uses: actions/upload-artifact@v4
+        with:
+          name: yetus-report-${{ matrix.platform }}
+          path: out
+          if-no-files-found: ignore
