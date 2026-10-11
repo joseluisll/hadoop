@@ -42,6 +42,11 @@ env:
   # a7d29a6 changed GitHub PR patch downloads in a way that fails in Actions.
   YETUS_REPOSITORY: ayushtkn/yetus
   YETUS_VERSION: 730e8612d10cee53777e9a0f08fcceda205f0e0a
+  # Prebuilt build images that apache/hadoop's "Image Cache" workflow
+  # publishes from dev-support/docker on trunk. Reusing them avoids building
+  # the whole toolchain image on every run.
+  BUILD_IMAGE_PREFIX: ghcr.io/apache/hadoop/gha-build-
+  BUILD_IMAGE_SUFFIX: -image-cache:trunk-static
 
 jobs:
   yetus:
@@ -55,20 +60,20 @@ jobs:
       matrix:
         include:
           - platform: ubuntu-noble
-            dockerfile: Dockerfile_ubuntu_24
+            os: ubuntu_24
             optional: "0"
           - platform: rockylinux-8
-            dockerfile: Dockerfile_rockylinux_8
+            os: rockylinux_8
             optional: "1"
           - platform: debian-13
-            dockerfile: Dockerfile_debian_13
+            os: debian_13
             optional: "1"
     env:
       WORKSPACE: ${{ github.workspace }}
       YETUS: yetus
       SOURCEDIR: ${{ github.workspace }}/src
       PATCHDIR: ${{ github.workspace }}/out
-      DOCKERFILE: ${{ github.workspace }}/src/dev-support/docker/${{ matrix.dockerfile }}
+      DOCKERFILE: ${{ github.workspace }}/yetus-base/Dockerfile
       IS_OPTIONAL: ${{ matrix.optional }}
       CHANGE_URL: ${{ github.event.pull_request.html_url }}
       PATCH_OR_ISSUE: ${{ github.event.pull_request.html_url }}
@@ -88,6 +93,14 @@ jobs:
           repository: ${{ env.YETUS_REPOSITORY }}
           ref: ${{ env.YETUS_VERSION }}
           path: yetus
+      - name: Use the Apache trunk build image
+        # Yetus builds whatever --dockerfile names as its base image. A single
+        # FROM line makes that build a pull of the published image, and only
+        # when jenkins.sh actually runs Yetus for this platform.
+        run: |
+          mkdir -p "$(dirname "${DOCKERFILE}")"
+          echo "FROM ${BUILD_IMAGE_PREFIX}${{ matrix.os }}${BUILD_IMAGE_SUFFIX}" > "${DOCKERFILE}"
+          cat "${DOCKERFILE}"
       - name: Run Yetus
         run: |
           git -C "$SOURCEDIR" fetch origin "${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}" || true
