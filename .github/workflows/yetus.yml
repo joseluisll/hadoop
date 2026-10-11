@@ -34,6 +34,10 @@ concurrency:
 
 env:
   YETUS_VERSION: rel/0.14.1
+  # Prebuilt Hadoop build image, published by apache/hadoop's "Image Cache"
+  # workflow from Dockerfile_ubuntu_24 on trunk. Reusing it avoids building
+  # the whole toolchain image on every run.
+  YETUS_BASE_IMAGE: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
 
 jobs:
   yetus:
@@ -52,13 +56,20 @@ jobs:
           repository: apache/yetus
           ref: ${{ env.YETUS_VERSION }}
           path: yetus
+      - name: Pull Apache trunk build image
+        run: |
+          docker pull "${YETUS_BASE_IMAGE}"
+          # Yetus builds whatever --dockerfile names as its base image.
+          # A single FROM line makes that build a reuse of the pulled image.
+          mkdir -p "${RUNNER_TEMP}/yetus-base"
+          echo "FROM ${YETUS_BASE_IMAGE}" > "${RUNNER_TEMP}/yetus-base/Dockerfile"
       - name: Run Yetus
         env:
           WORKSPACE: ${{ github.workspace }}
           YETUS: yetus
           SOURCEDIR: ${{ github.workspace }}/src
           PATCHDIR: ${{ github.workspace }}/out
-          DOCKERFILE: ${{ github.workspace }}/src/dev-support/docker/Dockerfile_ubuntu_24
+          DOCKERFILE: ${{ runner.temp }}/yetus-base/Dockerfile
           CHANGE_URL: ${{ github.event.pull_request.html_url }}
           PATCH_OR_ISSUE: ${{ github.event.pull_request.html_url }}
           BRANCH_NAME: ${{ github.event.pull_request.base.ref }}
