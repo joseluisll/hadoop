@@ -20,6 +20,11 @@
 
 name: "Yetus"
 
+# Runs the same precommit as the ASF Jenkins job in dev-support/Jenkinsfile:
+# the same Yetus build, the Ubuntu Noble run on every PR, and the optional
+# Rocky Linux 8 and Debian 13 runs that jenkins.sh only carries out when a PR
+# changes C/C++ code or the build platform.
+
 on:
   pull_request:
     types: [opened, reopened, synchronize]
@@ -27,19 +32,50 @@ on:
 permissions:
   contents: read
   pull-requests: write
+  statuses: write
 
 concurrency:
   group: yetus-${{ github.event.pull_request.number }}
   cancel-in-progress: true
 
 env:
-  YETUS_VERSION: rel/0.14.1
+  # Keep in sync with dev-support/Jenkinsfile.
+  YETUS_REPOSITORY: ayushtkn/yetus
+  YETUS_VERSION: a7d29a6a72750a0c5c39512f33945e773e69303e
 
 jobs:
   yetus:
-    name: Run Yetus precommit
-    runs-on: ubuntu-latest
-    timeout-minutes: 600
+    name: Yetus precommit (${{ matrix.platform }})
+    runs-on: ubuntu-24.04
+    # GitHub-hosted runners stop a job after 6 hours.
+    timeout-minutes: 360
+    continue-on-error: ${{ matrix.optional == '1' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-noble
+            dockerfile: Dockerfile_ubuntu_24
+            optional: "0"
+          - platform: rockylinux-8
+            dockerfile: Dockerfile_rockylinux_8
+            optional: "1"
+          - platform: debian-13
+            dockerfile: Dockerfile_debian_13
+            optional: "1"
+    env:
+      WORKSPACE: ${{ github.workspace }}
+      YETUS: yetus
+      SOURCEDIR: ${{ github.workspace }}/src
+      PATCHDIR: ${{ github.workspace }}/out
+      DOCKERFILE: ${{ github.workspace }}/src/dev-support/docker/${{ matrix.dockerfile }}
+      IS_OPTIONAL: ${{ matrix.optional }}
+      CHANGE_URL: ${{ github.event.pull_request.html_url }}
+      PATCH_OR_ISSUE: ${{ github.event.pull_request.html_url }}
+      BRANCH_NAME: ${{ github.event.pull_request.base.ref }}
+      BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      GITHUB_USER: ${{ github.actor }}
     steps:
       - name: Checkout Hadoop
         uses: actions/checkout@v4
@@ -49,29 +85,26 @@ jobs:
       - name: Checkout Yetus
         uses: actions/checkout@v4
         with:
-          repository: apache/yetus
+          repository: ${{ env.YETUS_REPOSITORY }}
           ref: ${{ env.YETUS_VERSION }}
           path: yetus
       - name: Run Yetus
-        env:
-          WORKSPACE: ${{ github.workspace }}
-          YETUS: yetus
-          SOURCEDIR: ${{ github.workspace }}/src
-          PATCHDIR: ${{ github.workspace }}/out
-          DOCKERFILE: ${{ github.workspace }}/src/dev-support/docker/Dockerfile_ubuntu_24
-          CHANGE_URL: ${{ github.event.pull_request.html_url }}
-          PATCH_OR_ISSUE: ${{ github.event.pull_request.html_url }}
-          BRANCH_NAME: ${{ github.event.pull_request.base.ref }}
-          BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          GITHUB_USER: ${{ github.actor }}
-          IS_OPTIONAL: "0"
         run: |
           git -C "$SOURCEDIR" fetch origin "${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}" || true
           bash "$SOURCEDIR/dev-support/jenkins.sh" run_ci
-      - name: Upload Yetus report
+      - name: Send GitHub status if it was missed
+        # YETUS-1059; Jenkins does this for the Ubuntu Noble run only.
+        if: always() && matrix.optional == '0'
+        run: bash "$SOURCEDIR/dev-support/jenkins.sh" github_status_recovery
+      - name: Clean up Yetus processes
         if: always()
+        run: bash "$SOURCEDIR/dev-support/jenkins.sh" cleanup_ci_proc
+      - name: Upload Yetus report
+        # Like Jenkins: always for Ubuntu Noble, on failure for the optional
+        # platforms.
+        if: always() && (matrix.optional == '0' || failure())
         uses: actions/upload-artifact@v4
         with:
-          name: yetus-report
+          name: yetus-report-${{ matrix.platform }}
           path: out
+          if-no-files-found: ignore
