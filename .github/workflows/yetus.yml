@@ -51,10 +51,14 @@ env:
 jobs:
   yetus:
     name: Yetus precommit (${{ matrix.platform }})
-    # A run that starts after its PR was merged gets the base branch as
+    # A run that starts after its PR was merged can get the base branch as
     # github.ref instead of refs/pull/<N>/merge, and Yetus cannot tell which
-    # PR to test. Skip it.
-    if: startsWith(github.ref, 'refs/pull/')
+    # PR to test. Skip it. "Run Yetus" also skips PRs that are no longer open.
+    # Fork-only: also run only for Hadoop JIRA branches (HADOOP-, HDFS-, YARN-, MAPREDUCE-).
+    if: >-
+      startsWith(github.ref, 'refs/pull/') &&
+      (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
+      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-'))
     runs-on: ubuntu-24.04
     # GitHub-hosted runners stop a job after 6 hours.
     timeout-minutes: 360
@@ -85,6 +89,7 @@ jobs:
       BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
       GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GITHUB_USER: ${{ github.actor }}
+      PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
       - name: Checkout Hadoop
         uses: actions/checkout@v4
@@ -107,6 +112,16 @@ jobs:
           cat "${DOCKERFILE}"
       - name: Run Yetus
         run: |
+          # A run that only starts after its PR was merged would test the
+          # patch against a base branch that already contains it.
+          state=$(curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+            | jq -r .state) || state=unknown
+          if [[ "${state}" == closed ]]; then
+            echo "::notice::PR #${PR_NUMBER} is already merged or closed; skipping Yetus."
+            exit 0
+          fi
           git -C "$SOURCEDIR" fetch origin "${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}" || true
           bash "$SOURCEDIR/dev-support/jenkins.sh" run_ci
       - name: Send GitHub status if it was missed
