@@ -39,9 +39,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  # Keep in sync with dev-support/Jenkinsfile.
+  # a7d29a6 changed GitHub PR patch downloads in a way that fails in Actions.
   YETUS_REPOSITORY: ayushtkn/yetus
-  YETUS_VERSION: a7d29a6a72750a0c5c39512f33945e773e69303e
+  YETUS_VERSION: 730e8612d10cee53777e9a0f08fcceda205f0e0a
 
 jobs:
   yetus:
