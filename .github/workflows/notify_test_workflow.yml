@@ -37,10 +37,12 @@ on:
 jobs:
   notify:
     name: "Notify Test Workflow"
-    # Fork-only: run only for Hadoop JIRA branches (HADOOP-, HDFS-, YARN-, MAPREDUCE-).
+    # Fork-only: run only for Hadoop JIRA branches (HADOOP-, HDFS-, YARN-, MAPREDUCE-),
+    # but not their <branch>-upstream copies built for apache/hadoop.
     if: >-
       (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
-      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-'))
+      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-')) &&
+      !endsWith(github.head_ref, '-upstream')
     runs-on: ubuntu-slim
     permissions:
       actions: read
