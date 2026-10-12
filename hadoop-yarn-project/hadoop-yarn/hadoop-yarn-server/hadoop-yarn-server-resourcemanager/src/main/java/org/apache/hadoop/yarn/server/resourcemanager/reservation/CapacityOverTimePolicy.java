@@ -111,8 +111,8 @@ public class CapacityOverTimePolicy extends NoOverCommitPolicy {
       consumptionForUserOverTime =
           RLESparseResourceAllocation.merge(plan.getResourceCalculator(),
               plan.getTotalCapacity(), consumptionForUserOverTime,
-              old.getResourcesOverTime(checkStart, checkEnd), RLEOperator.add,
-              checkStart, checkEnd);
+              old.getResourcesOverTime(checkStart, checkEnd),
+              RLEOperator.subtract, checkStart, checkEnd);
     }
 
     RLESparseResourceAllocation resRLE =
