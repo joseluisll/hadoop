@@ -118,10 +118,14 @@ public class CapacityOverTimePolicy extends NoOverCommitPolicy {
     RLESparseResourceAllocation resRLE =
         reservation.getResourcesOverTime(checkStart, checkEnd);
 
+    // An allocation in progress at checkEnd is not closed in the views above,
+    // so end the merge after checkEnd rather than at Long.MAX_VALUE, where
+    // the integral below would overflow. Points after checkEnd do not affect
+    // the integral over [checkStart, checkEnd], which is what is checked.
     RLESparseResourceAllocation toCheck = RLESparseResourceAllocation
         .merge(plan.getResourceCalculator(), plan.getTotalCapacity(),
             consumptionForUserOverTime, resRLE, RLEOperator.add, Long.MIN_VALUE,
-            Long.MAX_VALUE);
+            checkEnd + validWindow);
 
     NavigableMap<Long, Resource> integralUp = new TreeMap<>();
     NavigableMap<Long, Resource> integralDown = new TreeMap<>();
