@@ -17,6 +17,7 @@
  *******************************************************************************/
 package org.apache.hadoop.yarn.server.resourcemanager.reservation;
 
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 
@@ -29,6 +30,7 @@ import java.util.TreeMap;
 import net.jcip.annotations.NotThreadSafe;
 
 import org.apache.hadoop.yarn.api.records.ReservationDefinition;
+import org.apache.hadoop.yarn.api.records.ReservationId;
 import org.apache.hadoop.yarn.api.records.Resource;
 import org.apache.hadoop.yarn.server.resourcemanager.reservation.exceptions.PlanningException;
 import org.apache.hadoop.yarn.server.resourcemanager.reservation.exceptions.PlanningQuotaException;
@@ -202,6 +204,29 @@ public class TestCapacityOverTimePolicy extends BaseSharingPolicyTest {
     }
   }
 
+  /**
+   * Updating a reservation must not count its old version on top of the
+   * user's consumption, which already includes it: the update below keeps
+   * the reservation far within the 25% average limit.
+   */
+  @Test
+  public void testUpdateReservationWithinQuota() throws PlanningException {
+    InMemoryPlan plan = createPlan();
+    // an arbitrary fixed start time
+    long t0 = 1791808200000L;
+    ReservationId id = ReservationSystemTestUtil.getNewReservationId();
+
+    // 20% of the cluster for 20h, 16.7% on average over the 24h window
+    assertTrue(plan.addReservation(
+        createReservation(id, t0, t0 + 20 * ONEHOUR, 0.2, null), false));
+    // 20% of the cluster for 21h, 17.5% on average
+    assertTrue(plan.updateReservation(
+        createReservation(id, t0, t0 + 21 * ONEHOUR, 0.2, null)));
+    // 30% of the cluster for 21h, 26.25% on average, exceeds the limit
+    assertThrows(PlanningQuotaException.class, () -> plan.updateReservation(
+        createReservation(id, t0, t0 + 21 * ONEHOUR, 0.3, null)));
+  }
+
   private InMemoryPlan createPlan() {
     return new InMemoryPlan(mock(QueueMetrics.class), getInitializedPolicy(),
         mock(ReservationAgent.class),
@@ -218,6 +243,12 @@ public class TestCapacityOverTimePolicy extends BaseSharingPolicyTest {
    */
   private InMemoryReservationAllocation createReservation(long start,
       long end, double share, String recurrenceExpression) {
+    return createReservation(ReservationSystemTestUtil.getNewReservationId(),
+        start, end, share, recurrenceExpression);
+  }
+
+  private InMemoryReservationAllocation createReservation(ReservationId id,
+      long start, long end, double share, String recurrenceExpression) {
     ResourceCalculator rc = new DefaultResourceCalculator();
     Resource minAlloc = Resource.newInstance(1024, 1);
     Resource alloc = Resources.multiply(minAlloc, share * 1000);
@@ -242,8 +273,7 @@ public class TestCapacityOverTimePolicy extends BaseSharingPolicyTest {
     ReservationDefinition rDef =
         ReservationSystemTestUtil.createSimpleReservationDefinition(start,
             end, end - start, 1, recurrenceExpression);
-    return new InMemoryReservationAllocation(
-        ReservationSystemTestUtil.getNewReservationId(), rDef, "u1",
-        "dedicated", rStart, rEnd, allocations, rc, minAlloc);
+    return new InMemoryReservationAllocation(id, rDef, "u1", "dedicated",
+        rStart, rEnd, allocations, rc, minAlloc);
   }
 }
