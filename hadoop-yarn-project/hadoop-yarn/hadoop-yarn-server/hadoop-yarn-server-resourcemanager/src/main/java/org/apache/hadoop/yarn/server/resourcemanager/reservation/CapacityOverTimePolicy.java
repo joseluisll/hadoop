@@ -122,6 +122,9 @@ public class CapacityOverTimePolicy extends NoOverCommitPolicy {
     // so end the merge after checkEnd rather than at Long.MAX_VALUE, where
     // the integral below would overflow. Points after checkEnd do not affect
     // the integral over [checkStart, checkEnd], which is what is checked.
+    // Ending the merge at checkEnd instead would add a point in that range,
+    // where the approximated integral overestimates the window and could
+    // reject reservations within the quota.
     RLESparseResourceAllocation toCheck = RLESparseResourceAllocation
         .merge(plan.getResourceCalculator(), plan.getTotalCapacity(),
             consumptionForUserOverTime, resRLE, RLEOperator.add, Long.MIN_VALUE,
