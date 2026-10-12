@@ -37,12 +37,14 @@ jobs:
   upstream-branch:
     name: Build upstream branch
     # Only merged PRs from Hadoop JIRA branches (HADOOP-, HDFS-, YARN-,
-    # MAPREDUCE-) that live in this repository.
+    # MAPREDUCE-) that live in this repository, and never from a
+    # <branch>-upstream branch itself.
     if: >-
       github.event.pull_request.merged == true &&
       github.event.pull_request.head.repo.full_name == github.repository &&
       (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
-      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-'))
+      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-')) &&
+      !endsWith(github.head_ref, '-upstream')
     runs-on: ubuntu-24.04
     env:
       FEATURE: ${{ github.event.pull_request.head.ref }}
