@@ -40,16 +40,21 @@
 #                    FORK_BASE (e.g. the base before a PR was merged)
 #   FEATURE_COMMIT   use this commit as the feature instead of fetching
 #                    <feature-branch> (e.g. a merged PR's head)
+#   UPSTREAM_AUTHOR  author and committer, as "Name <email>"
+#                    (default: git config user.name and user.email)
 #
-# The commit keeps the author of the feature's oldest commit. The new branch
-# is only created locally; push it yourself once reviewed.
+# The commit message joins the feature's commits that start with the feature
+# branch name (its JIRA) and change something outside .github/ (or else takes
+# its oldest commit), without Claude-Session lines, and with Claude as
+# co-author. The new branch is only created locally; push it yourself once
+# reviewed.
 #
 # Exit status: 0 created, 3 nothing outside .github/ to send, other on error.
 
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  sed -n '20,47p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '20,52p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 
@@ -60,6 +65,15 @@ fork_base=${FORK_BASE:-PREPARATION}
 upstream_remote=${UPSTREAM_REMOTE:-apache}
 upstream_url=${UPSTREAM_URL:-https://github.com/apache/hadoop.git}
 upstream_branch=${UPSTREAM_BRANCH:-trunk}
+author=${UPSTREAM_AUTHOR:-"$(git config user.name || true) <$(git config user.email || true)>"}
+co_author="Co-Authored-By: Claude <noreply@anthropic.com>"
+
+if [[ ! "${author}" =~ ^([^<>]*[^<>[:space:]])\ \<([^<>[:space:]]+@[^<>[:space:]]+)\>$ ]]; then
+  echo "ERROR: no author; set UPSTREAM_AUTHOR=\"Name <email>\" or git config user.name/user.email." >&2
+  exit 1
+fi
+author_name=${BASH_REMATCH[1]}
+author_email=${BASH_REMATCH[2]}
 
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   echo "ERROR: the working tree has uncommitted changes; commit or stash them first." >&2
@@ -94,14 +108,54 @@ if [[ ! -s "${patch}" ]]; then
   exit 3
 fi
 
-# Reuse the message of the oldest commit of the feature branch.
-first_commit=$(git rev-list --reverse --no-merges "${base_ref}..${feature_ref}" | head -n 1)
-message=$(git log -1 --format=%B "${first_commit}")
-author=$(git log -1 --format='%an <%ae>' "${first_commit}")
+# The message comes from the feature's own commits: those that name its JIRA
+# (the branch name) and change something outside .github/, oldest first, so
+# empty "re-trigger CI" commits are skipped. Once PREPARATION is rebuilt,
+# commits that came in by merging an older PREPARATION are in this range too.
+commits=()
+while read -r commit; do
+  if ! git diff --quiet "${commit}^" "${commit}" -- . ':(exclude).github'; then
+    commits+=("${commit}")
+  fi
+done < <(git rev-list --reverse --no-merges -E --grep="^${feature}([^0-9]|$)" \
+  "${base_ref}..${feature_ref}")
+if [[ ${#commits[@]} -eq 0 ]]; then
+  commits=("$(git rev-list --reverse --no-merges "${base_ref}..${feature_ref}" | head -n 1)")
+fi
+
+# A commit's body without its trailers and Claude session links.
+body_of() {
+  git log -1 --format=%b "$1" \
+    | grep -v -i -E '^(Co-Authored-By|Claude-Session):|claude\.ai/code/session' \
+    | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' || true
+}
+
+# The oldest commit's subject and body, then each later commit's subject
+# (without the JIRA prefix) and body.
+message=$(git log -1 --format=%s "${commits[0]}")
+body=$(body_of "${commits[0]}")
+if [[ -n "${body}" ]]; then message+=$'\n\n'"${body}"; fi
+for commit in "${commits[@]:1}"; do
+  subject=$(git log -1 --format=%s "${commit}" | sed -E "s/^${feature}[.:]?[[:space:]]*//")
+  message+=$'\n\n'"${subject}"
+  body=$(body_of "${commit}")
+  if [[ -n "${body}" ]]; then message+=$'\n\n'"${body}"; fi
+done
+
+# Their Co-Authored-By trailers, once each; Claude stays as co-author.
+trailers=$(for commit in "${commits[@]}"; do
+  git log -1 --format=%B "${commit}" | grep -i '^Co-Authored-By:' || true
+done | awk '!seen[tolower($0)]++')
+if ! grep -q -i -E '^Co-Authored-By: Claude( .*)? <noreply@anthropic\.com>$' <<< "${trailers}"; then
+  trailers=$(printf '%s\n%s' "${trailers}" "${co_author}" | sed '/^$/d')
+fi
+message+=$'\n\n'"${trailers}"
 
 git checkout --quiet -B "${target}" "${upstream_ref}"
 git apply --index --3way "${patch}"
-git commit --quiet --author="${author}" -m "${message}"
+GIT_AUTHOR_NAME="${author_name}" GIT_AUTHOR_EMAIL="${author_email}" \
+  GIT_COMMITTER_NAME="${author_name}" GIT_COMMITTER_EMAIL="${author_email}" \
+  git commit --quiet -m "${message}"
 
 echo "Created ${target} on ${upstream_ref}:"
 git log --oneline -1
