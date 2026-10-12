@@ -43,17 +43,18 @@
 #   UPSTREAM_AUTHOR  author and committer, as "Name <email>"
 #                    (default: git config user.name and user.email)
 #
-# The commit takes the message of the feature's oldest commit that starts with
-# the feature branch name (its JIRA), or else of its oldest commit, without
-# Claude-Session lines, and with Claude as co-author. The new branch is only
-# created locally; push it yourself once reviewed.
+# The commit message joins the feature's commits that start with the feature
+# branch name (its JIRA) and change something outside .github/ (or else takes
+# its oldest commit), without Claude-Session lines, and with Claude as
+# co-author. The new branch is only created locally; push it yourself once
+# reviewed.
 #
 # Exit status: 0 created, 3 nothing outside .github/ to send, other on error.
 
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  sed -n '20,51p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '20,52p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 
@@ -107,20 +108,48 @@ if [[ ! -s "${patch}" ]]; then
   exit 3
 fi
 
-# Reuse the message of the oldest commit of the feature branch that names its
-# JIRA (the branch name): once PREPARATION is rebuilt, commits that came in by
-# merging an older PREPARATION are in this range too.
-first_commit=$(git rev-list --reverse --no-merges -E --grep="^${feature}([^0-9]|$)" \
-  "${base_ref}..${feature_ref}" | head -n 1)
-if [[ -z "${first_commit}" ]]; then
-  first_commit=$(git rev-list --reverse --no-merges "${base_ref}..${feature_ref}" | head -n 1)
+# The message comes from the feature's own commits: those that name its JIRA
+# (the branch name) and change something outside .github/, oldest first, so
+# empty "re-trigger CI" commits are skipped. Once PREPARATION is rebuilt,
+# commits that came in by merging an older PREPARATION are in this range too.
+commits=()
+while read -r commit; do
+  if ! git diff --quiet "${commit}^" "${commit}" -- . ':(exclude).github'; then
+    commits+=("${commit}")
+  fi
+done < <(git rev-list --reverse --no-merges -E --grep="^${feature}([^0-9]|$)" \
+  "${base_ref}..${feature_ref}")
+if [[ ${#commits[@]} -eq 0 ]]; then
+  commits=("$(git rev-list --reverse --no-merges "${base_ref}..${feature_ref}" | head -n 1)")
 fi
-# No Claude session links upstream; Claude stays as co-author.
-message=$(git log -1 --format=%B "${first_commit}" \
-  | grep -v -i -E '^Claude-Session:|claude\.ai/code/session' || true)
-if ! grep -q -i -E '^Co-Authored-By: Claude( .*)? <noreply@anthropic\.com>$' <<< "${message}"; then
-  message=$(git interpret-trailers --trailer "${co_author}" <<< "${message}")
+
+# A commit's body without its trailers and Claude session links.
+body_of() {
+  git log -1 --format=%b "$1" \
+    | grep -v -i -E '^(Co-Authored-By|Claude-Session):|claude\.ai/code/session' \
+    | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' || true
+}
+
+# The oldest commit's subject and body, then each later commit's subject
+# (without the JIRA prefix) and body.
+message=$(git log -1 --format=%s "${commits[0]}")
+body=$(body_of "${commits[0]}")
+if [[ -n "${body}" ]]; then message+=$'\n\n'"${body}"; fi
+for commit in "${commits[@]:1}"; do
+  subject=$(git log -1 --format=%s "${commit}" | sed -E "s/^${feature}[.:]?[[:space:]]*//")
+  message+=$'\n\n'"${subject}"
+  body=$(body_of "${commit}")
+  if [[ -n "${body}" ]]; then message+=$'\n\n'"${body}"; fi
+done
+
+# Their Co-Authored-By trailers, once each; Claude stays as co-author.
+trailers=$(for commit in "${commits[@]}"; do
+  git log -1 --format=%B "${commit}" | grep -i '^Co-Authored-By:' || true
+done | awk '!seen[tolower($0)]++')
+if ! grep -q -i -E '^Co-Authored-By: Claude( .*)? <noreply@anthropic\.com>$' <<< "${trailers}"; then
+  trailers=$(printf '%s\n%s' "${trailers}" "${co_author}" | sed '/^$/d')
 fi
+message+=$'\n\n'"${trailers}"
 
 git checkout --quiet -B "${target}" "${upstream_ref}"
 git apply --index --3way "${patch}"
