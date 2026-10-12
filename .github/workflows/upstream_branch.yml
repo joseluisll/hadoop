@@ -48,6 +48,8 @@ jobs:
       FEATURE: ${{ github.event.pull_request.head.ref }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
       MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+      # Author and committer of the upstream commit; Claude is added as co-author.
+      UPSTREAM_AUTHOR: "Jose Luis López López <joseluisll@gmail.com>"
     steps:
       - name: Checkout the merged PREPARATION
         uses: actions/checkout@v4

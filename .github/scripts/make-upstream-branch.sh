@@ -40,18 +40,20 @@
 #                    FORK_BASE (e.g. the base before a PR was merged)
 #   FEATURE_COMMIT   use this commit as the feature instead of fetching
 #                    <feature-branch> (e.g. a merged PR's head)
+#   UPSTREAM_AUTHOR  author and committer, as "Name <email>"
+#                    (default: git config user.name and user.email)
 #
-# The commit keeps the message and author of the feature's oldest commit that
-# starts with the feature branch name (its JIRA), or else of its oldest
-# commit. The new branch is only created locally; push it yourself once
-# reviewed.
+# The commit takes the message of the feature's oldest commit that starts with
+# the feature branch name (its JIRA), or else of its oldest commit, without
+# Claude-Session lines, and with Claude as co-author. The new branch is only
+# created locally; push it yourself once reviewed.
 #
 # Exit status: 0 created, 3 nothing outside .github/ to send, other on error.
 
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  sed -n '20,49p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '20,51p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 
@@ -62,6 +64,15 @@ fork_base=${FORK_BASE:-PREPARATION}
 upstream_remote=${UPSTREAM_REMOTE:-apache}
 upstream_url=${UPSTREAM_URL:-https://github.com/apache/hadoop.git}
 upstream_branch=${UPSTREAM_BRANCH:-trunk}
+author=${UPSTREAM_AUTHOR:-"$(git config user.name || true) <$(git config user.email || true)>"}
+co_author="Co-Authored-By: Claude <noreply@anthropic.com>"
+
+if [[ ! "${author}" =~ ^([^<>]*[^<>[:space:]])\ \<([^<>[:space:]]+@[^<>[:space:]]+)\>$ ]]; then
+  echo "ERROR: no author; set UPSTREAM_AUTHOR=\"Name <email>\" or git config user.name/user.email." >&2
+  exit 1
+fi
+author_name=${BASH_REMATCH[1]}
+author_email=${BASH_REMATCH[2]}
 
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   echo "ERROR: the working tree has uncommitted changes; commit or stash them first." >&2
@@ -104,12 +115,18 @@ first_commit=$(git rev-list --reverse --no-merges -E --grep="^${feature}([^0-9]|
 if [[ -z "${first_commit}" ]]; then
   first_commit=$(git rev-list --reverse --no-merges "${base_ref}..${feature_ref}" | head -n 1)
 fi
-message=$(git log -1 --format=%B "${first_commit}")
-author=$(git log -1 --format='%an <%ae>' "${first_commit}")
+# No Claude session links upstream; Claude stays as co-author.
+message=$(git log -1 --format=%B "${first_commit}" \
+  | grep -v -i -E '^Claude-Session:|claude\.ai/code/session' || true)
+if ! grep -q -i -E '^Co-Authored-By: Claude( .*)? <noreply@anthropic\.com>$' <<< "${message}"; then
+  message=$(git interpret-trailers --trailer "${co_author}" <<< "${message}")
+fi
 
 git checkout --quiet -B "${target}" "${upstream_ref}"
 git apply --index --3way "${patch}"
-git commit --quiet --author="${author}" -m "${message}"
+GIT_AUTHOR_NAME="${author_name}" GIT_AUTHOR_EMAIL="${author_email}" \
+  GIT_COMMITTER_NAME="${author_name}" GIT_COMMITTER_EMAIL="${author_email}" \
+  git commit --quiet -m "${message}"
 
 echo "Created ${target} on ${upstream_ref}:"
 git log --oneline -1
