@@ -37,6 +37,10 @@ on:
 jobs:
   notify:
     name: "Notify Test Workflow"
+    # Fork-only: run only for Hadoop JIRA branches (HADOOP-, HDFS-, YARN-, MAPREDUCE-).
+    if: >-
+      (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
+      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-'))
     runs-on: ubuntu-slim
     permissions:
       actions: read
