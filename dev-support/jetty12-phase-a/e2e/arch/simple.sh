@@ -67,12 +67,17 @@ arch_conf() {
     "nfs.server.port=${P_NFS3}" \
     "nfs.mountd.port=${P_MOUNTD}" \
     "nfs.http.address=${HOST}:${P_NFS_HTTP}"
+  # Router WebHDFS redirects name the router by its id, the local hostname
+  # plus the RPC port (Router#setRpcServerAddress), whatever its RPC address;
+  # the router listens on all interfaces so the datanode reaches it (on CI
+  # runners the hostname is not a loopback address).
   site "${HADOOP_CONF_DIR}/hdfs-rbf-site.xml" \
     "dfs.nameservices=ns0" \
     "dfs.namenode.rpc-address.ns0=${HOST}:${P_NN_RPC}" \
     "dfs.namenode.http-address.ns0=${HOST}:${P_NN_HTTP}" \
     "dfs.federation.router.default.nameserviceId=ns0" \
     "dfs.federation.router.rpc-address=${HOST}:${P_ROUTER_RPC}" \
+    "dfs.federation.router.rpc-bind-host=0.0.0.0" \
     "dfs.federation.router.http-address=${HOST}:${P_ROUTER_HTTP}" \
     "dfs.federation.router.admin-address=${HOST}:${P_ROUTER_ADMIN}" \
     "dfs.federation.router.monitor.namenode=ns0" \

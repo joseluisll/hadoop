@@ -97,8 +97,13 @@ arch_conf() {
     "dfs.namenode.http-address.ns1=${HOST}:${FED_HTTP[0]}" \
     "dfs.namenode.rpc-address.ns2=${HOST}:${FED_RPC[1]}" \
     "dfs.namenode.http-address.ns2=${HOST}:${FED_HTTP[1]}"
+  # Router WebHDFS redirects name the router by its id, the local hostname
+  # plus the RPC port (Router#setRpcServerAddress), whatever its RPC address;
+  # the router listens on all interfaces so the datanode reaches it (on CI
+  # runners the hostname is not a loopback address).
   site "${HADOOP_CONF_DIR}/hdfs-rbf-site.xml" \
     "dfs.federation.router.rpc-address=${HOST}:${P_ROUTER_RPC}" \
+    "dfs.federation.router.rpc-bind-host=0.0.0.0" \
     "dfs.federation.router.http-address=${HOST}:${P_ROUTER_HTTP}" \
     "dfs.federation.router.admin-address=${HOST}:${P_ROUTER_ADMIN}" \
     "dfs.federation.router.default.nameserviceId=ns1" \

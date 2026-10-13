@@ -111,8 +111,13 @@ arch_conf() {
       "dfs.ha.namenode.id=${HA_NN[i]}" \
       "dfs.namenode.name.dir=${d}/${HA_NN[i]}"
     site "$(instance_conf "${HA_RM[i]}")/yarn-site.xml" "yarn.resourcemanager.ha.id=${HA_RM[i]}"
+    # Router WebHDFS redirects name the router by its id, the local hostname
+    # plus the RPC port (Router#setRpcServerAddress), whatever its RPC address;
+    # the router listens on all interfaces so the datanode reaches it (on CI
+    # runners the hostname is not a loopback address).
     site "${RUN}/conf-${ROUTERS[i]}/hdfs-rbf-site.xml" \
       "dfs.federation.router.rpc-address=${HOST}:${ROUTER_RPC[i]}" \
+      "dfs.federation.router.rpc-bind-host=0.0.0.0" \
       "dfs.federation.router.http-address=${HOST}:${ROUTER_HTTP[i]}" \
       "dfs.federation.router.admin-address=${HOST}:${ROUTER_ADMIN[i]}"
   done

@@ -180,6 +180,14 @@ These are not caused by phase A; the harness records them, and they show as
   on each side. The harness accepts either shape for these responses
   (`obsdiff` in `e2e/expected-e2e-differences.txt`); their other checks
   still apply.
+- No JIRA yet: a WebHDFS read through the HDFS router (RBF) redirects the
+  client to a datanode with `namenoderpcaddress=<router id>`, and the router
+  id is the local hostname plus the RPC port (`Router#setRpcServerAddress`),
+  not the configured `dfs.federation.router.rpc-address`. A router bound to
+  one address the hostname does not resolve to (on CI runners the hostname is
+  a private address, the harness binds `localhost`) leaves the datanode unable
+  to reach it, and the read fails with 403. The harness sets
+  `dfs.federation.router.rpc-bind-host=0.0.0.0`.
 
 ## Running it
 
