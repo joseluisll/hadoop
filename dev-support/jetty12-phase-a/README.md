@@ -139,23 +139,37 @@ These are not caused by phase A; the harness records them, and they show as
 
 ### In CI
 
-`.github/workflows/jetty12_phase_a.yml` runs everything in parallel jobs:
-two builds, one job per architecture and side, one job per unit suite and
-side, and a comparison job that writes `report.md` to the run summary and
-the `report` artifact. It starts by hand:
+One workflow per architecture, so each can be run, re-run and read on its
+own; all five share `.github/workflows/tmpl_jetty12_phase_a.yml`:
 
-- **Run workflow** in the Actions tab, with the refs, architectures, suites
-  and tier as inputs. GitHub only offers this for workflows on the default
-  branch (`trunk` in this fork), so until then use:
-- a tag named `jetty12-phase-a-run-*`, which runs the harness from the
-  tagged commit with the defaults:
+| Workflow | Architecture | Unit test suites |
+|---|---|---|
+| `jetty12_phase_a_simple.yml` | `simple` | `changed` (tier `quick` or `full`), `client` |
+| `jetty12_phase_a_secure.yml` | `secure` | `secure` |
+| `jetty12_phase_a_ha.yml` | `ha` | `ha` |
+| `jetty12_phase_a_federated.yml` | `federated` | `federated` |
+| `jetty12_phase_a_mixed.yml` | `mixed` | `mixed` |
+
+Each builds both sides (with a self-comparison of each build), runs its
+architecture end to end on both, runs its unit suites on both, and compares
+them; `report.md` goes to the run summary and the `report-<arch>` artifact.
+The artifact and dependency comparison is part of every report.
+
+A workflow starts by hand:
+
+- **Run workflow** in the Actions tab, with the two refs (and the tier for
+  `simple`). GitHub only offers this for workflows on the default branch
+  (`trunk` in this fork), so until then use:
+- a tag named `jetty12-phase-a-<arch>-run-*`, which runs the tagged commit
+  as the candidate against `PREPARATION`:
 
   ```
-  git tag jetty12-phase-a-run-1 origin/HADOOP-99999
-  git push origin jetty12-phase-a-run-1
+  git tag jetty12-phase-a-secure-run-1 origin/HADOOP-99999
+  git push origin jetty12-phase-a-secure-run-1
   ```
 
-A full run is about 25 jobs; each fits a standard GitHub-hosted runner
+A workflow is 5 to 7 jobs (two builds, two end-to-end runs, two or four
+unit suite runs, the comparison); each fits a standard GitHub-hosted runner
 (4 vCPUs, 16 GB, 6-hour job limit for public repositories).
 
 ### On one machine

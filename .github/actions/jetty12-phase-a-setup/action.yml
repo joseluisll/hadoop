@@ -17,8 +17,8 @@
 # under the License.
 #
 
-# Fork-only: what every job of jetty12_phase_a.yml needs before running the
-# harness: disk space, JDK 17, the two refs resolved to commits, and the
+# Fork-only: what every job of tmpl_jetty12_phase_a.yml needs before running
+# the harness: disk space, JDK 17, the two refs resolved to commits, and the
 # Maven download cache.
 
 name: "Jetty 12 phase A harness setup"

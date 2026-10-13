@@ -1,0 +1,72 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Fork-only: the Jetty 12 phase A harness for the "simple" architecture: one
+# of every daemon, simple authentication; unit suites: the modules phase A
+# changes, and the shaded client jars.
+# Builds the baseline and the candidate, runs both, compares them; see
+# tmpl_jetty12_phase_a.yml and dev-support/jetty12-phase-a/README.md.
+#
+# Started by hand: "Run workflow" in the Actions tab once this file is on the
+# default branch, or pushing a tag, which runs the tagged commit as the
+# candidate against PREPARATION:
+#   git tag jetty12-phase-a-simple-run-1 origin/HADOOP-99999
+#   git push origin jetty12-phase-a-simple-run-1
+
+name: "Jetty 12 phase A: simple"
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: "Baseline branch, tag or commit (without the patch)"
+        default: "PREPARATION"
+      candidate_ref:
+        description: "Candidate branch, tag or commit (with the patch)"
+        default: "HADOOP-99999"
+      unit_tier:
+        description: "Tier of the 'changed' suite"
+        type: choice
+        options: [quick, full]
+        default: quick
+      maven_mirror:
+        description: "Maven Central mirror URL, if repo.maven.apache.org rate-limits"
+        default: ""
+  push:
+    tags:
+      - "jetty12-phase-a-simple-run-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jetty12-phase-a-simple-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  harness:
+    name: Harness
+    uses: ./.github/workflows/tmpl_jetty12_phase_a.yml
+    with:
+      arch: simple
+      unit_suites: '["changed","client"]'
+      baseline_ref: ${{ inputs.baseline_ref || 'PREPARATION' }}
+      candidate_ref: ${{ inputs.candidate_ref || github.sha }}
+      unit_tier: ${{ inputs.unit_tier || 'quick' }}
+      maven_mirror: ${{ inputs.maven_mirror || '' }}
