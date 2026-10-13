@@ -273,10 +273,12 @@ changes can be given to `ci/artifacts.sh unpack-build` in `BREAK_CANDIDATE`
 (specs of `ci/break_candidate.py`).
 
 Runs go **one at a time**, across all five workflows, oldest first: each
-run's first job waits (polling every minute) until no earlier harness run
+run's first jobs wait (polling every minute) until no earlier harness run
 is queued or running (`ci/wait-turn.sh`), so starting several runs queues
-them instead of running them side by side. A run that waits more than 6
-hours (the job limit) fails in that job and has to be started again.
+them instead of running them side by side. A job runs 6 hours at most, so
+the wait is split over two jobs ("Wait for earlier harness runs" and its
+"continued" job) of up to 340 minutes each; a run still waiting after about
+11 hours fails there and has to be started again.
 "Re-run failed jobs" skips the waiting job, which already succeeded, so such
 a re-run can overlap another run; push a new run branch instead.
 

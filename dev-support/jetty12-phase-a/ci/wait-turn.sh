@@ -14,7 +14,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Usage: ci/wait-turn.sh <owner/repo> <run id> [--once]
+# Usage: ci/wait-turn.sh <owner/repo> <run id> [--once] [--budget MINUTES]
 #
 # Runs of the harness workflows (any architecture) go one at a time, oldest
 # first: this waits until no earlier run of a workflow named
@@ -22,7 +22,8 @@
 # own concurrency groups keep at most one run pending and cancel the others,
 # so they cannot queue several runs. Run ids grow with creation time, so
 # "earlier" is a smaller id. --once prints the blocking runs and exits (1 if
-# any).
+# any). --budget stops waiting after that many minutes with exit code 3, so a
+# CI job (6 hours at most) can hand the wait on to the next one.
 #
 # Each poll is one API request (plus one per further page of runs created in
 # the last LOOKBACK_DAYS, default 2: a run cannot stay active longer, its jobs
@@ -38,7 +39,19 @@
 set -euo pipefail
 repo=$1
 run_id=$2
-once=${3:-}
+shift 2
+once=""
+budget=""
+while (( $# )); do
+  case "$1" in
+    --once) once=--once ;;
+    --budget) budget=$2; shift ;;
+    *) echo "unknown option $1" >&2; exit 2 ;;
+  esac
+  shift
+done
+[[ -z "${budget}" || "${budget}" =~ ^[0-9]+$ ]] || { echo "--budget takes whole minutes" >&2; exit 2; }
+started=$(date +%s)
 interval=${WAIT_INTERVAL:-60}
 max_errors=${MAX_ERRORS:-10}
 api=${GITHUB_API_URL:-https://api.github.com}
@@ -65,6 +78,15 @@ blocking() {
   done
 }
 
+# Sleeps one polling period, or exits 3 when the budget is spent.
+pause() {
+  if [[ -n "${budget}" ]] && (( $(date +%s) - started + interval > budget * 60 )); then
+    echo "still waiting after ${budget} minutes; handing the wait on"
+    exit 3
+  fi
+  sleep "${interval}"
+}
+
 errors=0
 while true; do
   if ! ahead=$(blocking); then
@@ -72,7 +94,7 @@ while true; do
     echo "$(date -u +%H:%M:%S) cannot list the workflow runs (${errors}/${max_errors})" >&2
     (( errors < max_errors )) || { echo "giving up: the Actions API cannot be read" >&2; exit 2; }
     [[ "${once}" == --once ]] && exit 2
-    sleep "${interval}"
+    pause
     continue
   fi
   errors=0
@@ -84,5 +106,5 @@ while true; do
   echo "$(date -u +%H:%M:%S) waiting for $(wc -l <<< "${ahead}") earlier harness run(s):"
   sed 's/^/  /' <<< "${ahead}"
   [[ "${once}" == --once ]] && exit 1
-  sleep "${interval}"
+  pause
 done
