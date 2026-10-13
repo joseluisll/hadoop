@@ -90,6 +90,19 @@ start_instance() {
       return 0
     fi
   fi
+  # A router serves nothing until its namenode heartbeats register; clients
+  # started right after it (job history server) would fail.
+  if [[ "$3" == dfsrouter ]]; then
+    local deadline=$((SECONDS + 120))
+    until curl -s --noproxy '*' "${url%/jmx}/jmx?qry=Hadoop:service=Router,name=FederationState" \
+        | grep -Eq '"NumActiveNamenodes" : [1-9]'; do
+      if (( SECONDS > deadline )); then
+        log "WARNING: ${name} has no active namenode after 120s"
+        break
+      fi
+      sleep 2
+    done
+  fi
   echo "${name} up" >> "${RES}/daemons.txt"
 }
 

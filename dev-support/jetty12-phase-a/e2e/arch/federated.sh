@@ -35,6 +35,7 @@ NN_URL="http://${HOST}:${FED_HTTP[0]}"
 NN2_URL="http://${HOST}:${FED_HTTP[1]}"
 ROUTER_FS="hdfs://${HOST}:${P_ROUTER_RPC}"
 ROUTER_URL="http://${HOST}:${P_ROUTER_HTTP}"
+ROUTER_ADMIN=("${P_ROUTER_ADMIN}")
 VIEWFS="viewfs://cluster"
 # YARN sub-clusters: RM port offset, NM RPC/web/localizer/shuffle ports.
 SC=(sc1 sc2)
@@ -103,6 +104,8 @@ arch_conf() {
     "dfs.federation.router.default.nameserviceId=ns1" \
     "dfs.federation.router.monitor.namenode=ns1,ns2" \
     "dfs.federation.router.monitor.localnamenode.enable=false" \
+    "dfs.federation.router.file.resolver.client.class=org.apache.hadoop.hdfs.server.federation.resolver.MultipleDestinationMountTableResolver" \
+    "dfs.federation.router.mount-table.cache.update=true" \
     "dfs.federation.router.store.driver.class=org.apache.hadoop.hdfs.server.federation.store.driver.impl.StateStoreZooKeeperImpl" \
     "hadoop.zk.address=${HOST}:${P_ZK}"
   # The client talks to sub-cluster sc1 directly; scenarios go through the
@@ -133,6 +136,9 @@ arch_conf() {
     # mapred-default.xml (13562) after yarn-site.xml.
     site "${RUN}/conf-nm${SC[i]}/mapred-site.xml" "mapreduce.shuffle.port=${SC_SHUFFLE[i]}"
   done
+  # Clients that go through the YARN router (the distributed shell client
+  # takes no -D options).
+  site "$(instance_conf viarouter)/yarn-site.xml" "yarn.resourcemanager.address=${YROUTER_RPC}"
 }
 
 arch_prepare() {

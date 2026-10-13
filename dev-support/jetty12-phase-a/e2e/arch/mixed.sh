@@ -86,6 +86,8 @@ arch_conf() {
     "dfs.federation.router.default.nameserviceId=ns1" \
     "dfs.federation.router.monitor.namenode=ns1.nn1,ns1.nn2,ns2" \
     "dfs.federation.router.monitor.localnamenode.enable=false" \
+    "dfs.federation.router.file.resolver.client.class=org.apache.hadoop.hdfs.server.federation.resolver.MultipleDestinationMountTableResolver" \
+    "dfs.federation.router.mount-table.cache.update=true" \
     "dfs.federation.router.store.driver.class=org.apache.hadoop.hdfs.server.federation.store.driver.impl.StateStoreZooKeeperImpl" \
     "hadoop.zk.address=${HOST}:${P_ZK}"
   # shellcheck disable=SC2046

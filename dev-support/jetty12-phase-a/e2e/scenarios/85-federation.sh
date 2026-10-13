@@ -49,6 +49,10 @@ cli mount-ns1 -- hdfs dfsrouteradmin -add /r1 ns1 /data1/fed
 cli mount-ns2 -- hdfs dfsrouteradmin -add /r2 ns2 /data2/fed
 cli mount-multi -- hdfs dfsrouteradmin -add /rboth ns1,ns2 /data1/multi -order HASH_ALL
 cli mount-refresh -- hdfs dfsrouteradmin -refresh
+# With several routers, every one of them must see the new mounts.
+for port in "${ROUTER_ADMIN[@]:1}"; do
+  hdfs dfsrouteradmin -Ddfs.federation.router.admin-address="${HOST}:${port}" -refresh >/dev/null 2>&1 || true
+done
 cli mount-list --shape lines -- sh -c "hdfs dfsrouteradmin -ls | awk 'NR>1 {print \$1, \$2, \$3}' | sort"
 cli quota -- hdfs dfsrouteradmin -setQuota /r2 -nsQuota 1000
 cli safemode --expect-regex 'Safe Mode: (\w+)' -- hdfs dfsrouteradmin -safemode get
@@ -93,13 +97,15 @@ if daemon_up yrouter; then
   http router-ui "${YROUTER_URL}/cluster" --expect-status any
   http router-ui-federation "${YROUTER_URL}/cluster/federation" --expect-status any
   http router-ui-nodes "${YROUTER_URL}/cluster/nodes" --expect-status any
-  http rm-sc1-info "${RM_URL}/ws/v1/cluster/info" --expect-regex '"clusterId"'
-  http rm-sc2-info "${RM2_URL}/ws/v1/cluster/info" --expect-regex '"clusterId"'
+  http rm-sc1-info "${RM_URL}/ws/v1/cluster/info" --expect-regex '"clusterInfo"'
+  http rm-sc2-info "${RM2_URL}/ws/v1/cluster/info" --expect-regex '"clusterInfo"'
   cli router-node-list --expect-regex 'Total Nodes:(\d+)' -- \
     yarn node -Dyarn.resourcemanager.address="${YROUTER_RPC}" -list -all
+  # The distributed shell client takes no -D options: a client configuration
+  # whose RM address is the YARN router.
   cli dshell-via-router --merge-stderr --expect-regex '(Application completed successfully)' -- \
-    yarn jar "${DSHELL_JAR}" -jar "${DSHELL_JAR}" \
-    -Dyarn.resourcemanager.address="${YROUTER_RPC}" -shell_command echo \
+    env HADOOP_CONF_DIR="${RUN}/conf-viarouter" \
+    yarn jar "${DSHELL_JAR}" -jar "${DSHELL_JAR}" -shell_command echo \
     -shell_args jetty12-federated -num_containers 1 -container_memory 256 \
     -master_memory 256 -appname jetty12-federated
   APP=$(rest "${Y}/apps" | python3 -c '
