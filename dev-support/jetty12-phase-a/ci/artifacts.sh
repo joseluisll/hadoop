@@ -75,7 +75,8 @@ unpack_results() {
   for dir in "$@"; do
     for f in "${dir}"/e2e-*.tar.gz "${dir}"/unit-*.tar.gz; do
       [[ -f "${f}" ]] || continue
-      side=$(basename "${f}" | cut -d- -f2)
+      # e2e-<side>-<arch>.tar.gz or unit-<side>.tar.gz
+      side=$(basename "${f}" .tar.gz | cut -d- -f2)
       check_side "${side}"
       mkdir -p "$(results_dir "${side}")"
       tar -C "$(results_dir "${side}")" -xzf "${f}"
