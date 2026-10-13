@@ -203,6 +203,12 @@ A workflow starts by hand:
   git push origin jetty12-phase-a-secure-run-1
   ```
 
+- or a branch with the same name pattern, where tags cannot be pushed:
+
+  ```
+  git push origin origin/HADOOP-99999:refs/heads/jetty12-phase-a-secure-run-1
+  ```
+
 A workflow is 5 to 7 jobs (two builds, two end-to-end runs, two or four
 unit suite runs, the comparison); each fits a standard GitHub-hosted runner
 (4 vCPUs, 16 GB, 6-hour job limit for public repositories).

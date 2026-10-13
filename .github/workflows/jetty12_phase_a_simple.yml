@@ -24,8 +24,8 @@
 # tmpl_jetty12_phase_a.yml and dev-support/jetty12-phase-a/README.md.
 #
 # Started by hand: "Run workflow" in the Actions tab once this file is on the
-# default branch, or pushing a tag, which runs the tagged commit as the
-# candidate against PREPARATION:
+# default branch, or pushing a tag or a branch named jetty12-phase-a-simple-run-*,
+# which runs that commit as the candidate against PREPARATION:
 #   git tag jetty12-phase-a-simple-run-1 origin/HADOOP-99999
 #   git push origin jetty12-phase-a-simple-run-1
 
@@ -50,6 +50,8 @@ on:
         default: ""
   push:
     tags:
+      - "jetty12-phase-a-simple-run-*"
+    branches:
       - "jetty12-phase-a-simple-run-*"
 
 permissions:
