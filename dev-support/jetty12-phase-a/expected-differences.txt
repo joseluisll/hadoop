@@ -70,3 +70,12 @@ jar-entry-(removed|added|changed) share/hadoop/client/hadoop-client-minicluster-
 jar-entry-(removed|added|changed) share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!(org/apache/hadoop/shaded/)?com/sun/net/httpserver/.*  # HADOOP-20014: JDK classes no longer copied into the jar
 class-(removed|added) client-minicluster:org\.apache\.hadoop\.shaded\.org\.glassfish\.jersey\.(test\.(jetty|jdkhttp)|jetty|jdkhttp)\..*  # HADOOP-20014
 class-(removed|added) client-minicluster:(org\.apache\.hadoop\.shaded\.)?com\.sun\.net\.httpserver\..*  # HADOOP-20014
+# jersey-container-jetty-http depended on jetty-continuation; nothing else in the
+# minicluster jar uses it, so its shaded copy goes with the Jetty test container.
+dep-removed hadoop-client-modules/hadoop-client-minicluster\|org\.eclipse\.jetty:jetty-continuation:jar:[^:]+:compile  # HADOOP-20014: came with jersey-container-jetty-http
+jar-entry-removed share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!org/apache/hadoop/shaded/org/eclipse/jetty/continuation/.*  # HADOOP-20014: came with jersey-container-jetty-http
+class-removed client-minicluster:org\.apache\.hadoop\.shaded\.org\.eclipse\.jetty\.continuation\..*  # HADOOP-20014: came with jersey-container-jetty-http
+
+# --- HADOOP-20015: TestRollingLevelDBTimelineStore logs through SLF4J instead
+# of Jetty's Log. Test sources only.
+jar-entry-changed share/hadoop/yarn/sources/hadoop-yarn-server-applicationhistoryservice-[^/]+-test-sources\.jar!org/apache/hadoop/yarn/server/timeline/TestRollingLevelDBTimelineStore\.java  # HADOOP-20015

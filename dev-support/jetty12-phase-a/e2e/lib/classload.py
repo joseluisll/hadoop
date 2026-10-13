@@ -37,6 +37,13 @@ GENERATED = re.compile(r"(\$\$Lambda|\$Proxy\d|^jdk\.internal\.reflect\.Generate
                        r"\$\$FastClassBy|\$\$EnhancerBy|ByteBuddy|\$MockitoMock|"
                        r"^com\.sun\.proxy\.|/0x)")
 VERSION = re.compile(r"-\d[\w.\-]*(?=\.jar$)")
+# Jars outside the distribution (staged test tools) keep absolute paths, which
+# name the side: <WORKDIR>/baseline/tools/... vs <WORKDIR>/candidate/tools/...
+SIDE_ROOT = re.compile(r"^.*/(baseline|candidate)(?=/)")
+
+
+def side_relative(path):
+    return SIDE_ROOT.sub("<side>", path)
 
 
 def jar_of(source, dist):
@@ -96,7 +103,7 @@ def compare(b_res, c_res):
         moved = {k: [b[k], c[k]] for k in sorted(b.keys() & c.keys())
                  if VERSION.sub("", os.path.basename(b[k])) !=
                  VERSION.sub("", os.path.basename(c[k])) or
-                 os.path.dirname(b[k]) != os.path.dirname(c[k])}
+                 side_relative(os.path.dirname(b[k])) != side_relative(os.path.dirname(c[k]))}
         result[d] = {
             "baseline_classes": len(b), "candidate_classes": len(c),
             "only_baseline": sorted(b.keys() - c.keys()),

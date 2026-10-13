@@ -69,6 +69,7 @@ base_hdfs() {
     "dfs.namenode.safemode.extension=0" \
     "dfs.namenode.safemode.min.datanodes=0" \
     "dfs.namenode.fs-limits.min-block-size=1024" \
+    "dfs.datanode.hostname=${HOST}" \
     "dfs.datanode.address=${HOST}:${P_DN_DATA}" \
     "dfs.datanode.http.address=${HOST}:${P_DN_HTTP}" \
     "dfs.datanode.ipc.address=${HOST}:${P_DN_IPC}" \

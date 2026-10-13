@@ -169,6 +169,17 @@ These are not caused by phase A; the harness records them, and they show as
   `ZKFailoverController`) that hides the BindException behind it. Each ZKFC
   of the harness has its own `dfs.ha.zkfc.port`, so the runs do not hit it;
   it was seen while setting them up.
+- No JIRA yet: the timeline server picks its JSON writer at random at each
+  start. `ApplicationHistoryServer#configure` registers both
+  `JettisonFeature` and `YarnJacksonJaxbJsonProvider`, and for the put
+  response, events, domains and the application history DAOs Jersey uses
+  either one. Restarting one build six times answered once with Jackson
+  (lists as arrays, empty list `[]`, declared field order) and otherwise
+  with Jettison (one-element lists collapsed to an object, empty list `""`,
+  `eventInfoJAXB` field names). The first CI run of `simple` hit one writer
+  on each side. The harness accepts either shape for these responses
+  (`obsdiff` in `e2e/expected-e2e-differences.txt`); their other checks
+  still apply.
 
 ## Running it
 

@@ -32,6 +32,7 @@ outside the allowlist, and no new error in the logs.
 
 Allowlist lines: '<kind> <regex>  # reason', kind one of
   obs        <component>:<id>
+  obsdiff    <component>:<id>   (excuses a DIFF only; a REGRESSION still fails)
   classjar   <daemon>:<class>   (class loaded from a different jar)
   logscan    <source>:<message> (error message only seen on the candidate)
 """
@@ -120,6 +121,8 @@ def main():
         else:
             cls, detail = "BOTH_FAIL", "; ".join(rc["problems"])
         rule = allow.match("obs", key) if cls in ("DIFF", "REGRESSION", "MISSING") else None
+        if rule is None and cls == "DIFF":
+            rule = allow.match("obsdiff", key)
         rows.append({"key": key, "component": comp, "class": cls, "detail": detail,
                      "expected": bool(rule), "reason": rule and rule["reason"]})
 

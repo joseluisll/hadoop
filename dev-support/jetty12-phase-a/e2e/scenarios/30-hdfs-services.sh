@@ -30,6 +30,12 @@ if daemon_up dfsrouter; then
   hadoop fs -mkdir -p /e2e/rbf-target
   hadoop fs -put -f "${LOCAL}/data.txt" /e2e/rbf-target/data.txt
   cli mount-add -- hdfs dfsrouteradmin -add /rbf ns0 /e2e/rbf-target
+  # The router reads new mounts from its state store on refresh.
+  hdfs dfsrouteradmin -refresh >/dev/null 2>&1 || true
+  for _ in $(seq 1 30); do
+    hdfs dfsrouteradmin -ls /rbf 2>/dev/null | grep -q "^/rbf " && break
+    sleep 1
+  done
   cli mount-ls --shape lines -- hdfs dfsrouteradmin -ls /rbf
   # The router refreshes its mount table cache periodically; ask now.
   cli mount-refresh -- hdfs dfsrouteradmin -refresh

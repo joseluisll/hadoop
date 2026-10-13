@@ -40,6 +40,7 @@ difference is not in the allowlist.
 import argparse
 import collections
 import hashlib
+import io
 import json
 import os
 import re
@@ -52,6 +53,7 @@ VOLATILE_ENTRY = re.compile(
     r"|^META-INF/maven/.*/pom\.(xml|properties)$"
     r"|^META-INF/DEPENDENCIES$"
     r"|-version-info\.properties$"
+    r"|^httpfs\.properties$"  # build time, user and revision
     r"|^META-INF/.*\.SF$|^META-INF/.*\.RSA$|^META-INF/.*\.DSA$)")
 # Files in the distribution that differ between any two builds.
 VOLATILE_FILE = re.compile(r"(\.pid$|/logs/|-version-info\.properties$)")
@@ -59,7 +61,8 @@ ARCHIVE = (".jar", ".war")
 
 
 class Allowlist:
-    """Lines of '<kind> <regex>  # reason'. A regex matches the whole subject."""
+    """Lines of '<kind> <regex>  # reason'. Both are regexes; each matches the
+    whole kind or subject (a kind such as 'dep-(removed|added)' covers two)."""
 
     def __init__(self, path):
         self.rules = []
@@ -70,13 +73,14 @@ class Allowlist:
                 if not body:
                     continue
                 kind, _, regex = body.partition(" ")
-                self.rules.append({"kind": kind, "regex": re.compile(regex.strip()),
+                self.rules.append({"kind": kind, "kind_re": re.compile(kind),
+                                   "regex": re.compile(regex.strip()),
                                    "pattern": regex.strip(), "reason": reason.strip(),
                                    "line": n, "hits": 0})
 
     def match(self, kind, subject):
         for r in self.rules:
-            if r["kind"] == kind and r["regex"].fullmatch(subject):
+            if r["kind_re"].fullmatch(kind) and r["regex"].fullmatch(subject):
                 r["hits"] += 1
                 return r
         return None
@@ -102,11 +106,27 @@ def dist_files(root):
 
 
 def jar_entries(path):
-    """{entry name: crc} for non-directory, non-volatile entries."""
+    """{entry name: crc} for non-directory, non-volatile entries. A jar nested
+    in the archive (a WAR's WEB-INF/lib) is summed over its own non-volatile
+    entries, so its build metadata does not count as a change."""
     try:
         with zipfile.ZipFile(path) as z:
-            return {i.filename: i.CRC for i in z.infolist()
-                    if not i.is_dir() and not VOLATILE_ENTRY.search(i.filename)}
+            out = {}
+            for i in z.infolist():
+                if i.is_dir() or VOLATILE_ENTRY.search(i.filename):
+                    continue
+                out[i.filename] = i.CRC
+                if i.filename.endswith(".jar"):
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(z.read(i))) as nested:
+                            h = hashlib.sha256()
+                            for n in sorted(nested.infolist(), key=lambda e: e.filename):
+                                if not n.is_dir() and not VOLATILE_ENTRY.search(n.filename):
+                                    h.update(f"{n.filename}\0{n.CRC}\n".encode())
+                            out[i.filename] = h.hexdigest()
+                    except zipfile.BadZipFile:
+                        pass
+            return out
     except zipfile.BadZipFile:
         return None
 

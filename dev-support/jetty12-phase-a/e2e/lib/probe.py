@@ -74,6 +74,11 @@ MASKS = [
     (re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"), "UUID"),
     (re.compile(r"\b\d{10,}\b"), "N"),
     (re.compile(r"\d{4}-\d\d-\d\d[ T]\d\d:\d\d:\d\d([.,]\d+)?"), "DATETIME"),
+    # java.util.Date#toString, e.g. "Tue Oct 13 15:00:02 UTC 2026" (fsck)
+    (re.compile(r"\b[A-Z][a-z]{2} [A-Z][a-z]{2} [ \d]\d \d\d:\d\d:\d\d [A-Z]{2,5} \d{4}\b"),
+     "DATETIME"),
+    # Object#toString identity hashes, e.g. "...KMSClientProvider@76a2ddf3"
+    (re.compile(r"(?<=[\w$])@[0-9a-f]{4,8}\b"), "@HASH"),
 ]
 
 
