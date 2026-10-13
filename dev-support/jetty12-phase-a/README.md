@@ -268,7 +268,9 @@ branch (or tag) name:
 | `static` | delete `share/hadoop/hdfs/webapps/static/hadoop.css` | narrow: one static file of the namenode UI |
 | `webhdfs-user` | set `dfs.webhdfs.user.provider.user.pattern` to `^hdfs$` in the `hdfs-default.xml` of the hadoop-hdfs jar | a changed default, nothing missing: WebHDFS rejects the harness user |
 
-The report says when a run is one of these, and lists the changes. Other
+The report says when a run is one of these, and lists the changes. A
+broken-candidate run skips the unit test jobs: they build from source and
+cannot see the broken distribution. Other
 changes can be given to `ci/artifacts.sh unpack-build` in `BREAK_CANDIDATE`
 (specs of `ci/break_candidate.py`).
 
@@ -322,6 +324,8 @@ to hours (`changed` full).
 | `UNIT_RERUNS` | 1 | re-runs of a failing test before it counts as failed |
 | `E2E_NFS` | `auto` | start the NFS gateway in `simple` (`auto` = when running as root) |
 | `E2E_GRIDMIX` | `true` | run the gridmix sleep jobs |
+| `E2E_START_TIMEOUT` | 180 | seconds to wait for a daemon's web endpoint (stops early when the daemon exits) |
+| `E2E_FS_CHECK_TIMEOUT` | 120 | seconds for the file system check before the scenarios |
 | `E2E_NM_MEMORY_MB` | 6144 | node manager memory (split between sub-clusters in `federated`) |
 | `DAEMON_HEAP` | `384m` | heap of each daemon |
 
@@ -348,6 +352,13 @@ logs, surefire reports).
   unit test module with no test reports on a side fail the run.
 - An architecture given to `compare.sh` (or found on either side) that a
   side has no observations for is **NOT RUN**, and the run is not a PASS.
+- **Fail fast**: a daemon whose process exits is reported at once instead of
+  after its start timeout, and when the default file system is not usable
+  once the cluster has started (`hadoop fs -ls /`, see `fs-check.log`), the
+  scenarios are skipped; the logs and class loading are still collected. The
+  comparison then says the cluster did not start: **FAIL** for the
+  candidate, with each daemon's state on both sides and the new log errors,
+  or **NOT RUN** for the baseline.
 - **BOTH_FAIL** observations and tests failing on both sides are not caused
   by the patch, but each one hides what it was checking: look at them before
   relying on a run.

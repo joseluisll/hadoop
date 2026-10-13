@@ -66,6 +66,25 @@ run_daemon() {
       "${launcher}" --config "${conf}" --daemon "${action}" "${sub}"
 }
 
+# wait_ready <instance> <daemon> <url> <seconds>: prints "up", "exited" or
+# "timeout". A daemon that will not come up stops the wait at once instead of
+# running out the timeout: its process is gone, or its main thread died (KMS
+# and HttpFS keep the JVM alive when their web application fails to start;
+# the launcher rotates the .out file at each start, so the line is new).
+wait_ready() {
+  local pidf="${HADOOP_PID_DIR}/hadoop-$1-$2.pid" deadline=$((SECONDS + $4)) pid
+  while (( SECONDS < deadline )); do
+    if wait_http "$3" 2; then echo up; return 0; fi
+    pid=$(cat "${pidf}" 2>/dev/null || true)
+    if [[ -n "${pid}" ]] && ! kill -0 "${pid}" 2>/dev/null; then echo exited; return 0; fi
+    if grep -qs '^Exception in thread "main"' "${HADOOP_LOG_DIR}/hadoop-$1-$2-"*.out; then
+      echo exited
+      return 0
+    fi
+  done
+  echo timeout
+}
+
 start_instance() {
   local name=$1 url=$5
   log "starting ${name}"
@@ -74,10 +93,18 @@ start_instance() {
     echo "${name} start-failed" >> "${RES}/daemons.txt"
     return 0
   fi
-  if [[ "${url}" != "-" ]] && ! wait_http "${url}" "${E2E_START_TIMEOUT:-180}"; then
-    log "WARNING: ${name} web endpoint ${url} not up"
-    echo "${name} not-ready" >> "${RES}/daemons.txt"
-    return 0
+  if [[ "${url}" != "-" ]]; then
+    case $(wait_ready "${name}" "$3" "${url}" "${E2E_START_TIMEOUT:-180}") in
+      up) ;;
+      exited)
+        log "WARNING: ${name} exited before its web endpoint ${url} was up"
+        echo "${name} start-failed" >> "${RES}/daemons.txt"
+        return 0 ;;
+      *)
+        log "WARNING: ${name} web endpoint ${url} not up"
+        echo "${name} not-ready" >> "${RES}/daemons.txt"
+        return 0 ;;
+    esac
   fi
   # Daemons without a web endpoint: give them a moment, then check the pid.
   if [[ "${url}" == "-" ]]; then

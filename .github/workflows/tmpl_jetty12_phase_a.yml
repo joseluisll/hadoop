@@ -229,7 +229,9 @@ jobs:
   unit:
     name: Unit ${{ matrix.suite }} ${{ matrix.side }}
     needs: queue-2
-    if: inputs.unit_suites != '[]'
+    # A broken-candidate run breaks the distribution, which the unit tests
+    # (built from source) never see: skip them there.
+    if: inputs.unit_suites != '[]' && !contains(github.ref_name, '-run-broken-')
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     strategy:

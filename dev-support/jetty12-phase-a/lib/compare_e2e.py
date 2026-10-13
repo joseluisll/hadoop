@@ -30,7 +30,9 @@ The candidate passes when there is no REGRESSION, no MISSING on the
 candidate side, no DIFF outside the allowlist, no class loaded from a jar
 outside the allowlist, no error in the logs that is new or much more frequent
 than on the baseline, and no observation id recorded twice. When either side
-has no observations at all, the verdict is NOT RUN.
+has no observations at all, the verdict is NOT RUN. When a side's cluster
+did not start far enough to run the scenarios (e2e/run.sh wrote aborted.txt),
+the verdict is FAIL for the candidate and NOT RUN for the baseline.
 
 Allowlist lines: '<kind> <regex>  # reason', kind one of
   obs        <component>:<id>
@@ -117,6 +119,61 @@ def differing_paths(a, b, path=""):
     return [] if a == b else [path or "/"]
 
 
+def log_errors(allow, baseline, candidate):
+    """Errors in the candidate's logs that the baseline has not, or far less often."""
+    lb = load_json(os.path.join(baseline, "logscan.json"))
+    lc = load_json(os.path.join(candidate, "logscan.json"))
+    out = []
+    for src, msgs in lc.items():
+        for msg, n in msgs.items():
+            nb = lb.get(src, {}).get(msg, 0)
+            if nb == 0 or n > max(2 * nb, nb + 5):
+                rule = allow.match("logscan", f"{src}:{msg}")
+                out.append({"source": src, "message": msg, "count": n, "baseline_count": nb,
+                            "expected": bool(rule), "reason": rule and rule["reason"]})
+    return out
+
+
+def daemon_states(path):
+    states = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for line in f:
+                if line.strip():
+                    name, _, state = line.strip().partition(" ")
+                    states[name] = state
+    return states
+
+
+def not_started(a, allow, aborted):
+    """A side whose cluster did not start far enough to run the scenarios."""
+    if "baseline" in aborted:
+        return not_run(a, "the baseline's cluster did not start: " + aborted["baseline"])
+    b = daemon_states(os.path.join(a.baseline, "daemons.txt"))
+    c = daemon_states(os.path.join(a.candidate, "daemons.txt"))
+    errors = log_errors(allow, a.baseline, a.candidate)
+    result = {"verdict": "FAIL", "arch": a.arch,
+              "reason": "the candidate's cluster did not start: " + aborted["candidate"],
+              "daemons": {d: {"baseline": b.get(d), "candidate": c.get(d)}
+                          for d in sorted(set(b) | set(c))},
+              "new_log_errors": errors}
+    with open(os.path.join(a.out, f"e2e-compare-{a.arch}.json"), "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=1)
+    with open(os.path.join(a.out, f"e2e-compare-{a.arch}.md"), "w", encoding="utf-8") as f:
+        f.write(f"## End-to-end: {a.arch} architecture\n\nVerdict: **FAIL**: {result['reason']}. "
+                "The scenarios were not run on the candidate.\n\n"
+                "| Daemon | Baseline | Candidate |\n|---|---|---|\n")
+        for d, st in result["daemons"].items():
+            mark = "" if st["baseline"] == st["candidate"] else " **(differs)**"
+            f.write(f"| {d} | {st['baseline'] or 'not started'} "
+                    f"| {st['candidate'] or 'not started'}{mark} |\n")
+        f.write(f"\n### Log errors new or much more frequent on the candidate: {len(errors)}\n\n")
+        for e in errors:
+            f.write(f"- {e['source']}: `{e['message']}` x{e['count']} (baseline x{e['baseline_count']})\n")
+    print(f"e2e comparison ({a.arch}): FAIL: {result['reason']}")
+    return 1
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expected", required=True)
@@ -130,6 +187,13 @@ def main():
 
     paths = {side: os.path.join(d, "observations.jsonl")
              for side, d in (("baseline", a.baseline), ("candidate", a.candidate))}
+    aborted = {}
+    for side, d in (("baseline", a.baseline), ("candidate", a.candidate)):
+        if os.path.exists(os.path.join(d, "aborted.txt")):
+            with open(os.path.join(d, "aborted.txt"), encoding="utf-8") as f:
+                aborted[side] = f.read().strip()
+    if aborted:
+        return not_started(a, allow, aborted)
     absent = [side for side, p in paths.items() if not os.path.exists(p)]
     if absent:
         return not_run(a, f"no observations from the {' and '.join(absent)} run "
@@ -172,17 +236,7 @@ def main():
                               "reason": rule and rule["reason"]})
 
     # Errors in logs that only the candidate has, or has far more often.
-    lb = load_json(os.path.join(a.baseline, "logscan.json"))
-    lc = load_json(os.path.join(a.candidate, "logscan.json"))
-    new_errors = []
-    for src, msgs in lc.items():
-        for msg, n in msgs.items():
-            nb = lb.get(src, {}).get(msg, 0)
-            if nb == 0 or n > max(2 * nb, nb + 5):
-                rule = allow.match("logscan", f"{src}:{msg}")
-                new_errors.append({"source": src, "message": msg, "count": n,
-                                   "baseline_count": nb,
-                                   "expected": bool(rule), "reason": rule and rule["reason"]})
+    new_errors = log_errors(allow, a.baseline, a.candidate)
 
     counts = {}
     for r in rows:
