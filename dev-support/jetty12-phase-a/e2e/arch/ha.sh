@@ -59,18 +59,22 @@ INSTANCES+=(
   "historyserver mapred historyserver MAPRED_HISTORYSERVER ${JHS_URL}/jmx ${HADOOP_CONF_DIR}"
 )
 
-# ha_hdfs_props <nameservice> <nn ids> <rpc ports> <http ports> <journal>:
-# the HA configuration of one nameservice.
+# ha_hdfs_props <nameservice> <nn ids> <rpc ports> <http ports> <journal>
+#               [zkfc ports]: the HA configuration of one nameservice. The
+# ZKFC ports go under each namenode id, so every ZKFC (and haadmin) can
+# reach the others for a graceful failover.
 ha_hdfs_props() {
   local ns=$1 journal=$5 i
-  local -a ids rpc web
+  local -a ids rpc web zkfc
   read -ra ids <<< "$2"
   read -ra rpc <<< "$3"
   read -ra web <<< "$4"
+  read -ra zkfc <<< "${6:-}"
   echo "dfs.ha.namenodes.${ns}=$(IFS=,; echo "${ids[*]}")"
   for i in "${!ids[@]}"; do
     echo "dfs.namenode.rpc-address.${ns}.${ids[i]}=${HOST}:${rpc[i]}"
     echo "dfs.namenode.http-address.${ns}.${ids[i]}=${HOST}:${web[i]}"
+    [[ -n "${zkfc[i]:-}" ]] && echo "dfs.ha.zkfc.port.${ns}.${ids[i]}=${zkfc[i]}"
   done
   echo "dfs.namenode.shared.edits.dir=${journal}"
   echo "dfs.ha.automatic-failover.enabled.${ns}=true"
@@ -104,7 +108,7 @@ arch_conf() {
   base_core "fs.defaultFS=${FS}" "ha.zookeeper.quorum=${HOST}:${P_ZK}"
   # shellcheck disable=SC2046
   base_hdfs "dfs.nameservices=${HA_NS}" \
-    $(ha_hdfs_props "${HA_NS}" "${HA_NN[*]}" "${HA_NN_RPC[*]}" "${HA_NN_HTTP[*]}" "$(ha_journal "${HA_NS}")") \
+    $(ha_hdfs_props "${HA_NS}" "${HA_NN[*]}" "${HA_NN_RPC[*]}" "${HA_NN_HTTP[*]}" "$(ha_journal "${HA_NS}")" "${HA_ZKFC_PORT[*]}") \
     "dfs.ha.fencing.methods=shell(/bin/true)"
   # shellcheck disable=SC2046
   base_yarn $(ha_yarn_props)
@@ -118,7 +122,6 @@ arch_conf() {
   for i in 0 1; do
     site "$(instance_conf "${HA_NN[i]}")/hdfs-site.xml" \
       "dfs.ha.namenode.id=${HA_NN[i]}" \
-      "dfs.ha.zkfc.port=${HA_ZKFC_PORT[i]}" \
       "dfs.namenode.name.dir=${d}/${HA_NN[i]}"
     site "$(instance_conf "${HA_RM[i]}")/yarn-site.xml" \
       "yarn.resourcemanager.ha.id=${HA_RM[i]}"

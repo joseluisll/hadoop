@@ -74,7 +74,7 @@ arch_conf() {
   # Clients know the two routers as an HA nameservice, and ns1/ns2 directly.
   # shellcheck disable=SC2046
   base_hdfs "dfs.nameservices=ns1,ns2,routerfed" \
-    $(ha_hdfs_props ns1 "${HA_NN[*]}" "${HA_NN_RPC[*]}" "${HA_NN_HTTP[*]}" "$(ha_journal ns1)") \
+    $(ha_hdfs_props ns1 "${HA_NN[*]}" "${HA_NN_RPC[*]}" "${HA_NN_HTTP[*]}" "$(ha_journal ns1)" "${HA_ZKFC_PORT[*]}") \
     "dfs.namenode.rpc-address.ns2=${HOST}:9002" \
     "dfs.namenode.http-address.ns2=${HOST}:9882" \
     $(ha_hdfs_props routerfed "r1 r2" "${ROUTER_RPC[*]}" "${ROUTER_HTTP[*]}" "") \
@@ -85,6 +85,7 @@ arch_conf() {
   site "${HADOOP_CONF_DIR}/hdfs-rbf-site.xml" \
     "dfs.federation.router.default.nameserviceId=ns1" \
     "dfs.federation.router.monitor.namenode=ns1.nn1,ns1.nn2,ns2" \
+    "dfs.federation.router.monitor.localnamenode.enable=false" \
     "dfs.federation.router.store.driver.class=org.apache.hadoop.hdfs.server.federation.store.driver.impl.StateStoreZooKeeperImpl" \
     "hadoop.zk.address=${HOST}:${P_ZK}"
   # shellcheck disable=SC2046
@@ -106,7 +107,6 @@ arch_conf() {
     site "${RUN}/conf-${HA_NN[i]}/hdfs-site.xml" \
       "dfs.nameservice.id=ns1" \
       "dfs.ha.namenode.id=${HA_NN[i]}" \
-      "dfs.ha.zkfc.port=${HA_ZKFC_PORT[i]}" \
       "dfs.namenode.name.dir=${d}/${HA_NN[i]}"
     site "$(instance_conf "${HA_RM[i]}")/yarn-site.xml" "yarn.resourcemanager.ha.id=${HA_RM[i]}"
     site "${RUN}/conf-${ROUTERS[i]}/hdfs-rbf-site.xml" \

@@ -69,6 +69,9 @@ INSTANCES=(
 # federation_yarn_props: what every YARN process of the federation shares.
 federation_yarn_props() {
   echo "yarn.federation.enabled=true"
+  # The sub-clusters' RMs are not HA; with failover on (the default) every
+  # YARN client looks for RM HA ids and fails on an empty list.
+  echo "yarn.federation.failover.enabled=false"
   echo "yarn.federation.state-store.class=org.apache.hadoop.yarn.server.federation.store.impl.ZookeeperFederationStateStore"
   echo "hadoop.zk.address=${HOST}:${P_ZK}"
   echo "yarn.router.webapp.address=${HOST}:${P_YROUTER_HTTP}"
@@ -99,6 +102,7 @@ arch_conf() {
     "dfs.federation.router.admin-address=${HOST}:${P_ROUTER_ADMIN}" \
     "dfs.federation.router.default.nameserviceId=ns1" \
     "dfs.federation.router.monitor.namenode=ns1,ns2" \
+    "dfs.federation.router.monitor.localnamenode.enable=false" \
     "dfs.federation.router.store.driver.class=org.apache.hadoop.hdfs.server.federation.store.driver.impl.StateStoreZooKeeperImpl" \
     "hadoop.zk.address=${HOST}:${P_ZK}"
   # The client talks to sub-cluster sc1 directly; scenarios go through the
