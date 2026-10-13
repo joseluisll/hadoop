@@ -274,8 +274,10 @@ def fetch_curl(a, data):
         headers = {}
         if os.path.exists(hdr):
             # The last block is the final response (after 401 challenges,
-            # 100-continue and followed redirects).
-            blocks = [b for b in open(hdr, encoding="latin-1").read().split("\r\n\r\n") if b.strip()]
+            # 100-continue and followed redirects). newline="" keeps the
+            # CRLFs that text mode would turn into plain newlines.
+            with open(hdr, encoding="latin-1", newline="") as f:
+                blocks = [b for b in f.read().split("\r\n\r\n") if b.strip()]
             for line in (blocks[-1].split("\r\n")[1:] if blocks else []):
                 k, _, v = line.partition(":")
                 headers[k.strip()] = v.strip()
