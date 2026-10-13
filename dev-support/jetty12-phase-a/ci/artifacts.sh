@@ -18,7 +18,9 @@
 #
 #   ci/artifacts.sh pack-build <side> <dir>    distribution tarball, staged
 #                                              test tools, build results
-#   ci/artifacts.sh unpack-build <side> <dir>  the reverse, into WORKDIR
+#   ci/artifacts.sh unpack-build <side> <dir>  the reverse, into WORKDIR;
+#                                              for the candidate, removes the
+#                                              jars named in BREAK_CANDIDATE
 #   ci/artifacts.sh pack-e2e <side> <arch> <dir>
 #   ci/artifacts.sh pack-unit <side> <dir>
 #   ci/artifacts.sh unpack-results <dir>...    e2e/unit results into WORKDIR
@@ -48,6 +50,25 @@ unpack_build() {
   # The distribution now lives here, not in the build's worktree.
   dist_dir "${side}" > "$(results_dir "${side}")/build/dist-path.txt"
   log "unpacked ${side} into $(dist_dir "${side}")"
+  [[ "${side}" == candidate && -n "${BREAK_CANDIDATE:-}" ]] && break_candidate
+  return 0
+}
+
+# Checks the harness itself: BREAK_CANDIDATE (space-separated jar file name
+# globs) deletes those jars from the candidate's distribution, which every
+# comparison must then fail on. The report says what was removed.
+break_candidate() {
+  local dist pattern removed=()
+  dist=$(dist_dir candidate)
+  for pattern in ${BREAK_CANDIDATE}; do
+    while IFS= read -r f; do
+      removed+=("${f#"${dist}/"}")
+      rm -f "${f}"
+    done < <(find "${dist}/share" -name "${pattern}" -type f)
+  done
+  (( ${#removed[@]} > 0 )) || die "BREAK_CANDIDATE=${BREAK_CANDIDATE} matched no jar"
+  printf '%s\n' "${removed[@]}" > "$(results_dir candidate)/build/broken.txt"
+  log "candidate deliberately broken, removed: ${removed[*]}"
 }
 
 pack_e2e() {

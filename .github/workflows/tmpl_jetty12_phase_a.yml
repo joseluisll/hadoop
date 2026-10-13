@@ -22,6 +22,16 @@
 # Builds the baseline and the candidate, runs the architecture end to end
 # and its unit test suites on both, and compares them; report.md goes to the
 # run summary and the report artifact.
+#
+# Two runs check the harness rather than the patch, chosen by the name of the
+# branch that starts the caller:
+#   jetty12-phase-a-<arch>-run-aa-*      baseline against itself: the
+#                                        candidate is baseline_ref too; any
+#                                        difference is noise
+#   jetty12-phase-a-<arch>-run-broken-*  the candidate's distribution loses
+#                                        jakarta.annotation-api (the only
+#                                        javax.annotation jar after
+#                                        HADOOP-20013); the result must be FAIL
 
 name: "Jetty 12 phase A harness (template)"
 
@@ -48,6 +58,10 @@ on:
       maven_mirror:
         type: string
         default: ""
+      break_candidate:
+        description: "Jar file name globs to delete from the candidate's distribution"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -57,7 +71,8 @@ env:
   HARNESS: dev-support/jetty12-phase-a
   MAVEN_MIRROR_URL: ${{ inputs.maven_mirror }}
   BASELINE: ${{ inputs.baseline_ref || 'PREPARATION' }}
-  CANDIDATE: ${{ inputs.candidate_ref || github.sha }}
+  CANDIDATE: ${{ contains(github.ref_name, '-run-aa-') && (inputs.baseline_ref || 'PREPARATION') || inputs.candidate_ref || github.sha }}
+  BREAK_CANDIDATE: ${{ inputs.break_candidate || (contains(github.ref_name, '-run-broken-') && 'jakarta.annotation-api-*.jar' || '') }}
 
 jobs:
   build:

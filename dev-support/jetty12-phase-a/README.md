@@ -249,6 +249,21 @@ A workflow starts by hand:
   git push origin origin/HADOOP-99999:refs/heads/jetty12-phase-a-secure-run-1
   ```
 
+Two runs check the harness itself instead of the patch, chosen by the
+branch (or tag) name:
+
+- `jetty12-phase-a-<arch>-run-aa-*`: the baseline against itself (both
+  sides build `PREPARATION`). Every difference it reports is noise the
+  harness must mask or allow.
+- `jetty12-phase-a-<arch>-run-broken-*`: the candidate's distribution loses
+  `jakarta.annotation-api` before it is compared or run (after HADOOP-20013
+  the only jar with the `javax.annotation` classes). The verdict must be
+  FAIL; if it is not, the harness misses a broken dependency.
+
+The report says when a run is one of these. The jars to remove can also be
+set with `BREAK_CANDIDATE` (file name globs) for `ci/artifacts.sh
+unpack-build`.
+
 A workflow is 5 to 7 jobs (two builds, two end-to-end runs, two or four
 unit suite runs, the comparison); each fits a standard GitHub-hosted runner
 (4 vCPUs, 16 GB, 6-hour job limit for public repositories).

@@ -43,6 +43,20 @@ def commit(results, side):
     return read(p).strip() if os.path.exists(p) else "not built"
 
 
+def harness_check(results):
+    """Notes for runs that check the harness instead of the patch."""
+    notes = []
+    if commit(results, "baseline") == commit(results, "candidate") != "not built":
+        notes.append("**Harness check, baseline against itself**: both sides are the same "
+                     "commit, so every difference below is noise.\n")
+    broken = os.path.join(results, "candidate", "build", "broken.txt")
+    if os.path.exists(broken):
+        jars = ", ".join(f"`{j}`" for j in read(broken).split())
+        notes.append(f"**Harness check, candidate deliberately broken**: removed {jars}. "
+                     "The verdict must be FAIL.\n")
+    return notes
+
+
 def main(results):
     cmp_dir = os.path.join(results, "compare")
     archs = sorted(f[len("e2e-compare-"):-len(".json")] for f in os.listdir(cmp_dir)
@@ -59,6 +73,7 @@ def main(results):
     out = ["# Jetty 12 phase A: no functional change\n",
            f"- Baseline: `{commit(results, 'baseline')}`",
            f"- Candidate: `{commit(results, 'candidate')}`\n",
+           *harness_check(results),
            f"Overall: **{overall}**\n",
            "| Check | Verdict |", "|---|---|"]
     out += [f"| {n} | {v} |" for n, v in verdicts]
