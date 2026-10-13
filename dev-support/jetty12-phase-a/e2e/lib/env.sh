@@ -178,11 +178,15 @@ cli() {
   [[ "${1:-}" == "--" ]] && shift
   local out="${RES}/cli/${COMPONENT}.${id}.out"
   mkdir -p "${RES}/cli"
+  # Commands get a time limit so a hung job (e.g. no node to run on) cannot
+  # block the scenario; shell functions run as they are.
+  local limit=()
+  [[ "$(type -t "$1")" == function ]] || limit=(timeout "${E2E_CMD_TIMEOUT:-900}")
   local rc=0
   if [[ "${merge}" == true ]]; then
-    "$@" > "${out}" 2>&1 || rc=$?
+    "${limit[@]}" "$@" > "${out}" 2>&1 || rc=$?
   else
-    "$@" > "${out}" 2> "${out}.err" || rc=$?
+    "${limit[@]}" "$@" > "${out}" 2> "${out}.err" || rc=$?
   fi
   python3 -I "${PROBE}" cli --obs "${OBS}" --component "${COMPONENT}" --id "${id}" \
     --rc "${rc}" --stdout-file "${out}" "${opts[@]}"

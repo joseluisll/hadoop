@@ -93,8 +93,13 @@ arch_conf() {
     "dfs.web.authentication.kerberos.principal=HTTP/_HOST${r}" \
     "dfs.web.authentication.kerberos.keytab=${kt}" \
     "dfs.cluster.administrators=${USER_NAME}"
+  # Log aggregation under Kerberos opens files with SecureIOUtils, which needs
+  # the native libhadoop; without it the node manager exits ("Secure IO is
+  # not possible without native code extensions"). The distributions here
+  # are built without -Pnative.
   # shellcheck disable=SC2046
   base_yarn $(yarn_rm_addresses "" 0) \
+    "yarn.log-aggregation-enable=false" \
     "yarn.resourcemanager.hostname=${HOST}" \
     "yarn.http.policy=HTTPS_ONLY" \
     "yarn.nodemanager.webapp.https.address=${HOST}:${P_NM_HTTPS}" \

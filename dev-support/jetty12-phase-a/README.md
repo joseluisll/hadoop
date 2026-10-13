@@ -120,6 +120,9 @@ namenodes, three journalnodes, two resource managers or two routers.
   only class loading is compared.
 - **NFS mounts**: mounting needs a kernel NFS client; the gateway's RPC
   services are checked instead.
+- **Log aggregation under Kerberos**: it needs the native `libhadoop`
+  (SecureIOUtils), and the distributions are built without `-Pnative`, so
+  `secure` turns it off; the other architectures aggregate logs.
 - **MapReduce on YARN federation**: with both sub-clusters on one host, the
   AMRMProxy address a job needs is ambiguous; YARN federation is exercised
   with distributed shell, which finds its home RM through the node manager.
