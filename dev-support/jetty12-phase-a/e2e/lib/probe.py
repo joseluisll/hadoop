@@ -59,6 +59,21 @@ VALUE_HEADERS = {
     "www-authenticate", "allow", "content-encoding", "transfer-encoding",
     "vary", "server", "accept-ranges",
 }
+# Parts of header values that differ on every response: the GSS-API token of
+# a SPNEGO reply ("Negotiate <token>", mutual authentication). The bare
+# "Negotiate" challenge of a 401 stays as it is.
+HEADER_MASKS = [
+    (re.compile(r"\b(Negotiate|Kerberos|NTLM) [A-Za-z0-9+/=_-]{8,}"), r"\1 TOKEN"),
+]
+
+
+def header_value(v):
+    v = " ".join(v.split())
+    for regex, repl in HEADER_MASKS:
+        v = regex.sub(repl, v)
+    return v
+
+
 # Headers whose very presence depends on timing or body size.
 IGNORED_HEADERS = {"date", "content-length", "expires", "last-modified", "etag",
                    "connection", "keep-alive"}
@@ -315,7 +330,7 @@ def do_http(a):
         "method": a.method,
         "status": status,
         "error": error and re.sub(r"\[Errno \d+\] ", "", error.split(":")[0]),
-        "headers": {k: (", ".join(sorted(" ".join(v.split()) for v in vs))
+        "headers": {k: (", ".join(sorted(header_value(v) for v in vs))
                         if k in VALUE_HEADERS else True)
                     for k, vs in sorted(lower.items()) if k not in IGNORED_HEADERS
                     and k not in (a.ignore_header or [])},
