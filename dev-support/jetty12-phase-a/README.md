@@ -148,14 +148,14 @@ These are not caused by phase A; the harness records them, and they show as
   way: `HDFSPolicyProvider` lists `ClientProtocol` for
   `ClientNamenodeProtocolPB`.) The MapReduce observations of `secure` fail
   on both sides until it is fixed.
-- Distributed shell cannot be submitted through the YARN router: its client
+- YARN-12024: distributed shell cannot be submitted through the YARN router: its client
   tolerates `YARNFeatureNotEnabledException` from `getResourceProfiles`
   (resource profiles are off by default), but
   `FederationClientInterceptor.getResourceProfiles` wraps the sub-clusters'
   exceptions in a plain `YarnException` ("invokeConcurrent Failed"), so the
   client gives up. `federated` also submits through the router's REST API,
   which works.
-- The YARN router's REST API cannot forward requests whose answer has a
+- YARN-12025: the YARN router's REST API cannot forward requests whose answer has a
   body to read, e.g. `POST /ws/v1/cluster/apps/new-application` answers 503
   "No active SubCluster available" after "MessageBodyReader not found for
   media type=application/json ... NewApplication":
