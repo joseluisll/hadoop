@@ -128,8 +128,10 @@ arch_conf() {
       "yarn.nodemanager.localizer.address=${HOST}:${SC_NM_LOC[i]}" \
       "yarn.nodemanager.local-dirs=${d}/nm-local-${SC[i]}" \
       "yarn.nodemanager.log-dirs=${HADOOP_LOG_DIR}/userlogs-${SC[i]}" \
-      "yarn.nodemanager.resource.memory-mb=$(( ${E2E_NM_MEMORY_MB:-6144} / 2 ))" \
-      "mapreduce.shuffle.port=${SC_SHUFFLE[i]}"
+      "yarn.nodemanager.resource.memory-mb=$(( ${E2E_NM_MEMORY_MB:-6144} / 2 ))"
+    # In mapred-site: ShuffleHandler builds a JobConf, which adds
+    # mapred-default.xml (13562) after yarn-site.xml.
+    site "${RUN}/conf-nm${SC[i]}/mapred-site.xml" "mapreduce.shuffle.port=${SC_SHUFFLE[i]}"
   done
 }
 
