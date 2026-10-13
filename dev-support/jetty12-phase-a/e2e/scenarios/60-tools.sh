@@ -61,11 +61,12 @@ cli folder --expect-rc 0,1 -- hadoop rumenfolder \
 
 if [[ "${E2E_GRIDMIX:-true}" == true && -s "${LOCAL}/trace.json" ]]; then
   COMPONENT=tools-gridmix
-  # Gridmix wants an input directory even for sleep jobs: -generate a small one.
+  # Gridmix wants input even for sleep jobs: -generate a small one, and
+  # accept its small files (gridmix.min.file.size defaults to 128 MB).
   cli sleep-jobs --merge-stderr -- timeout 900 hadoop gridmix \
     -Dgridmix.job.type=SLEEPJOB -Dgridmix.job-submission.policy=SERIAL \
     -Dgridmix.sleep.max-map-time=200 -Dgridmix.sleep.max-reduce-time=200 \
-    -Dgridmix.output.directory="${D}/gridmix-out" \
+    -Dgridmix.output.directory="${D}/gridmix-out" -Dgridmix.min.file.size=1048576 \
     -generate 10m "${D}/gridmix" "file://${LOCAL}/trace.json"
 fi
 
