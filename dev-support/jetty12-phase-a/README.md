@@ -264,6 +264,12 @@ The report says when a run is one of these. The jars to remove can also be
 set with `BREAK_CANDIDATE` (file name globs) for `ci/artifacts.sh
 unpack-build`.
 
+Runs go **one at a time**, across all five workflows, oldest first: each
+run's first job waits (polling every minute) until no earlier harness run
+is queued or running (`ci/wait-turn.sh`), so starting several runs queues
+them instead of running them side by side. A run that waits more than 6
+hours (the job limit) fails in that job and has to be started again.
+
 A workflow is 5 to 7 jobs (two builds, two end-to-end runs, two or four
 unit suite runs, the comparison); each fits a standard GitHub-hosted runner
 (4 vCPUs, 16 GB, 6-hour job limit for public repositories).

@@ -32,6 +32,11 @@
 #                                        jakarta.annotation-api (the only
 #                                        javax.annotation jar after
 #                                        HADOOP-20013); the result must be FAIL
+#
+# Runs go one at a time across all five architectures, oldest first: the
+# first job (queue) waits until no earlier harness run is active
+# (ci/wait-turn.sh). GitHub's concurrency groups would cancel all but one
+# pending run instead of queueing them.
 
 name: "Jetty 12 phase A harness (template)"
 
@@ -75,8 +80,28 @@ env:
   BREAK_CANDIDATE: ${{ inputs.break_candidate || (contains(github.ref_name, '-run-broken-') && 'jakarta.annotation-api-*.jar' || '') }}
 
 jobs:
+  queue:
+    name: Wait for earlier harness runs
+    runs-on: ubuntu-24.04
+    # A job runs at most 6 hours on GitHub-hosted runners; a run that waits
+    # longer fails here and has to be started again.
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: dev-support/jetty12-phase-a/ci
+      - name: Wait for the runs started before this one
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ${HARNESS}/ci/wait-turn.sh "${{ github.repository }}" "${{ github.run_id }}"
+
   build:
     name: Build ${{ matrix.side }}
+    needs: queue
     runs-on: ubuntu-24.04
     timeout-minutes: 180
     strategy:
@@ -159,6 +184,7 @@ jobs:
 
   unit:
     name: Unit ${{ matrix.suite }} ${{ matrix.side }}
+    needs: queue
     if: inputs.unit_suites != '[]'
     runs-on: ubuntu-24.04
     timeout-minutes: 360

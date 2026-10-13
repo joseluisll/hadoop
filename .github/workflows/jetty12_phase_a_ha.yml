@@ -50,6 +50,8 @@ on:
 
 permissions:
   contents: read
+  # the template's queue job reads the other harness runs
+  actions: read
 
 concurrency:
   group: jetty12-phase-a-ha-${{ github.ref }}
