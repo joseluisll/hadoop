@@ -44,3 +44,11 @@ obsdiff yarn-timeline:(put-entity|get-events|domain|ahs-app|ahs-apps|ahs-attempt
 # simple, not in run 5; the Jetty jars are identical on both sides). Only
 # that header may differ; any other difference in the observation still fails.
 obsfield [a-z0-9:-]+/headers/vary  # Vary on static files varies between runs of one build (pre-existing)
+
+# Not caused by phase A: the counters of the sleep job, read from its
+# application master while it runs, have groups only once a task has been
+# counted. Under Kerberos every task is rejected (MAPREDUCE-7548), so whether
+# a group exists yet is timing: secure runs 2 and 3 had none on either side,
+# run 4 had one on the baseline only. Only the presence of the groups may
+# differ; the response itself is still compared.
+obsfield mapreduce-am:am-job-counters/body/json/jobCounters/counterGroup  # job counters read mid-run depend on timing (MAPREDUCE-7548 under Kerberos)
