@@ -269,6 +269,8 @@ run's first job waits (polling every minute) until no earlier harness run
 is queued or running (`ci/wait-turn.sh`), so starting several runs queues
 them instead of running them side by side. A run that waits more than 6
 hours (the job limit) fails in that job and has to be started again.
+"Re-run failed jobs" skips the waiting job, which already succeeded, so such
+a re-run can overlap another run; push a new run branch instead.
 
 A workflow is 5 to 7 jobs (two builds, two end-to-end runs, two or four
 unit suite runs, the comparison); each fits a standard GitHub-hosted runner
