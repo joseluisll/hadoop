@@ -53,6 +53,12 @@ cli output --expect-regex '^\s*(\d+)' -- hadoop fs -cat "${D}/streaming-out/part
 COMPONENT=tools-rumen
 DONE_DIR=$(hdfs getconf -confKey mapreduce.jobhistory.done-dir 2>/dev/null)
 DONE_DIR=${DONE_DIR:-/tmp/hadoop-yarn/staging/history/done}
+# The history server moves finished jobs to the done directory every three
+# minutes; when this scenario runs alone, wait for the streaming job above.
+for _ in $(seq 1 60); do
+  hadoop fs -ls -R "${DONE_DIR}" 2>/dev/null | grep -q '\.jhist$' && break
+  sleep 5
+done
 cli tracebuilder -- hadoop rumentrace -recursive \
   "file://${LOCAL}/trace.json" "file://${LOCAL}/topology.json" "${FS}${DONE_DIR}"
 check trace-written "$([[ -s "${LOCAL}/trace.json" ]] && echo true || echo false)"
