@@ -55,9 +55,17 @@ src_dir() {
 # from its build, or unpacked under <side>/dist (CI jobs that only download
 # the tarball).
 dist_dir() {
-  local d
-  d=$(find "$(side_dir "$1")/dist" "$(src_dir "$1")/hadoop-dist/target" -maxdepth 1 -type d \
-      -name 'hadoop-[0-9]*' 2>/dev/null | head -1)
+  local d where=()
+  # Only existing directories: find fails on a missing one, which set -e
+  # with pipefail turns into a silent exit (CI unpacks the distribution
+  # where there is no build tree).
+  for d in "$(side_dir "$1")/dist" "$(src_dir "$1")/hadoop-dist/target"; do
+    [[ -d "${d}" ]] && where+=("${d}")
+  done
+  d=""
+  if [[ ${#where[@]} -gt 0 ]]; then
+    d=$(find "${where[@]}" -maxdepth 1 -type d -name 'hadoop-[0-9]*' | head -1) || true
+  fi
   [[ -n "${d}" ]] || die "no hadoop distribution built for $1; run build.sh $1 first"
   echo "${d}"
 }
