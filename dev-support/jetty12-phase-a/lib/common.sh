@@ -127,12 +127,48 @@ EOF
         || die "cannot download the Maven wrapper jar from ${MAVEN_MIRROR_URL}"
     fi
   fi
+  # The resolver's HTTP retries (Maven Resolver 1.9 property names) cover
+  # failed connections and 429/5xx answers; mvn_logged below covers what they
+  # do not, such as a download cut off part way.
   # shellcheck disable=SC2086
   (cd "$(src_dir "${side}")" && ./mvnw -B -ntp "${settings[@]}" \
       -Dmaven.repo.local="${M2_REPO:-${WORKDIR}/m2}" \
       -Daether.enhancedLocalRepository.split=true \
       -Daether.enhancedLocalRepository.localPrefix="installed-${side}" \
+      -Daether.connector.http.retryHandler.count=5 \
+      -Daether.connector.http.retryHandler.interval=5000 \
+      -Daether.connector.http.retryHandler.intervalMax=60000 \
+      -Daether.connector.http.retryHandler.serviceUnavailable=429,502,503,504 \
       ${MVN_EXTRA_ARGS} "$@")
+}
+
+# Lines of a Maven log that blame the network, not the build.
+MVN_TRANSFER_ERROR='^\[ERROR\].*(Could not transfer|Premature end of Content-Length|Connection reset|Connection refused|timed out|status code: (429|5[0-9][0-9])|Remote host terminated)'
+
+# mvn_logged <side> <log> <args...>: mvn_side with its output in <log>. When
+# Maven fails on a download (MVN_TRANSFER_ERROR), runs it again, up to
+# MVN_ATTEMPTS times in all, resuming from the module that failed; earlier
+# attempts are kept as <log>.attempt-N.
+mvn_logged() {
+  local side=$1 logf=$2
+  shift 2
+  local attempt=1 max=${MVN_ATTEMPTS:-3} rc resume=()
+  while true; do
+    rc=0
+    mvn_side "${side}" "$@" "${resume[@]}" > "${logf}" 2>&1 || rc=$?
+    (( rc == 0 )) && return 0
+    if (( attempt >= max )) || ! grep -Eq "${MVN_TRANSFER_ERROR}" "${logf}"; then
+      return "${rc}"
+    fi
+    local module
+    module=$(grep -oE -- '-rf :[A-Za-z0-9._-]+' "${logf}" | tail -1 | cut -c6-) || true
+    resume=()
+    [[ -n "${module}" ]] && resume=(-rf ":${module}")
+    log "maven attempt ${attempt} failed on a download ($(grep -Em1 "${MVN_TRANSFER_ERROR}" "${logf}" | cut -c1-160)); retrying${module:+ from ${module}} in $((attempt * 30))s"
+    mv "${logf}" "${logf}.attempt-${attempt}"
+    sleep $((attempt * 30))
+    attempt=$((attempt + 1))
+  done
 }
 
 require_cmd() {

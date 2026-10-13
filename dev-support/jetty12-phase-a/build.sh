@@ -48,23 +48,20 @@ log "building $(cat "${OUT}/commit-subject.txt")"
 
 if [[ "${MODE}" == install ]]; then
   log "mvn install (no tests); log: ${OUT}/mvn-install.log"
-  mvn_side "${SIDE}" install -DskipTests -Dmaven.javadoc.skip=true \
-    > "${OUT}/mvn-install.log" 2>&1 \
+  mvn_logged "${SIDE}" "${OUT}/mvn-install.log" install -DskipTests -Dmaven.javadoc.skip=true \
     || die "build failed; see ${OUT}/mvn-install.log"
   exit 0
 fi
 
 log "mvn install -Pdist (no tests); log: ${OUT}/mvn-install.log"
-mvn_side "${SIDE}" install -Pdist -Dtar -DskipTests -Dmaven.javadoc.skip=true \
-  > "${OUT}/mvn-install.log" 2>&1 \
+mvn_logged "${SIDE}" "${OUT}/mvn-install.log" install -Pdist -Dtar -DskipTests -Dmaven.javadoc.skip=true \
   || die "build failed; see ${OUT}/mvn-install.log"
 
 # Resolved dependencies of every module, all scopes.
 log "recording resolved dependencies; log: ${OUT}/mvn-dependency-list.log"
 find "${SRC}" -name jetty12-deps.txt -path '*/target/*' -delete
-mvn_side "${SIDE}" -nsu dependency:list -Dmdep.outputScope=true -Dmdep.includeParents=false \
-  -DoutputFile=target/jetty12-deps.txt -Dsort=true \
-  > "${OUT}/mvn-dependency-list.log" 2>&1 \
+mvn_logged "${SIDE}" "${OUT}/mvn-dependency-list.log" -nsu dependency:list -Dmdep.outputScope=true \
+  -Dmdep.includeParents=false -DoutputFile=target/jetty12-deps.txt -Dsort=true \
   || die "dependency:list failed; see ${OUT}/mvn-dependency-list.log"
 
 # One file, one line per "module<TAB>group:artifact:type[:classifier]:version:scope".
@@ -82,9 +79,9 @@ log "distribution: ${dist}"
 TOOLS="$(side_dir "${SIDE}")/tools"
 rm -rf "${TOOLS}"
 mkdir -p "${TOOLS}/minikdc" "${TOOLS}/timelineservice-tests"
-mvn_side "${SIDE}" -nsu dependency:copy-dependencies -pl hadoop-common-project/hadoop-minikdc \
-  -DincludeScope=runtime -DoutputDirectory="${TOOLS}/minikdc" \
-  > "${OUT}/mvn-tools.log" 2>&1 || die "cannot stage MiniKdc; see ${OUT}/mvn-tools.log"
+mvn_logged "${SIDE}" "${OUT}/mvn-tools.log" -nsu dependency:copy-dependencies \
+  -pl hadoop-common-project/hadoop-minikdc -DincludeScope=runtime -DoutputDirectory="${TOOLS}/minikdc" \
+  || die "cannot stage MiniKdc; see ${OUT}/mvn-tools.log"
 cp "${SRC}"/hadoop-common-project/hadoop-minikdc/target/hadoop-minikdc-*[0-9T].jar "${TOOLS}/minikdc/"
 cp "${SRC}"/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice/target/hadoop-yarn-server-timelineservice-*-tests.jar \
   "${TOOLS}/timelineservice-tests/"

@@ -146,7 +146,7 @@ run_module() {
   fi
   log "${suite}: ${module}${tests:+ ($(tr ',' '\n' <<< "${tests}" | wc -l) test patterns)}"
   local start=${SECONDS} rc=0
-  mvn_side "${SIDE}" "${args[@]}" > "${dest}/mvn.log" 2>&1 || rc=$?
+  mvn_logged "${SIDE}" "${dest}/mvn.log" "${args[@]}" || rc=$?
   local src
   src="$(src_dir "${SIDE}")/${module}/target"
   cp "${src}"/surefire-reports/TEST-*.xml "${dest}/" 2>/dev/null || true
