@@ -196,8 +196,9 @@ These are not caused by phase A; the harness records them, and they show as
   still apply.
 - Jetty's `DefaultServlet` (HttpServer2 turns its precompressed "gzip"
   option on) adds `Vary: Accept-Encoding` to a static file only when it finds
-  a precompressed variant, and one build sends it in one run and not in the
-  next: the candidate sent it on the RM's `yarn.css` in CI runs 3 and 4 of
+  a precompressed variant (the hadoop-yarn-common jar ships
+  `webapps/static/yarn.css.gz`), and one build sends it in one run and not in
+  the next: the candidate sent it on the RM's `yarn.css` in CI runs 3 and 4 of
   `simple` and not in run 5, with identical code. The harness lets that one
   header differ (`obsfield` in `e2e/expected-e2e-differences.txt`); any other
   difference in the same observation still fails.
@@ -255,14 +256,21 @@ branch (or tag) name:
 - `jetty12-phase-a-<arch>-run-aa-*`: the baseline against itself (both
   sides build `PREPARATION`). Every difference it reports is noise the
   harness must mask or allow.
-- `jetty12-phase-a-<arch>-run-broken-*`: the candidate's distribution loses
-  `jakarta.annotation-api` before it is compared or run (after HADOOP-20013
-  the only jar with the `javax.annotation` classes). The verdict must be
-  FAIL; if it is not, the harness misses a broken dependency.
+- `jetty12-phase-a-<arch>-run-broken-<case>-<n>`: the candidate's
+  distribution is broken on purpose before it is compared or run
+  (`ci/break_candidate.py`). The verdict must be FAIL; if it is not, the
+  harness misses that kind of breakage.
 
-The report says when a run is one of these. The jars to remove can also be
-set with `BREAK_CANDIDATE` (file name globs) for `ci/artifacts.sh
-unpack-build`.
+| Case | Change to the candidate | Kind of breakage |
+|---|---|---|
+| `annotation` (also `run-broken-<n>`) | delete `jakarta.annotation-api`, the only `javax.annotation` jar after HADOOP-20013 | a dependency the patch relies on goes missing |
+| `jetty` | delete `jetty-http` | massive: no web server starts |
+| `static` | delete `share/hadoop/hdfs/webapps/static/hadoop.css` | narrow: one static file of the namenode UI |
+| `webhdfs-user` | set `dfs.webhdfs.user.provider.user.pattern` to `^hdfs$` in the `hdfs-default.xml` of the hadoop-hdfs jar | a changed default, nothing missing: WebHDFS rejects the harness user |
+
+The report says when a run is one of these, and lists the changes. Other
+changes can be given to `ci/artifacts.sh unpack-build` in `BREAK_CANDIDATE`
+(specs of `ci/break_candidate.py`).
 
 Runs go **one at a time**, across all five workflows, oldest first: each
 run's first job waits (polling every minute) until no earlier harness run

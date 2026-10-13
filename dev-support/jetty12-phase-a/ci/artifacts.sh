@@ -19,8 +19,9 @@
 #   ci/artifacts.sh pack-build <side> <dir>    distribution tarball, staged
 #                                              test tools, build results
 #   ci/artifacts.sh unpack-build <side> <dir>  the reverse, into WORKDIR;
-#                                              for the candidate, removes the
-#                                              jars named in BREAK_CANDIDATE
+#                                              for the candidate, breaks it
+#                                              when asked (BREAK_CANDIDATE,
+#                                              BREAK_REF; see below)
 #   ci/artifacts.sh pack-e2e <side> <arch> <dir>
 #   ci/artifacts.sh pack-unit <side> <dir>
 #   ci/artifacts.sh unpack-results <dir>...    e2e/unit results into WORKDIR
@@ -50,25 +51,32 @@ unpack_build() {
   # The distribution now lives here, not in the build's worktree.
   dist_dir "${side}" > "$(results_dir "${side}")/build/dist-path.txt"
   log "unpacked ${side} into $(dist_dir "${side}")"
-  [[ "${side}" == candidate && -n "${BREAK_CANDIDATE:-}" ]] && break_candidate
+  [[ "${side}" == candidate ]] && break_candidate
   return 0
 }
 
-# Checks the harness itself: BREAK_CANDIDATE (space-separated jar file name
-# globs) deletes those jars from the candidate's distribution, which every
-# comparison must then fail on. The report says what was removed.
+# Checks the harness itself by breaking the candidate's distribution, which
+# every comparison must then fail on (ci/break_candidate.py; the report says
+# what was changed). BREAK_CANDIDATE holds specs for it (e.g.
+# "rm:share/*/jetty-http-*.jar"); otherwise BREAK_REF, the name of a branch
+# jetty12-phase-a-<arch>-run-broken-<case>-<n>, names a case (no case:
+# "annotation").
 break_candidate() {
-  local dist pattern removed=()
-  dist=$(dist_dir candidate)
-  for pattern in ${BREAK_CANDIDATE}; do
-    while IFS= read -r f; do
-      removed+=("${f#"${dist}/"}")
-      rm -f "${f}"
-    done < <(find "${dist}/share" -name "${pattern}" -type f)
-  done
-  (( ${#removed[@]} > 0 )) || die "BREAK_CANDIDATE=${BREAK_CANDIDATE} matched no jar"
-  printf '%s\n' "${removed[@]}" > "$(results_dir candidate)/build/broken.txt"
-  log "candidate deliberately broken, removed: ${removed[*]}"
+  local args=() case
+  if [[ -n "${BREAK_CANDIDATE:-}" ]]; then
+    # shellcheck disable=SC2206
+    args=(${BREAK_CANDIDATE})
+  elif [[ "${BREAK_REF:-}" == *-run-broken-* ]]; then
+    case=${BREAK_REF##*-run-broken-}
+    case=$(sed -E 's/-?[0-9]+$//' <<< "${case}")
+    args=(--case "${case:-annotation}")
+  else
+    return 0
+  fi
+  python3 -I "${HARNESS_DIR}/ci/break_candidate.py" "$(dist_dir candidate)" \
+    "$(results_dir candidate)/build/broken.txt" "${args[@]}" \
+    || die "could not break the candidate as asked (${args[*]})"
+  log "candidate deliberately broken: $(tr '\n' ';' < "$(results_dir candidate)/build/broken.txt")"
 }
 
 pack_e2e() {

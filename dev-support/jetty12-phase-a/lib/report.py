@@ -51,9 +51,9 @@ def harness_check(results):
                      "commit, so every difference below is noise.\n")
     broken = os.path.join(results, "candidate", "build", "broken.txt")
     if os.path.exists(broken):
-        jars = ", ".join(f"`{j}`" for j in read(broken).split())
-        notes.append(f"**Harness check, candidate deliberately broken**: removed {jars}. "
-                     "The verdict must be FAIL.\n")
+        changes = "".join(f"\n- `{line}`" for line in read(broken).splitlines() if line.strip())
+        notes.append("**Harness check, candidate deliberately broken**; the verdict must be "
+                     f"FAIL. Changes made to its distribution:{changes}\n")
     return notes
 
 
