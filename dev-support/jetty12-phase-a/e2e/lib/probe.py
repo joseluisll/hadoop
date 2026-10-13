@@ -79,6 +79,13 @@ MASKS = [
      "DATETIME"),
     # Object#toString identity hashes, e.g. "...KMSClientProvider@76a2ddf3"
     (re.compile(r"(?<=[\w$])@[0-9a-f]{4,8}\b"), "@HASH"),
+    # Delegation tokens (WebHDFS, HttpFS, KMS GETDELEGATIONTOKEN)
+    (re.compile(r'"urlString":"[A-Za-z0-9_-]+"'), '"urlString":"TOKEN"'),
+    # Durations in milliseconds, e.g. the namenode startup progress
+    (re.compile(r'"elapsedTime":\d+'), '"elapsedTime":N'),
+    # Each side runs its cluster under WORKDIR/<side>/, which shows in
+    # configuration resource names and file paths.
+    (re.compile(r"(?<=/)(baseline|candidate)(?=/)"), "SIDE"),
 ]
 
 
@@ -187,7 +194,7 @@ def body_shape(kind, body, content_type):
         try:
             return {"json": json_shape(json.loads(text))}
         except ValueError:
-            return {"json_error": True, "first_line": mask(text.strip().split("\n")[0][:200])}
+            return {"json_error": True, "first_line": mask(text.strip().split("\n")[0])[:200]}
     if kind == "xml":
         return {"xml": xml_shape(text)}
     if kind == "html":
@@ -203,7 +210,7 @@ def body_shape(kind, body, content_type):
         return {"sha256": hashlib.sha256(body).hexdigest()}
     if kind == "lines":
         return {"lines": [mask(line) for line in text.splitlines()]}
-    return {"first_line": mask(text.strip().split("\n")[0][:200]) if text.strip() else ""}
+    return {"first_line": mask(text.strip().split("\n")[0])[:200] if text.strip() else ""}
 
 
 class NoRedirect(urllib.request.HTTPRedirectHandler):

@@ -97,6 +97,9 @@ arch_conf() {
   # the native libhadoop; without it the node manager exits ("Secure IO is
   # not possible without native code extensions"). The distributions here
   # are built without -Pnative.
+  # The node manager logs in as nm/<canonical local hostname> when its
+  # principal has _HOST (SecurityUtil.login without a bind address); on CI
+  # runners that is an FQDN the keytab has no entry for, so name the host.
   # shellcheck disable=SC2046
   base_yarn $(yarn_rm_addresses "" 0) \
     "yarn.log-aggregation-enable=false" \
@@ -105,7 +108,7 @@ arch_conf() {
     "yarn.nodemanager.webapp.https.address=${HOST}:${P_NM_HTTPS}" \
     "yarn.resourcemanager.principal=rm/_HOST${r}" \
     "yarn.resourcemanager.keytab=${kt}" \
-    "yarn.nodemanager.principal=nm/_HOST${r}" \
+    "yarn.nodemanager.principal=nm/${HOST}${r}" \
     "yarn.nodemanager.keytab=${kt}" \
     "yarn.resourcemanager.webapp.spnego-principal=HTTP/_HOST${r}" \
     "yarn.resourcemanager.webapp.spnego-keytab-file=${kt}" \
