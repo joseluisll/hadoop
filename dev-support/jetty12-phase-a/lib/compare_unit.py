@@ -67,6 +67,17 @@ def read_module(path):
     return tests, status
 
 
+# Modules with no tests whose build itself is the check (maven-enforcer rules
+# on the shaded client jars): they pass when Maven succeeded on both sides.
+CHECK_ONLY_MODULES = ("hadoop-client-modules/hadoop-client-check-invariants",
+                      "hadoop-client-modules/hadoop-client-check-test-invariants")
+
+
+def checks_only(p):
+    return p["module"].endswith(CHECK_ONLY_MODULES) and all(
+        (p[side]["status"] or {}).get("maven_exit") == 0 for side in ("baseline", "candidate"))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
@@ -105,8 +116,11 @@ def main():
                           "status": cs},
         })
     not_run = [p["module"] for p in per_module
-               if p["candidate"]["tests"] == 0 or p["baseline"]["tests"] == 0]
-    verdict = "PASS" if not regressions and not missing and per_module else "FAIL"
+               if (p["candidate"]["tests"] == 0 or p["baseline"]["tests"] == 0)
+               and not checks_only(p)]
+    # A module with no test reports on a side (a suite pattern matching
+    # nothing, or a build failure) compared nothing, so it cannot pass.
+    verdict = "PASS" if not regressions and not missing and not not_run and per_module else "FAIL"
     if not per_module:
         verdict = "NOT RUN"
     result = {"verdict": verdict, "modules": per_module, "regressions": regressions,

@@ -207,7 +207,7 @@ jobs:
           ${HARNESS}/ci/artifacts.sh unpack-results "${RUNNER_TEMP}"/results/*
       - name: Compare
         shell: bash
-        run: ${HARNESS}/compare.sh
+        run: ${HARNESS}/compare.sh ${{ inputs.arch }}
       - name: Summary
         if: always()
         shell: bash

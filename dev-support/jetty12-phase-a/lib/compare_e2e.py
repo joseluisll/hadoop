@@ -28,7 +28,9 @@ Every observation (component + id) is classified:
 
 The candidate passes when there is no REGRESSION, no MISSING on the
 candidate side, no DIFF outside the allowlist, no class loaded from a jar
-outside the allowlist, and no new error in the logs.
+outside the allowlist, no error in the logs that is new or much more frequent
+than on the baseline, and no observation id recorded twice. When either side
+has no observations at all, the verdict is NOT RUN.
 
 Allowlist lines: '<kind> <regex>  # reason', kind one of
   obs        <component>:<id>
@@ -51,14 +53,18 @@ from artifact_diff import Allowlist  # noqa: E402
 
 
 def load_obs(path):
-    out = {}
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    r = json.loads(line)
-                    out[f"{r['component']}:{r['id']}"] = r
-    return out
+    """Observations by component:id, and the keys recorded more than once (a
+    later record would hide an earlier one, so those fail the comparison)."""
+    out, dups = {}, set()
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            if line.strip():
+                r = json.loads(line)
+                key = f"{r['component']}:{r['id']}"
+                if key in out:
+                    dups.add(key)
+                out[key] = r
+    return out, dups
 
 
 def load_json(path):
@@ -102,9 +108,16 @@ def main():
     ap.add_argument("candidate")
     a = ap.parse_args()
     allow = Allowlist(a.expected)
+    os.makedirs(a.out, exist_ok=True)
 
-    b = load_obs(os.path.join(a.baseline, "observations.jsonl"))
-    c = load_obs(os.path.join(a.candidate, "observations.jsonl"))
+    paths = {side: os.path.join(d, "observations.jsonl")
+             for side, d in (("baseline", a.baseline), ("candidate", a.candidate))}
+    absent = [side for side, p in paths.items() if not os.path.exists(p)]
+    if absent:
+        return not_run(a, f"no observations from the {' and '.join(absent)} run "
+                          "(the cluster did not start, or the run was not done)")
+    b, dups_b = load_obs(paths["baseline"])
+    c, dups_c = load_obs(paths["candidate"])
     rows = []
     for key in sorted(set(b) | set(c), key=lambda k: (k.split(":")[0], k)):
         rb, rc = b.get(key), c.get(key)
@@ -136,15 +149,17 @@ def main():
                               "candidate": jc, "expected": bool(rule),
                               "reason": rule and rule["reason"]})
 
-    # Errors in logs that only the candidate has.
+    # Errors in logs that only the candidate has, or has far more often.
     lb = load_json(os.path.join(a.baseline, "logscan.json"))
     lc = load_json(os.path.join(a.candidate, "logscan.json"))
     new_errors = []
     for src, msgs in lc.items():
         for msg, n in msgs.items():
-            if msg not in lb.get(src, {}):
+            nb = lb.get(src, {}).get(msg, 0)
+            if nb == 0 or n > max(2 * nb, nb + 5):
                 rule = allow.match("logscan", f"{src}:{msg}")
                 new_errors.append({"source": src, "message": msg, "count": n,
+                                   "baseline_count": nb,
                                    "expected": bool(rule), "reason": rule and rule["reason"]})
 
     counts = {}
@@ -157,6 +172,7 @@ def main():
         "unexpected_diffs": [r for r in rows if r["class"] == "DIFF" and not r["expected"]],
         "unexpected_class_jars": [m for m in jar_moves if not m["expected"]],
         "new_log_errors": [e for e in new_errors if not e["expected"]],
+        "duplicate_ids": sorted(dups_b | dups_c),
     }
     verdict = "PASS" if not any(blocking.values()) else "FAIL"
     result = {
@@ -173,7 +189,6 @@ def main():
         "unused_rules": [f"line {r['line']}: {r['kind']} {r['pattern']}"
                          for r in allow.rules if r["hits"] == 0],
     }
-    os.makedirs(a.out, exist_ok=True)
     result["arch"] = a.arch
     with open(os.path.join(a.out, f"e2e-compare-{a.arch}.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
@@ -182,6 +197,17 @@ def main():
     write_markdown(os.path.join(a.out, f"e2e-compare-{a.arch}.md"), result, blocking)
     print(f"e2e comparison ({a.arch}): {verdict} {counts}")
     return 0 if verdict == "PASS" else 1
+
+
+def not_run(a, reason):
+    """An architecture that cannot be compared is reported, never skipped."""
+    result = {"verdict": "NOT RUN", "arch": a.arch, "reason": reason}
+    with open(os.path.join(a.out, f"e2e-compare-{a.arch}.json"), "w", encoding="utf-8") as f:
+        json.dump(result, f, indent=1)
+    with open(os.path.join(a.out, f"e2e-compare-{a.arch}.md"), "w", encoding="utf-8") as f:
+        f.write(f"## End-to-end: {a.arch} architecture\n\nVerdict: **NOT RUN**: {reason}.\n\n")
+    print(f"e2e comparison ({a.arch}): NOT RUN: {reason}")
+    return 1
 
 
 def write_markdown(path, result, blocking):
@@ -209,6 +235,12 @@ def write_markdown(path, result, blocking):
                 for r in items:
                     f.write(f"| `{r['key']}` | {(r['detail'] or '').replace('|', '/')} |\n")
                 f.write("\n")
+        if blocking["duplicate_ids"]:
+            f.write("### Observation ids recorded more than once\n\nEach id must be unique; "
+                    "the later record hides the earlier one.\n\n")
+            for k in blocking["duplicate_ids"]:
+                f.write(f"- `{k}`\n")
+            f.write("\n")
         exp = [r for r in rows if r["expected"]]
         if exp:
             f.write(f"### Expected differences ({len(exp)})\n\n| Observation | Class | Reason |\n"
@@ -242,9 +274,9 @@ def write_markdown(path, result, blocking):
                         f"| {m['reason'] or '**no**'} |\n")
             f.write("\n</details>\n\n")
         errs = result["new_log_errors"]
-        f.write(f"### Log errors seen only on the candidate: {len(errs)}\n\n")
+        f.write(f"### Log errors new or much more frequent on the candidate: {len(errs)}\n\n")
         for e in errs:
-            f.write(f"- {e['source']}: `{e['message']}` x{e['count']}"
+            f.write(f"- {e['source']}: `{e['message']}` x{e['count']} (baseline x{e['baseline_count']})"
                     f"{' (expected: ' + e['reason'] + ')' if e['expected'] else ''}\n")
         if result["unused_rules"]:
             f.write("\nAllowlist rules that matched nothing:\n\n")

@@ -213,6 +213,15 @@ def body_shape(kind, body, content_type):
     return {"first_line": mask(text.strip().split("\n")[0])[:200] if text.strip() else ""}
 
 
+def header_lists(pairs):
+    """{lower-case name: [values]}: a header sent several times (Set-Cookie,
+    WWW-Authenticate) keeps every value."""
+    out = {}
+    for k, v in pairs:
+        out.setdefault(k.strip().lower(), []).append(v.strip())
+    return out
+
+
 class NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, *args, **kwargs):
         return None
@@ -233,9 +242,9 @@ def fetch_urllib(a, data):
     status, headers, body, error = None, {}, b"", None
     try:
         with opener.open(req, timeout=a.timeout) as resp:
-            status, headers, body = resp.status, dict(resp.headers.items()), resp.read()
+            status, headers, body = resp.status, header_lists(resp.headers.items()), resp.read()
     except urllib.error.HTTPError as e:
-        status, headers = e.code, dict(e.headers.items())
+        status, headers = e.code, header_lists(e.headers.items())
         try:
             body = e.read()
         except Exception:
@@ -278,9 +287,8 @@ def fetch_curl(a, data):
             # CRLFs that text mode would turn into plain newlines.
             with open(hdr, encoding="latin-1", newline="") as f:
                 blocks = [b for b in f.read().split("\r\n\r\n") if b.strip()]
-            for line in (blocks[-1].split("\r\n")[1:] if blocks else []):
-                k, _, v = line.partition(":")
-                headers[k.strip()] = v.strip()
+            headers = header_lists(line.partition(":")[::2] for line in
+                                   (blocks[-1].split("\r\n")[1:] if blocks else []))
         body = open(out, "rb").read() if os.path.exists(out) else b""
         return int(code), headers, body, None
 
@@ -301,24 +309,28 @@ def do_http(a):
         with open(a.out, "wb") as f:
             f.write(body)
 
-    lower = {k.lower(): v for k, v in headers.items()}
-    content_type = " ".join(lower.get("content-type", "").lower().split())
+    lower = headers
+    content_type = " ".join(lower.get("content-type", [""])[0].lower().split())
     obs = {
         "method": a.method,
         "status": status,
         "error": error and re.sub(r"\[Errno \d+\] ", "", error.split(":")[0]),
-        "headers": {k: (" ".join(v.split()) if k in VALUE_HEADERS else True)
-                    for k, v in sorted(lower.items()) if k not in IGNORED_HEADERS
+        "headers": {k: (", ".join(sorted(" ".join(v.split()) for v in vs))
+                        if k in VALUE_HEADERS else True)
+                    for k, vs in sorted(lower.items()) if k not in IGNORED_HEADERS
                     and k not in (a.ignore_header or [])},
     }
     if "set-cookie" in lower:
         # The cookie's name and attributes (HttpOnly, Secure, Path, ...)
-        # matter; its value is random.
-        name, _, rest = lower["set-cookie"].partition("=")
-        attrs = sorted(p.strip().split("=")[0].lower() for p in rest.split(";")[1:] if p.strip())
-        obs["headers"]["set-cookie"] = "; ".join([name.strip()] + attrs)
+        # matter; its value is random. One entry per cookie.
+        cookies = []
+        for c in lower["set-cookie"]:
+            name, _, rest = c.partition("=")
+            attrs = sorted(p.strip().split("=")[0].lower() for p in rest.split(";")[1:] if p.strip())
+            cookies.append("; ".join([name.strip()] + attrs))
+        obs["headers"]["set-cookie"] = " | ".join(sorted(cookies))
     if "location" in lower:
-        loc = re.sub(r"^https?://[^/]+", "", lower["location"])
+        loc = re.sub(r"^https?://[^/]+", "", lower["location"][0])
         obs["headers"]["location"] = mask(re.sub(r"[?&](delegation|offset|"
                                                  r"namenoderpcaddress)=[^&]*", "", loc))
     if status is not None and not a.head_only:

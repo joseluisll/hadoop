@@ -14,15 +14,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Usage: compare.sh
+# Usage: compare.sh [architectures]
 #
-# Compares whatever both sides have produced (build, e2e, unit) and writes
+# Compares what both sides have produced (build, e2e, unit) and writes
 # results/compare/report.md. Exits 0 only when every check passed.
+#
+# architectures: comma-separated list that should have run end to end; each
+# one missing on a side is reported NOT RUN. Default: every architecture
+# either side has results for.
 
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 LOG_TAG="compare"
 OUT="${WORKDIR}/results/compare"
+# report.py lists what it finds here: nothing may be left from an earlier run.
+rm -rf "${OUT}"
 mkdir -p "${OUT}"
 B=$(results_dir baseline)
 C=$(results_dir candidate)
@@ -33,19 +39,20 @@ else
   log "skipping artifact diff: both sides must be built"
 fi
 
-compared=0
-for arch_dir in "${B}"/e2e/*/; do
-  arch=$(basename "${arch_dir}")
-  if [[ -f "${B}/e2e/${arch}/observations.jsonl" && -f "${C}/e2e/${arch}/observations.jsonl" ]]; then
-    python3 -I "${HARNESS_DIR}/lib/compare_e2e.py" \
-      --expected "${HARNESS_DIR}/e2e/expected-e2e-differences.txt" --out "${OUT}" \
-      --arch "${arch}" "${B}/e2e/${arch}" "${C}/e2e/${arch}" || true
-    compared=$((compared + 1))
-  else
-    log "skipping e2e comparison of ${arch}: both sides must have run it"
-  fi
+if [[ -n "${1:-}" ]]; then
+  archs="${1//,/ }"
+else
+  archs=$(find "${B}/e2e" "${C}/e2e" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null \
+    | sort -u | tr '\n' ' ') || true
+fi
+# compare_e2e.py writes a NOT RUN result for an architecture a side has no
+# observations for, so it shows in the report instead of being skipped.
+for arch in ${archs}; do
+  python3 -I "${HARNESS_DIR}/lib/compare_e2e.py" \
+    --expected "${HARNESS_DIR}/e2e/expected-e2e-differences.txt" --out "${OUT}" \
+    --arch "${arch}" "${B}/e2e/${arch}" "${C}/e2e/${arch}" || true
 done
-(( compared > 0 )) || log "no architecture ran end to end on both sides"
+[[ -n "${archs// /}" ]] || log "no architecture ran end to end"
 
 if [[ -d "${B}/unit" && -d "${C}/unit" ]]; then
   python3 -I "${HARNESS_DIR}/lib/compare_unit.py" --out "${OUT}" "${B}/unit" "${C}/unit" || true

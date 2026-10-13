@@ -127,6 +127,20 @@ namenodes, three journalnodes, two resource managers or two routers.
   AMRMProxy address a job needs is ambiguous; YARN federation is exercised
   with distributed shell, which finds its home RM through the node manager.
 
+Run, but compared on neither side, because they fail on both (see known
+issues below). A PASS says nothing about them:
+
+- **MapReduce under Kerberos** (MAPREDUCE-7548): every job of `secure`
+  fails, so the jobs, their output, the job history server's job and task
+  pages and the AM's REST API and UI through the proxy with SPNEGO are not
+  compared there. The other architectures run MapReduce without Kerberos.
+- **Distributed shell and REST submissions through the YARN router**
+  (YARN-12024, YARN-12025): `federated` records them failing on both sides;
+  only the router's read-only REST calls and client RPC are compared.
+- **Timeline server JSON responses** (put, events, domains, application
+  history): the JSON writer is chosen at random at each start, so only their
+  status and checks are compared, not their shape (`obsdiff`).
+
 ## Known issues found on both sides
 
 These are not caused by phase A; the harness records them, and they show as
@@ -161,9 +175,9 @@ These are not caused by phase A; the harness records them, and they show as
   media type=application/json ... NewApplication":
   `RouterWebServiceUtil.invokeRMWebService` ignores the client it is given
   and builds a bare `ClientBuilder.newClient()` with no JSON provider
-  registered. Seen on the candidate; phase A changes no JSON provider jar
-  on the router's classpath, and the baseline run in CI shows whether it
-  fails there too.
+  registered. Phase A changes no JSON provider jar on the router's
+  classpath, and the CI runs of `federated` fail the same way on the
+  baseline.
 - HADOOP-20018: when the ZKFC cannot bind its RPC port, it exits with a
   NullPointerException (`this.rpcServer` is null in
   `ZKFailoverController`) that hides the BindException behind it. Each ZKFC
@@ -251,7 +265,7 @@ dev-support/jetty12-phase-a/e2e/run.sh baseline all
 dev-support/jetty12-phase-a/e2e/run.sh candidate all
 dev-support/jetty12-phase-a/unit-tests.sh baseline all quick
 dev-support/jetty12-phase-a/unit-tests.sh candidate all quick
-dev-support/jetty12-phase-a/compare.sh
+dev-support/jetty12-phase-a/compare.sh simple,secure,ha,federated,mixed
 ```
 
 Rough durations on 4 cores: build 35-60 minutes per side, each
@@ -287,9 +301,13 @@ architecture and an overall verdict. Supporting data sits next to it
 logs, surefire reports).
 
 - **UNEXPECTED** artifact differences, **DIFF**/**REGRESSION**/**MISSING**
-  observations, classes loaded from an unexpected jar, log errors only the
-  candidate has, and unit tests that passed on the baseline but fail on the
-  candidate fail the run.
+  observations, classes loaded from an unexpected jar, log errors that are
+  new on the candidate or much more frequent there (more than twice the
+  baseline's count and at least 6 more), an observation id recorded twice,
+  unit tests that passed on the baseline but fail on the candidate, and a
+  unit test module with no test reports on a side fail the run.
+- An architecture given to `compare.sh` (or found on either side) that a
+  side has no observations for is **NOT RUN**, and the run is not a PASS.
 - **BOTH_FAIL** observations and tests failing on both sides are not caused
   by the patch, but each one hides what it was checking: look at them before
   relying on a run.

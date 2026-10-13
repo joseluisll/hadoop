@@ -41,7 +41,9 @@ if [[ "${TIER}" != none ]]; then
     "${H}/unit-tests.sh" "${side}" all "${TIER}"
   done
 fi
-"${H}/compare.sh"
+all_archs=(simple secure ha federated mixed)
+[[ "${ARCHS}" == all ]] && ARCHS=$(IFS=,; echo "${all_archs[*]}")
+"${H}/compare.sh" "${ARCHS}"
 rc=$?
 log "report: ${WORKDIR}/results/compare/report.md"
 exit "${rc}"

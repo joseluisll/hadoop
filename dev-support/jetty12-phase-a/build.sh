@@ -40,7 +40,9 @@ if [[ ! -d "${SRC}/.git" && ! -f "${SRC}/.git" ]]; then
   log "creating worktree for ${REF} at ${SRC}"
   git -C "${REPO_DIR}" worktree add --detach "${SRC}" "${REF}"
 else
-  log "reusing worktree ${SRC}"
+  # A reused worktree must still build ${REF}: the branch may have moved.
+  log "reusing worktree ${SRC}, checking out ${REF}"
+  git -C "${SRC}" checkout -q --detach "${REF}" || die "cannot check out ${REF} in ${SRC}"
 fi
 git -C "${SRC}" rev-parse HEAD > "${OUT}/commit.txt"
 git -C "${SRC}" log -1 --format='%H %s' > "${OUT}/commit-subject.txt"
