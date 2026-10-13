@@ -1,0 +1,27 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# End-to-end differences between baseline and candidate that phase A is
+# meant to cause. lib/compare_e2e.py fails on every other one.
+#
+# Format: <kind> <regex>  # reason   (the regex must match the whole subject)
+#   obs       <component>:<observation id>
+#   classjar  <daemon>:<class>       class loaded from a different jar
+#   logscan   <source>:<message>     error message only the candidate logs
+
+# HADOOP-20013: the javax.annotation classes come from jakarta.annotation-api
+# instead of the duplicate javax.annotation-api jar. Same classes, other jar.
+obs common-cli:load\.(hadoop|hdfs|yarn|mapred)\.javax\.annotation\.[A-Za-z.]+  # HADOOP-20013
+classjar [a-z0-9]+:javax\.annotation\..*  # HADOOP-20013
