@@ -95,9 +95,9 @@ start_instance() {
   if [[ "$3" == dfsrouter ]]; then
     local deadline=$((SECONDS + 120))
     until curl -s --noproxy '*' "${url%/jmx}/jmx?qry=Hadoop:service=Router,name=FederationState" \
-        | grep -Eq '"NumActiveNamenodes" : [1-9]'; do
+        | grep -Eq '"NumNamenodes" : [1-9]'; do
       if (( SECONDS > deadline )); then
-        log "WARNING: ${name} has no active namenode after 120s"
+        log "WARNING: ${name} has no registered namenode after 120s"
         break
       fi
       sleep 2

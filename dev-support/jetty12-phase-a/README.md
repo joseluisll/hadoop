@@ -148,6 +148,13 @@ These are not caused by phase A; the harness records them, and they show as
   way: `HDFSPolicyProvider` lists `ClientProtocol` for
   `ClientNamenodeProtocolPB`.) The MapReduce observations of `secure` fail
   on both sides until it is fixed.
+- Distributed shell cannot be submitted through the YARN router: its client
+  tolerates `YARNFeatureNotEnabledException` from `getResourceProfiles`
+  (resource profiles are off by default), but
+  `FederationClientInterceptor.getResourceProfiles` wraps the sub-clusters'
+  exceptions in a plain `YarnException` ("invokeConcurrent Failed"), so the
+  client gives up. `federated` also submits through the router's REST API,
+  which works.
 - HADOOP-20018: when the ZKFC cannot bind its RPC port, it exits with a
   NullPointerException (`this.rpcServer` is null in
   `ZKFailoverController`) that hides the BindException behind it. Each ZKFC

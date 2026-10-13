@@ -117,6 +117,27 @@ print(apps[0]["id"] if apps else "")' 2>/dev/null || true)
   http router-app-state "${Y}/apps/${APP}/state" --expect-status any
   cli router-app-status --expect-regex 'Final-State : (\w+)' -- \
     yarn application -Dyarn.resourcemanager.address="${YROUTER_RPC}" -status "${APP}"
+  # Distributed shell fails through the router (see README, known issues),
+  # so placement is also checked with an application submitted to the
+  # router's REST API; its AM never registers, so it ends FAILED.
+  http rest-new-app "${Y}/apps/new-application?user.name=${USER_NAME}" --method POST --data '' \
+    --expect-regex '"application-id"' --out "${RES}/router-new-app.json"
+  REST_APP=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["application-id"])' \
+    "${RES}/router-new-app.json" 2>/dev/null || echo none)
+  http rest-submit "${Y}/apps?user.name=${USER_NAME}" --method POST \
+    --header 'Content-Type: application/json' --expect-status 202 \
+    --data "{\"application-id\":\"${REST_APP}\",\"application-name\":\"jetty12-router-rest\",
+    \"application-type\":\"YARN\",\"queue\":\"default\",\"max-app-attempts\":1,
+    \"resource\":{\"memory\":256,\"vCores\":1},
+    \"am-container-spec\":{\"commands\":{\"command\":\"sleep 1\"}}}"
+  for _ in $(seq 1 60); do
+    rest "${Y}/apps/${REST_APP}/state" | grep -Eq '"state":"(FAILED|FINISHED|KILLED)"' && break
+    sleep 2
+  done
+  http rest-app-final "${Y}/apps/${REST_APP}" --expect-regex '"name":"jetty12-router-rest"'
+  on1=$(rest "${RM_URL}/ws/v1/cluster/apps/${REST_APP}" | grep -c '"id"' || true)
+  on2=$(rest "${RM2_URL}/ws/v1/cluster/apps/${REST_APP}" | grep -c '"id"' || true)
+  check rest-app-on-one-subcluster "$([[ $((on1 + on2)) -eq 1 ]] && echo true || echo false)" "sc1 ${on1}, sc2 ${on2}"
   # It ran on exactly one of the sub-clusters.
   on1=$(rest "${RM_URL}/ws/v1/cluster/apps/${APP}" | grep -c '"id"' || true)
   on2=$(rest "${RM2_URL}/ws/v1/cluster/apps/${APP}" | grep -c '"id"' || true)
