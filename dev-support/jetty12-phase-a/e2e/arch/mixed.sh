@@ -106,6 +106,7 @@ arch_conf() {
     site "${RUN}/conf-${HA_NN[i]}/hdfs-site.xml" \
       "dfs.nameservice.id=ns1" \
       "dfs.ha.namenode.id=${HA_NN[i]}" \
+      "dfs.ha.zkfc.port=${HA_ZKFC_PORT[i]}" \
       "dfs.namenode.name.dir=${d}/${HA_NN[i]}"
     site "$(instance_conf "${HA_RM[i]}")/yarn-site.xml" "yarn.resourcemanager.ha.id=${HA_RM[i]}"
     site "${RUN}/conf-${ROUTERS[i]}/hdfs-rbf-site.xml" \

@@ -148,6 +148,11 @@ These are not caused by phase A; the harness records them, and they show as
   way: `HDFSPolicyProvider` lists `ClientProtocol` for
   `ClientNamenodeProtocolPB`.) The MapReduce observations of `secure` fail
   on both sides until it is fixed.
+- When the ZKFC cannot bind its RPC port, it exits with a
+  NullPointerException (`this.rpcServer` is null in
+  `ZKFailoverController`) that hides the BindException behind it. Each ZKFC
+  of the harness has its own `dfs.ha.zkfc.port`, so the runs do not hit it;
+  it was seen while setting them up.
 
 ## Running it
 

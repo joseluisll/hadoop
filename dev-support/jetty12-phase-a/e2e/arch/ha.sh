@@ -30,6 +30,8 @@ FS="hdfs://${HA_NS}"
 HA_NN=(nn1 nn2)
 HA_NN_RPC=(9000 9001)
 HA_NN_HTTP=(9870 9880)
+# Each ZKFC serves RPC on its own port (default 8019 for all of them).
+HA_ZKFC_PORT=(8019 8029)
 HA_RM=(rm1 rm2)
 HA_RM_OFFSET=(0 10000)
 NN_URL="http://${HOST}:${HA_NN_HTTP[0]}"
@@ -90,6 +92,7 @@ ha_yarn_props() {
   echo "yarn.resourcemanager.recovery.enabled=true"
   echo "yarn.resourcemanager.store.class=org.apache.hadoop.yarn.server.resourcemanager.recovery.ZKRMStateStore"
   echo "hadoop.zk.address=${HOST}:${P_ZK}"
+  echo "yarn.resourcemanager.zk-address=${HOST}:${P_ZK}"
   for i in "${!HA_RM[@]}"; do
     echo "yarn.resourcemanager.hostname.${HA_RM[i]}=${HOST}"
     yarn_rm_addresses "${HA_RM[i]}" "${HA_RM_OFFSET[i]}"
@@ -115,6 +118,7 @@ arch_conf() {
   for i in 0 1; do
     site "$(instance_conf "${HA_NN[i]}")/hdfs-site.xml" \
       "dfs.ha.namenode.id=${HA_NN[i]}" \
+      "dfs.ha.zkfc.port=${HA_ZKFC_PORT[i]}" \
       "dfs.namenode.name.dir=${d}/${HA_NN[i]}"
     site "$(instance_conf "${HA_RM[i]}")/yarn-site.xml" \
       "yarn.resourcemanager.ha.id=${HA_RM[i]}"

@@ -45,15 +45,18 @@ http bad-token-cookie "${NN_URL}/jmx" --no-auth --header 'Cookie: hadoop.auth="u
   --expect-status 401 --shape none
 
 COMPONENT=secure-kerberos
-cli kdiag --merge-stderr --expect-regex '(?m)^(Hadoop Kerberos diagnostics complete|KDiag)' -- \
+cli kdiag --merge-stderr --expect-regex '(?m)^== (Kerberos Diagnostics scan)' -- \
   hadoop org.apache.hadoop.security.KDiag --keytab "${KEYTAB}" --principal "nn/${HOST}@${REALM}"
 cli whoami --expect-regex '(\S+)' -- hadoop org.apache.hadoop.security.UserGroupInformation
 cli rpc-without-ticket --merge-stderr --expect-rc 1 \
   --expect-regex '(Client cannot authenticate via|GSS initiate failed|SIMPLE authentication is not enabled)' \
   -- env KRB5CCNAME="FILE:${RUN}/tmp/no-such-ccache" hadoop fs -ls /
-cli fetchdt -- hdfs fetchdt --webservice "${NN_URL}" "${RUN}/tmp/hdfs.token"
-cli fetchdt-print --expect-regex '(HDFS_DELEGATION_TOKEN|WEBHDFS delegation|SWEBHDFS delegation)' -- \
-  hdfs fetchdt --print "${RUN}/tmp/hdfs.token"
+# A token fetched over HTTPS is for SWEBHDFS; RPC needs one fetched over RPC.
+cli fetchdt-web -- hdfs fetchdt --webservice "${NN_URL}" "${RUN}/tmp/web.token"
+cli fetchdt-web-print --expect-regex '(SWEBHDFS delegation token)' -- \
+  hdfs fetchdt --print "${RUN}/tmp/web.token"
+cli fetchdt -- hdfs fetchdt "${RUN}/tmp/hdfs.token"
+cli fetchdt-print --expect-regex '(HDFS_DELEGATION_TOKEN)' -- hdfs fetchdt --print "${RUN}/tmp/hdfs.token"
 cli rpc-with-token-file --shape sha256 -- \
   env KRB5CCNAME="FILE:${RUN}/tmp/no-such-ccache" HADOOP_TOKEN_FILE_LOCATION="${RUN}/tmp/hdfs.token" \
   hadoop fs -cat "${D}/data.txt"
