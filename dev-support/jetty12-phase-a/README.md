@@ -194,6 +194,13 @@ These are not caused by phase A; the harness records them, and they show as
   on each side. The harness accepts either shape for these responses
   (`obsdiff` in `e2e/expected-e2e-differences.txt`); their other checks
   still apply.
+- Jetty's `DefaultServlet` (HttpServer2 turns its precompressed "gzip"
+  option on) adds `Vary: Accept-Encoding` to a static file only when it finds
+  a precompressed variant, and one build sends it in one run and not in the
+  next: the candidate sent it on the RM's `yarn.css` in CI runs 3 and 4 of
+  `simple` and not in run 5, with identical code. The harness lets that one
+  header differ (`obsfield` in `e2e/expected-e2e-differences.txt`); any other
+  difference in the same observation still fails.
 - No JIRA yet: a WebHDFS read through the HDFS router (RBF) redirects the
   client to a datanode with `namenoderpcaddress=<router id>`, and the router
   id is the local hostname plus the RPC port (`Router#setRpcServerAddress`),

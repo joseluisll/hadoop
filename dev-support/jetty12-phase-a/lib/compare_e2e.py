@@ -35,6 +35,8 @@ has no observations at all, the verdict is NOT RUN.
 Allowlist lines: '<kind> <regex>  # reason', kind one of
   obs        <component>:<id>
   obsdiff    <component>:<id>   (excuses a DIFF only; a REGRESSION still fails)
+  obsfield   <component>:<id><path>  (excuses a DIFF when every differing field,
+                                     e.g. /headers/vary, matches such a rule)
   classjar   <daemon>:<class>   (class loaded from a different jar)
   logscan    <source>:<message> (error message only seen on the candidate)
 """
@@ -99,6 +101,22 @@ def first_difference(a, b, path=""):
     return None if a == b else f"{path or '/'}: {json.dumps(a)[:120]} vs {json.dumps(b)[:120]}"
 
 
+def differing_paths(a, b, path=""):
+    """Every JSON path at which two values differ (not just the first)."""
+    if type(a) is not type(b):
+        return [path or "/"]
+    if isinstance(a, dict):
+        return [p for k in sorted(set(a) | set(b))
+                for p in ([f"{path}/{k}"] if k not in a or k not in b
+                          else differing_paths(a[k], b[k], f"{path}/{k}"))]
+    if isinstance(a, list):
+        if len(a) != len(b):
+            return [path or "/"]
+        return [p for i, (x, y) in enumerate(zip(a, b))
+                for p in differing_paths(x, y, f"{path}[{i}]")]
+    return [] if a == b else [path or "/"]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expected", required=True)
@@ -136,6 +154,10 @@ def main():
         rule = allow.match("obs", key) if cls in ("DIFF", "REGRESSION", "MISSING") else None
         if rule is None and cls == "DIFF":
             rule = allow.match("obsdiff", key)
+        if rule is None and cls == "DIFF":
+            fields = [allow.match("obsfield", key + p)
+                      for p in differing_paths(rb["obs"], rc["obs"])]
+            rule = fields[0] if fields and all(fields) else None
         rows.append({"key": key, "component": comp, "class": cls, "detail": detail,
                      "expected": bool(rule), "reason": rule and rule["reason"]})
 
