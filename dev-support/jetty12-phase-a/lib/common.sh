@@ -51,10 +51,12 @@ src_dir() {
   echo "${WORKDIR}/$1/src"
 }
 
-# dist_dir <side>: the unpacked hadoop-<version> distribution of that side.
+# dist_dir <side>: the unpacked hadoop-<version> distribution of that side,
+# from its build, or unpacked under <side>/dist (CI jobs that only download
+# the tarball).
 dist_dir() {
   local d
-  d=$(find "$(src_dir "$1")/hadoop-dist/target" -maxdepth 1 -type d \
+  d=$(find "$(side_dir "$1")/dist" "$(src_dir "$1")/hadoop-dist/target" -maxdepth 1 -type d \
       -name 'hadoop-[0-9]*' 2>/dev/null | head -1)
   [[ -n "${d}" ]] || die "no hadoop distribution built for $1; run build.sh $1 first"
   echo "${d}"

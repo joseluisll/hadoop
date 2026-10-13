@@ -28,7 +28,7 @@ dependencies:
 
 This harness builds the tree without the patch (**baseline**, default
 `origin/PREPARATION`) and with it (**candidate**, default
-`origin/HADOOP-99999`), runs the same checks against both, and reports every
+`origin/HADOOP-99999`), runs the same checks on both, and reports every
 difference. Differences the patch is meant to cause are listed, with the
 JIRA that causes them, in two allowlists; anything else fails the run.
 
@@ -43,83 +43,146 @@ JIRA that causes them, in two allowlists; anything else fails the run.
      reader, shaded client, minicluster) and the jar each class is first
      loaded from;
    - every module's resolved dependencies, all scopes (`dependency:list`).
-2. **End-to-end cluster** (`e2e/run.sh`): a single-host cluster started from
-   the side's distribution tarball with every daemon, and the same scenarios
-   run on both sides (about 900 observations). Each observation records
-   whether the expectation held and a normalized view (HTTP status, content
-   type, security headers, JSON/XML shape, HTML title and assets, CLI exit
-   code, checksums of deterministic job output) that must be identical on
-   both sides. Each daemon's JVM also logs every class it loads, and all
-   daemon and container logs are scanned for class-loading, linkage and
-   JAX-RS provider errors.
-3. **Unit and integration tests** (`unit-tests.sh`): the Maven tests of every
-   module whose build phase A changes, plus the HTTP tests of the modules
-   that run those servers, on both trees, compared test by test. The shaded
-   client invariant checks and `hadoop-client-integration-tests` (which uses
-   the minicluster jar from a downstream point of view) run too.
+2. **End to end, in five architectures** (`e2e/run.sh`): real daemons
+   started from each side's distribution tarball on one host, the same
+   scenarios run against both sides. Each observation records whether the
+   expectation held and a normalized view (HTTP status, content type,
+   security headers, cookie attributes, JSON/XML shape, HTML title and
+   assets, TLS protocol and cipher, CLI exit code, checksums of
+   deterministic job output) that must be identical on both sides. Every
+   daemon JVM logs the classes it loads, and all daemon and container logs
+   are scanned for class loading, linkage and JAX-RS provider errors.
+3. **Hadoop's own tests, by architecture** (`unit-tests.sh`): the tests of
+   every module whose build phase A changes, and existing MiniKdc, HA,
+   federation and mixed-topology tests, on both trees, compared test by
+   test; plus the shaded client invariant checks and
+   `hadoop-client-integration-tests`.
 
-## Coverage
+## Architectures
 
-| Component | Daemon / tool | What the scenarios do |
+Each architecture is a file in `e2e/arch/` listing its daemon instances.
+Every instance gets its own configuration directory, pid file and logs
+(`HADOOP_IDENT_STRING` is the instance name), so one host runs two
+namenodes, three journalnodes, two resource managers or two routers.
+
+| Architecture | Topology | Scenarios |
 |---|---|---|
-| hadoop-common | every daemon's HttpServer2 | `/jmx` (query, get, JSONP, bad query), `/conf` (XML, JSON, by name), `/stacks`, `/logLevel` get/set, `/logs/` listing and traversal attempt, `/prom`, static content, 404s, `HEAD`/`OPTIONS`/`TRACE`/`POST`, security headers (`10-web-common.sh`) |
-| hadoop-common | CLI | `version`, `classpath`, `envvars`, `conftest`, `checknative`, credential provider, local file system, loading of the javax.annotation, servlet, JAX-RS, Jersey and Jetty classes through all four launchers (`00-cli-common.sh`) |
-| HDFS | namenode, datanode, secondary namenode, journalnode | file system shell, ACLs, xattrs, snapshots and diff, quotas, storage policies, EC policies, cache directives, fsck, image fetch, `oiv`, `oev`, `saveNamespace`, balancer, mover, disk balancer; WebHDFS REST (about 45 operations including two-step create/append through the datanode, ranges, snapshots, error bodies, permissions); the WebHDFS client file system; namenode, datanode, SNN and JN web UIs, fsck and image transfer servlets (`20-hdfs.sh`) |
-| HDFS RBF | dfsrouter | mount table admin, RPC through the router, WebHDFS through the router, federation UI (`30-hdfs-services.sh`) |
-| HttpFS | httpfs | the WebHDFS REST API (about 30 operations) including data upload, errors, authentication; WebHDFS client against HttpFS |
-| KMS | kms | key create/roll/list/delete via CLI and REST, EEK generate and decrypt, errors, authentication; HDFS encryption zone write/read over RPC, WebHDFS and HttpFS |
-| NFS gateway | portmap, nfs3 (as root) | start-up, JMX, `rpcinfo`, `showmount` |
-| YARN | resourcemanager | CLI, REST in JSON and XML (cluster, scheduler, apps, nodes, labels, activities, errors), application submission and kill through REST in JSON and XML, web UI pages |
-| YARN | nodemanager | REST, web UI, distributed shell containers, log aggregation |
-| YARN | timeline server | timeline v1 entity POST/GET round trip, application history REST and UI |
-| YARN | web proxy | proxying to a running MapReduce AM, finished and unknown applications |
-| YARN | router, GPG, shared cache manager, timeline reader v2 | REST and UI through the router, router client RPC, GPG and SCM UIs, timeline reader REST (file system storage) |
-| YARN | services API | create, status, flex, stop, destroy a service through the RM's REST API |
-| MapReduce | jobs, history server, shuffle | pi, wordcount, grep, teragen/terasort/teravalidate with checksums compared, job CLI, the AM's REST API and UI through the proxy while a job runs, job kill, history server REST (JSON and XML) and UI (`50-mapreduce.sh`) |
-| hadoop-tools | distcp, archives, streaming, rumen, gridmix | DistCp over HDFS, WebHDFS and HttpFS, HAR create and read, streaming job, rumen trace, gridmix sleep jobs from that trace (`60-tools.sh`) |
-| hadoop-tools | SLS | a simulation from the bundled trace, its Jetty web UI and the in-process RM |
-| hadoop-tools | resource estimator | its REST service: translate a log, history, estimate, delete |
-| hadoop-tools | cloud connectors, dynamometer, fs2img, fedbalance, extras, datajoin | entry classes load from the tools classpath the same way on both sides |
-| hadoop-client | api, runtime, minicluster | jar contents, visible classes, invariant checks, `hadoop-client-integration-tests` |
+| `simple` | one of every daemon, simple auth over HTTP: namenode, datanode, secondary namenode, journalnode, HDFS router, HttpFS, KMS, NFS gateway (as root), resource manager, node manager, timeline server, web proxy, YARN router, shared cache manager, timeline reader v2, job history server | 00 10 20 30 40 50 60 |
+| `secure` | Kerberos (KDC from `hadoop-minikdc`), every web server HTTPS only with SPNEGO, SASL data transfer with block tokens, KMS and HttpFS with Kerberos over HTTPS, delegation tokens: namenode, datanode, KMS, HttpFS, resource manager, node manager, timeline server, job history server | 00 10 20 30 50 70 |
+| `ha` | ZooKeeper, three journalnodes, two namenodes with ZKFC automatic failover, two resource managers with leader election and the ZooKeeper state store, datanode, node manager, job history server | 00 10 20 50 80 |
+| `federated` | HDFS federation (two namespaces, one datanode with two block pools, RBF router with the ZooKeeper state store, ViewFS) and YARN federation (two sub-clusters, YARN router with the federation interceptors, global policy generator, ZooKeeper federation state store) | 00 10 85 |
+| `mixed` | an HA namespace and a non-HA one federated behind two RBF routers that clients use as one HA nameservice (the default file system, so YARN and MapReduce go through RBF), RM HA | 00 10 80 85 90 |
 
-Not exercised end to end, and why:
+| Scenario | What it does |
+|---|---|
+| `00-cli-common` | `hadoop` CLI, credential provider, local file system; loads the javax.annotation, servlet, JAX-RS, Jersey and Jetty classes through all four launchers and records the jar each comes from |
+| `10-web-common` | on every daemon instance's web server: `/jmx` (query, get, callback, bad query, no user), `/conf` (XML, JSON), `/stacks`, `/logLevel` get/set, `/logs/` listing and traversal attempt, `/prom`, static content, 404s, `/isActive`, `HEAD`/`OPTIONS`/`TRACE`/`POST`, security headers; under TLS the closed HTTP port and the 401 without credentials |
+| `20-hdfs` | file system shell, ACLs, xattrs, snapshots, quotas, storage and EC policies, cache directives, fsck, image fetch, `oiv`, `oev`, `saveNamespace`, balancer, mover, disk balancer; WebHDFS REST (about 45 operations, two-step create/append through the datanode, errors); WebHDFS client; namenode, datanode, SNN, JN web UIs and servlets |
+| `30-hdfs-services` | RBF mount table and RPC/WebHDFS through the router; HttpFS REST and client; KMS keys over CLI and REST, EEK generate/decrypt; encryption zone read over RPC, WebHDFS and HttpFS; NFS gateway |
+| `40-yarn` | YARN CLI, distributed shell, RM REST in JSON and XML, application submit and kill through REST, RM UI, node manager, timeline v1 entity round trip, application history, web proxy, YARN router, shared cache manager, timeline reader, YARN services API (create, flex, stop, destroy) |
+| `50-mapreduce` | pi, wordcount, grep, teragen/terasort/teravalidate with checksums, job CLI, the AM's REST API and UI through the proxy while a job runs, job kill, job history REST and UI |
+| `60-tools` | DistCp over HDFS, WebHDFS and HttpFS; HAR; streaming; rumen; gridmix; SLS with its Jetty UI; resource estimator REST; cloud connector and other tools' entry classes |
+| `70-secure` | TLS protocol, cipher and certificate per server, TLS 1.1 refused; SPNEGO 401s and a forged auth cookie; KDiag; RPC without a ticket; `fetchdt` and RPC with a token file; WebHDFS delegation token get/use/renew/cancel |
+| `80-ha` | active/standby `/isActive`, standby WebHDFS StandbyException, standby RM redirects; kill the active namenode, then the active RM: failover through ZooKeeper, data and applications survive, the killed daemon returns as standby, graceful failback |
+| `85-federation` | both namespaces, cross-namespace DistCp; RBF single and multi-destination mounts, quotas, rename across mounts refused, WebHDFS and UI through the router; ViewFS; YARN router REST aggregated over both sub-clusters, client RPC, an application placed on one sub-cluster, GPG UI |
+| `90-mixed` | MapReduce with RBF as the default file system across HA and non-HA namespaces; both routers share one mount table; kill a router and keep reading, writing and running jobs through the other |
+
+## Reused Hadoop test code
+
+- **MiniKdc** (`hadoop-minikdc`) is the KDC of the secure architecture; when
+  the host has no `kinit`, its Kerby client library gets the ticket
+  (`e2e/lib/KerbyKinit.java`).
+- **ZooKeeper** runs from the jars the distribution already ships.
+- The **timeline service test jar** provides the file system storage the
+  timeline reader runs on.
+- The **unit test suites** are Hadoop's existing tests, grouped by what they
+  exercise:
+
+| Suite | Tests |
+|---|---|
+| `changed` | the modules phase A changes (web and Jersey tests in `quick`, everything in `full`), plus the HTTP tests of KMS, HDFS, RBF, timeline service and MR jobs |
+| `secure` | `TestHttpServerWithSpnego`, `TestSSLHttpServer*`, `TestKDiag*`, `TestSecureNameNode`, `TestSaslDataTransfer`, `TestWebHdfsTokens`, `TestBlockTokenWithDFS*`, `TestKMS`, `TestHttpFSWithKerberos`, `TestRouterWithSecureStartup`, `TestRouterHttpDelegationToken`, `TestRouterSecurityManager`, `TestRMWebappAuthentication`, `TestRMWebServicesDelegationTokenAuthentication`, `TestTimelineAuthenticationFilterForV1`, `TestSecureLogins`, `TestJHSSecurity` |
+| `ha` | `TestZKFailoverController`, `TestNodeFencer`, `TestWebHDFSForHA`, `TestFailoverWithBlockTokensEnabled`, `TestHAStateTransitions`, `TestDFSZKFailoverController`, `TestStandbyCheckpoints`, `TestDelegationTokensWithHA`, `TestQuorumJournalManager`, `TestRMFailover`, `TestApplicationClientProtocolOnHA`, `TestResourceTrackerOnHA`, `TestRMHA`, `TestRMEmbeddedElector` |
+| `federated` | `TestViewFileSystemHdfs`, `TestViewFsHdfs`, `TestRefreshNamenodes`, `TestWebHdfsWithMultipleNameNodes`, `TestMultipleNNPortQOP`, `TestRouterRpc`, `TestRouterAdminCLI`, `TestRouterMountTable`, `TestRouterWebHdfsMethods`, `TestRouterWebHDFSContract*`, `TestFederationClientInterceptor`, `TestFederationInterceptorREST`, `TestRouterWebServicesREST`, `TestGlobalPolicyGenerator`, `TestFederationInterceptor`, `TestZookeeperFederationStateStore` |
+| `mixed` | `TestSecureNNWithQJM` (secure + HA), `TestRouterNamenodeHeartbeat`, `TestRouterNamenodeMonitoring`, `TestRouterFaultTolerant`, `TestObserverWithRouter`, `TestRouterRPCClientRetries` |
+| `client` | `hadoop-client-check-invariants`, `hadoop-client-check-test-invariants`, `hadoop-client-integration-tests` |
+
+## Not exercised end to end, and why
 
 - **Timeline service v2 with HBase storage**: needs an HBase cluster. The
   reader runs with file system storage; the HBase modules' tests run in the
-  unit tier `full`.
-- **YARN registry DNS**: needs ZooKeeper and has no web server; phase A does
-  not touch it.
+  `changed` suite's `full` tier.
+- **YARN registry DNS**: needs a registry in ZooKeeper and has no web
+  server; phase A does not touch it.
 - **Cloud connectors**: need cloud credentials; only class loading is
   compared. Phase A does not touch them.
 - **Dynamometer**: needs a captured fsimage and audit logs and a long run;
   only class loading is compared.
 - **NFS mounts**: mounting needs a kernel NFS client; the gateway's RPC
   services are checked instead.
-- **Kerberos / TLS**: the cluster runs with simple authentication over HTTP.
+- **MapReduce on YARN federation**: with both sub-clusters on one host, the
+  AMRMProxy address a job needs is ambiguous; YARN federation is exercised
+  with distributed shell, which finds its home RM through the node manager.
+
+## Known issues found on both sides
+
+These are not caused by phase A; the harness records them, and they show as
+"failing on both sides":
+
+- `slsrun.sh` builds the simulated RM's configuration from
+  `new Configuration(false)` plus `sls-runner.xml`, so `yarn-site.xml` is not
+  read and the scheduler class is null (NPE in `RMRunner.startRM`). The
+  harness puts the scheduler and RM ports in `sls-runner.xml` to still
+  exercise SLS.
 
 ## Running it
 
-Requirements: Linux, JDK 17 or later, Python 3, curl, git, about 25 GB of
-disk and 16 GB of memory. Maven comes from the tree's own `./mvnw`. Docker
-is not needed; inside the Hadoop build image (`start-build-env.sh`) it works
+### In CI
+
+`.github/workflows/jetty12_phase_a.yml` runs everything in parallel jobs:
+two builds, one job per architecture and side, one job per unit suite and
+side, and a comparison job that writes `report.md` to the run summary and
+the `report` artifact. It starts by hand:
+
+- **Run workflow** in the Actions tab, with the refs, architectures, suites
+  and tier as inputs. GitHub only offers this for workflows on the default
+  branch (`trunk` in this fork), so until then use:
+- a tag named `jetty12-phase-a-run-*`, which runs the harness from the
+  tagged commit with the defaults:
+
+  ```
+  git tag jetty12-phase-a-run-1 origin/HADOOP-99999
+  git push origin jetty12-phase-a-run-1
+  ```
+
+A full run is about 25 jobs; each fits a standard GitHub-hosted runner
+(4 vCPUs, 16 GB, 6-hour job limit for public repositories).
+
+### On one machine
+
+Requirements: Linux, JDK 17 or later, Python 3, curl (with GSS-API for the
+secure architecture), git, about 30 GB of disk and 16 GB of memory. Maven
+comes from the tree's own `./mvnw`. `kinit` is used when present. Docker is
+not needed; inside the Hadoop build image (`start-build-env.sh`) it works
 the same.
 
 ```
-# everything: build both sides, e2e on both, quick unit tier, report
+# everything: build both sides, all architectures, all unit suites, report
 dev-support/jetty12-phase-a/run-all.sh quick
 
 # or step by step
 dev-support/jetty12-phase-a/build.sh baseline
 dev-support/jetty12-phase-a/build.sh candidate
-dev-support/jetty12-phase-a/e2e/run.sh baseline
-dev-support/jetty12-phase-a/e2e/run.sh candidate
-dev-support/jetty12-phase-a/unit-tests.sh baseline quick
-dev-support/jetty12-phase-a/unit-tests.sh candidate quick
+dev-support/jetty12-phase-a/e2e/run.sh baseline all
+dev-support/jetty12-phase-a/e2e/run.sh candidate all
+dev-support/jetty12-phase-a/unit-tests.sh baseline all quick
+dev-support/jetty12-phase-a/unit-tests.sh candidate all quick
 dev-support/jetty12-phase-a/compare.sh
 ```
 
-Rough durations on 4 cores: build 40-60 minutes per side, e2e 30-45 minutes
-per side, unit tier `quick` 2-3 hours per side, `full` most of a day.
+Rough durations on 4 cores: build 35-60 minutes per side, each
+architecture 10-30 minutes per side, unit suites from minutes (`client`)
+to hours (`changed` full).
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -129,24 +192,25 @@ per side, unit tier `quick` 2-3 hours per side, `full` most of a day.
 | `MVN_EXTRA_ARGS` | none | added to every Maven call |
 | `M2_REPO` | `$WORKDIR/m2` | Maven repository; both sides share downloads but install into separate prefixes |
 | `UNIT_RERUNS` | 1 | re-runs of a failing test before it counts as failed |
-| `E2E_NFS` | `auto` | start the NFS gateway (`auto` = when running as root) |
+| `E2E_NFS` | `auto` | start the NFS gateway in `simple` (`auto` = when running as root) |
 | `E2E_GRIDMIX` | `true` | run the gridmix sleep jobs |
-| `E2E_NM_MEMORY_MB` | 6144 | node manager memory |
+| `E2E_NM_MEMORY_MB` | 6144 | node manager memory (split between sub-clusters in `federated`) |
 | `DAEMON_HEAP` | `384m` | heap of each daemon |
 
-Single parts can be re-run: `e2e/run.sh candidate 40-yarn` runs one
-scenario file, `unit-tests.sh candidate quick resourcemanager` one module,
-`e2e/cluster.sh candidate start|status|stop` drives the cluster by hand.
-`artifact-diff.sh candidate candidate` compares one build with itself,
-which must report no differences.
+Single parts can be re-run: `e2e/run.sh candidate ha 80-ha` runs one
+scenario of one architecture, `unit-tests.sh candidate secure` one suite,
+`e2e/cluster.sh candidate mixed start|status|stop|kill|restart` drives a
+cluster by hand. `artifact-diff.sh candidate candidate` compares a build
+with itself, which must report no differences.
 
 ## Reading the report
 
-`$WORKDIR/results/compare/report.md` has one section per check and an
-overall verdict. Supporting data sits next to it (`artifact-diff.json`,
-`e2e-compare.json`, `classload-compare.json`, `unit-compare.json`) and
-under `results/<side>/` (raw observations, CLI output, daemon start-up,
-scenario logs, surefire reports).
+`$WORKDIR/results/compare/report.md` has one section per check and
+architecture and an overall verdict. Supporting data sits next to it
+(`artifact-diff.json`, `e2e-compare-<arch>.json`,
+`classload-compare-<arch>.json`, `unit-compare.json`) and under
+`results/<side>/` (raw observations, CLI output, daemon start-up, scenario
+logs, surefire reports).
 
 - **UNEXPECTED** artifact differences, **DIFF**/**REGRESSION**/**MISSING**
   observations, classes loaded from an unexpected jar, log errors only the

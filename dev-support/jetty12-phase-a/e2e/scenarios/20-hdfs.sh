@@ -72,7 +72,7 @@ img=$(ls -t "${LOCAL}"/fsimage_* 2>/dev/null | head -1)
 cli oiv-xml -- hdfs oiv -p XML -i "${img}" -o "${LOCAL}/fsimage.xml"
 cli oiv-delimited -- hdfs oiv -p Delimited -i "${img}" -o "${LOCAL}/fsimage.tsv"
 cli roll-edits -- hdfs dfsadmin -rollEdits
-edits=$(ls -t "${RUN}"/data/nn/current/edits_0* 2>/dev/null | head -1)
+edits=$(ls -t "${RUN}"/data/nn*/current/edits_0* 2>/dev/null | head -1)
 cli oev -- hdfs oev -i "${edits}" -o "${LOCAL}/edits.xml"
 cli save-namespace-enter -- hdfs dfsadmin -safemode enter
 cli save-namespace -- hdfs dfsadmin -saveNamespace
@@ -80,9 +80,9 @@ cli save-namespace-leave -- hdfs dfsadmin -safemode leave
 cli balancer --expect-rc 0 -- hdfs balancer -threshold 10
 cli mover -- hdfs mover -p "${D}/dir"
 cli diskbalancer-report --shape none -- hdfs diskbalancer -report
-cli webhdfs-client-ls --shape lines -- sh -c "hadoop fs -ls webhdfs://${HOST}:${P_NN_HTTP}${D}/dir | awk '{print \$1, \$5, \$8}'"
-cli webhdfs-client-cat --shape sha256 -- hadoop fs -cat "webhdfs://${HOST}:${P_NN_HTTP}${D}/dir/numbers.txt"
-cli webhdfs-client-put -- hadoop fs -put -f "${LOCAL}/numbers.txt" "webhdfs://${HOST}:${P_NN_HTTP}${D}/dir/via-webhdfs.txt"
+cli webhdfs-client-ls --shape lines -- sh -c "hadoop fs -ls ${WEBHDFS_FS}${D}/dir | awk '{print \$1, \$5, \$8}'"
+cli webhdfs-client-cat --shape sha256 -- hadoop fs -cat "${WEBHDFS_FS}${D}/dir/numbers.txt"
+cli webhdfs-client-put -- hadoop fs -put -f "${LOCAL}/numbers.txt" "${WEBHDFS_FS}${D}/dir/via-webhdfs.txt"
 same_checksum webhdfs-client-roundtrip "${D}/dir/numbers.txt" "${D}/dir/via-webhdfs.txt"
 
 COMPONENT=hdfs-webhdfs
@@ -116,12 +116,12 @@ http open-range "${W}${D}/dir/numbers.txt?op=OPEN&offset=10&length=20&${U}" --fo
 http mkdirs "${W}${D}/rest?op=MKDIRS&permission=755&${U}" --method PUT --expect-regex '"boolean":true'
 http create-redirect "${W}${D}/rest/a.txt?op=CREATE&overwrite=true&${U}" --method PUT \
   --expect-status 307 --data ''
-loc=$(curl -s -i --noproxy '*' -X PUT "${W}${D}/rest/a.txt?op=CREATE&overwrite=true&${U}" \
+loc=$(rest -i -X PUT "${W}${D}/rest/a.txt?op=CREATE&overwrite=true&${U}" \
   | tr -d '\r' | sed -n 's/^Location: //Ip')
 http create-datanode "${loc}" --method PUT --data-file "${LOCAL}/numbers.txt" \
   --header 'Content-Type: application/octet-stream' --expect-status 201
 same_checksum webhdfs-create-roundtrip "${D}/dir/numbers.txt" "${D}/rest/a.txt"
-loc=$(curl -s -i --noproxy '*' -X POST "${W}${D}/rest/a.txt?op=APPEND&${U}" \
+loc=$(rest -i -X POST "${W}${D}/rest/a.txt?op=APPEND&${U}" \
   | tr -d '\r' | sed -n 's/^Location: //Ip')
 http append-datanode "${loc}" --method POST --data 'appended' \
   --header 'Content-Type: application/octet-stream'
@@ -145,8 +145,11 @@ http err-not-found "${W}${D}/no-such-file?op=GETFILESTATUS&${U}" --expect-status
 http err-bad-op "${W}${D}?op=NOSUCHOP&${U}" --expect-status 400
 http err-bad-param "${W}${D}?op=LISTSTATUS&permission=999x&${U}" --expect-status any
 http err-wrong-method "${W}${D}?op=MKDIRS&${U}" --expect-status any
-http err-permission "${W}${D}/dir?op=LISTSTATUS&user.name=nobody" --expect-status 403 \
-  --expect-regex 'AccessControlException'
+# Under Kerberos the caller is the SPNEGO identity, not user.name.
+if [[ "${SECURE}" != true ]]; then
+  http err-permission "${W}${D}/dir?op=LISTSTATUS&user.name=nobody" --expect-status 403 \
+    --expect-regex 'AccessControlException'
+fi
 http err-not-dir "${W}${D}/dir/numbers.txt/child?op=MKDIRS&${U}" --method PUT --expect-status any
 http no-user "${W}${D}/dir?op=LISTSTATUS" --expect-status any
 
@@ -166,24 +169,29 @@ http nn-fsstate "${NN_URL}/jmx?qry=Hadoop:service=NameNode,name=FSNamesystemStat
 http nn-startup "${NN_URL}/startupProgress" --expect-regex '"phases"'
 http nn-fsck-servlet "${NN_URL}/fsck?ugi=${USER_NAME}&path=${D}" --expect-regex 'HEALTHY'
 http nn-imagetransfer-noargs "${NN_URL}/imagetransfer" --expect-status any
+# Under Kerberos only namenodes may fetch the image.
 http nn-imagetransfer-image "${NN_URL}/imagetransfer?getimage=1&txid=latest" \
-  --shape none --expect-status 200
+  --shape none --expect-status "$([[ "${SECURE}" == true ]] && echo any || echo 200)"
 http nn-getdelegationtoken "${NN_URL}/getDelegationToken" --expect-status any
-dn_url="http://${HOST}:${P_DN_HTTP}"
-http dn-index "${dn_url}/index.html" --expect-status any
-http dn-datanode-html "${dn_url}/datanode.html"
-http dn-info "${dn_url}/jmx?qry=Hadoop:service=DataNode,name=DataNodeInfo" \
+http dn-index "${DN_URL}/index.html" --expect-status any
+http dn-datanode-html "${DN_URL}/datanode.html"
+http dn-info "${DN_URL}/jmx?qry=Hadoop:service=DataNode,name=DataNodeInfo" \
   --expect-regex '"Version"'
-http dn-webhdfs-direct "${dn_url}/webhdfs/v1${D}/dir/numbers.txt?op=OPEN&namenoderpcaddress=${HOST}:${P_NN_RPC}&${U}" \
-  --shape sha256
-http dn-webhdfs-bad "${dn_url}/webhdfs/v1${D}/dir/numbers.txt?op=OPEN&${U}" --expect-status any
-snn_url="http://${HOST}:${P_SNN_HTTP}"
-http snn-status "${snn_url}/status.html" --expect-status any
-http snn-info "${snn_url}/jmx?qry=Hadoop:service=SecondaryNameNode,name=SecondaryNameNodeInfo" \
-  --expect-status any
-jn_url="http://${HOST}:${P_JN_HTTP}"
-http jn-index "${jn_url}/index.html" --expect-status any
-http jn-journal-html "${jn_url}/journal.html" --expect-status any
-http jn-getjournal-noargs "${jn_url}/getJournal" --expect-status any
-http jn-info "${jn_url}/jmx?qry=Hadoop:service=JournalNode,name=JournalNodeInfo" \
-  --expect-status any
+# Reading straight from the datanode needs a delegation token under Kerberos.
+if [[ "${SECURE}" != true && "${FS}" == "hdfs://${HOST}:${P_NN_RPC}" ]]; then
+  http dn-webhdfs-direct "${DN_URL}/webhdfs/v1${D}/dir/numbers.txt?op=OPEN&namenoderpcaddress=${HOST}:${P_NN_RPC}&${U}" \
+    --shape sha256
+fi
+http dn-webhdfs-bad "${DN_URL}/webhdfs/v1${D}/dir/numbers.txt?op=OPEN&${U}" --expect-status any
+if daemon_up secondarynamenode; then
+  http snn-status "${SNN_URL}/status.html" --expect-status any
+  http snn-info "${SNN_URL}/jmx?qry=Hadoop:service=SecondaryNameNode,name=SecondaryNameNodeInfo" \
+    --expect-status any
+fi
+if daemon_up journalnode; then
+  http jn-index "${JN_URL}/index.html" --expect-status any
+  http jn-journal-html "${JN_URL}/journal.html" --expect-status any
+  http jn-getjournal-noargs "${JN_URL}/getJournal" --expect-status any
+  http jn-info "${JN_URL}/jmx?qry=Hadoop:service=JournalNode,name=JournalNodeInfo" \
+    --expect-status any
+fi

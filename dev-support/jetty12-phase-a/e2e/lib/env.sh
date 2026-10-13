@@ -14,14 +14,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Environment of one end-to-end run: where the distribution, configuration,
-# data and results live, which ports every daemon uses, and helpers for the
-# scenarios. Sourced after lib/common.sh with SIDE set.
+# Environment of one end-to-end run of one architecture: where the
+# distribution, configuration, data and results live, the ports and URLs of
+# the daemons, and helpers for the scenarios. Sourced after lib/common.sh
+# with SIDE and ARCH set; then sources e2e/arch/${ARCH}.sh.
 
 E2E_DIR="${HARNESS_DIR}/e2e"
+ARCH="${ARCH:-simple}"
+[[ -f "${E2E_DIR}/arch/${ARCH}.sh" ]] || die "unknown architecture '${ARCH}' (see e2e/arch/)"
 DIST=$(dist_dir "${SIDE}")
-RUN="$(side_dir "${SIDE}")/e2e"            # cluster state, wiped on each run
-RES="$(results_dir "${SIDE}")/e2e"         # what the comparison reads
+TOOLS_DIR="$(side_dir "${SIDE}")/tools"
+RUN="$(side_dir "${SIDE}")/e2e/${ARCH}"    # cluster state, wiped on each run
+RES="$(results_dir "${SIDE}")/e2e/${ARCH}" # what the comparison reads
 OBS="${RES}/observations.jsonl"
 PROBE="${E2E_DIR}/lib/probe.py"
 
@@ -29,24 +33,24 @@ export HADOOP_HOME="${DIST}"
 export HADOOP_CONF_DIR="${RUN}/conf"
 export HADOOP_LOG_DIR="${RUN}/logs"
 export HADOOP_PID_DIR="${RUN}/pids"
-export YARN_LOG_DIR="${HADOOP_LOG_DIR}"
-export HADOOP_MAPRED_LOG_DIR="${HADOOP_LOG_DIR}"
-export HTTPFS_TEMP="${RUN}/tmp/httpfs"
-export KMS_TEMP="${RUN}/tmp/kms"
 export JAVA_HOME="${JAVA_HOME:-$(dirname "$(dirname "$(readlink -f "$(command -v java)")")")}"
 export PATH="${DIST}/bin:${DIST}/sbin:${PATH}"
 # Optional tools some scenarios need on the client classpath.
 export HADOOP_OPTIONAL_TOOLS="hadoop-distcp,hadoop-archives,hadoop-streaming,hadoop-rumen,hadoop-gridmix,hadoop-extras,hadoop-datajoin"
-unset HADOOP_CLASSPATH
+unset HADOOP_CLASSPATH YARN_LOG_DIR HADOOP_MAPRED_LOG_DIR
 
 HOST=localhost
 USER_NAME=$(id -un)
+SECURE=false
 
-# Ports. Defaults where Hadoop has them, explicit everywhere so a stray
+# Ports. Hadoop's defaults where it has them; explicit everywhere so a stray
 # daemon from another run makes start-up fail loudly instead of mixing runs.
+# Architectures with several instances of a daemon shift these.
 P_NN_RPC=9000
 P_NN_HTTP=9870
+P_NN_HTTPS=9871
 P_DN_HTTP=9864
+P_DN_HTTPS=9865
 P_DN_DATA=9866
 P_DN_IPC=9867
 P_SNN_HTTP=9868
@@ -65,10 +69,13 @@ P_RM_SCHED=8030
 P_RM_TRACKER=8031
 P_RM_ADMIN=8033
 P_RM_HTTP=8088
+P_RM_HTTPS=8090
 P_NM_HTTP=8042
+P_NM_HTTPS=8044
 P_NM_LOCALIZER=8040
 P_AHS_RPC=10200
 P_AHS_HTTP=8188
+P_AHS_HTTPS=8190
 P_PROXY=9046
 P_YROUTER_HTTP=8089
 P_YROUTER_CLIENT=8050
@@ -81,58 +88,62 @@ P_SCM_UPLOADER=8046
 P_TLREADER_HTTP=8198
 P_JHS_RPC=10020
 P_JHS_HTTP=19888
+P_JHS_HTTPS=19890
 P_JHS_ADMIN=10033
 P_SLS_HTTP=10001
+P_ZK=2181
+P_KDC=60088
 
+# URLs and file system URIs the scenarios use. Architectures override them
+# (HTTPS, a logical nameservice, a router in front, ...).
 NN_URL="http://${HOST}:${P_NN_HTTP}"
+DN_URL="http://${HOST}:${P_DN_HTTP}"
+SNN_URL="http://${HOST}:${P_SNN_HTTP}"
+JN_URL="http://${HOST}:${P_JN_HTTP}"
 RM_URL="http://${HOST}:${P_RM_HTTP}"
 NM_URL="http://${HOST}:${P_NM_HTTP}"
 AHS_URL="http://${HOST}:${P_AHS_HTTP}"
 JHS_URL="http://${HOST}:${P_JHS_HTTP}"
 HTTPFS_URL="http://${HOST}:${P_HTTPFS}"
 KMS_URL="http://${HOST}:${P_KMS}"
+PROXY_URL="http://${HOST}:${P_PROXY}"
 FS="hdfs://${HOST}:${P_NN_RPC}"
+WEBHDFS_FS="webhdfs://${HOST}:${P_NN_HTTP}"
+HTTPFS_FS="webhdfs://${HOST}:${P_HTTPFS}"
+KMS_PROVIDER="kms://http@${HOST}:${P_KMS}/kms"
+NODE_ID="${HOST}:45454"
 
-# Daemons: name, launcher, subcommand, the *_OPTS variable the launcher reads,
-# the web address checked for readiness ("-" for none).
-DAEMONS=(
-  "namenode hdfs namenode HDFS_NAMENODE ${NN_URL}/jmx"
-  "datanode hdfs datanode HDFS_DATANODE http://${HOST}:${P_DN_HTTP}/jmx"
-  "secondarynamenode hdfs secondarynamenode HDFS_SECONDARYNAMENODE http://${HOST}:${P_SNN_HTTP}/jmx"
-  "journalnode hdfs journalnode HDFS_JOURNALNODE http://${HOST}:${P_JN_HTTP}/jmx"
-  "kms hadoop kms HADOOP_KMS ${KMS_URL}/jmx"
-  "httpfs hdfs httpfs HDFS_HTTPFS ${HTTPFS_URL}/jmx"
-  "dfsrouter hdfs dfsrouter HDFS_DFSROUTER http://${HOST}:${P_ROUTER_HTTP}/jmx"
-  "resourcemanager yarn resourcemanager YARN_RESOURCEMANAGER ${RM_URL}/jmx"
-  "nodemanager yarn nodemanager YARN_NODEMANAGER ${NM_URL}/jmx"
-  "timelineserver yarn timelineserver YARN_TIMELINESERVER ${AHS_URL}/jmx"
-  "proxyserver yarn proxyserver YARN_PROXYSERVER http://${HOST}:${P_PROXY}/jmx"
-  "router yarn router YARN_ROUTER http://${HOST}:${P_YROUTER_HTTP}/jmx"
-  "globalpolicygenerator yarn globalpolicygenerator YARN_GLOBALPOLICYGENERATOR http://${HOST}:${P_GPG_HTTP}/jmx"
-  "sharedcachemanager yarn sharedcachemanager YARN_SHAREDCACHEMANAGER http://${HOST}:${P_SCM_HTTP}/jmx"
-  "timelinereader yarn timelinereader YARN_TIMELINEREADER http://${HOST}:${P_TLREADER_HTTP}/jmx"
-  "historyserver mapred historyserver MAPRED_HISTORYSERVER ${JHS_URL}/jmx"
-)
-# The NFS gateway needs the privileged portmap port; only started as root.
-NFS_DAEMONS=(
-  "portmap hdfs portmap HDFS_PORTMAP -"
-  "nfs3 hdfs nfs3 HDFS_NFS3 http://${HOST}:${P_NFS_HTTP}/jmx"
-)
+# INSTANCES: one line per daemon instance, started in order:
+#   <instance> <launcher> <subcommand> <OPTS prefix> <readiness URL or -> <conf dir>
+# The architecture file fills it and defines arch_conf (write configuration),
+# arch_prepare (format, bootstrap, after services start) and arch_after_start.
+INSTANCES=()
+# Scenario files (by name, a regex) this architecture runs.
+ARCH_SCENARIOS='.*'
+# Non-Hadoop services the architecture needs: zookeeper, kdc.
+ARCH_SERVICES=()
 
-nfs_enabled() {
-  [[ "${E2E_NFS:-auto}" == true ]] || { [[ "${E2E_NFS:-auto}" == auto && ${EUID} -eq 0 ]]; }
-}
+arch_conf() { :; }
+arch_prepare() { :; }
+arch_after_start() { :; }
 
-all_daemons() {
-  printf '%s\n' "${DAEMONS[@]}"
-  if nfs_enabled; then printf '%s\n' "${NFS_DAEMONS[@]}"; fi
+# shellcheck source=/dev/null
+source "${E2E_DIR}/arch/${ARCH}.sh"
+
+# --------------------------------------------------------------- helpers
+
+# daemon_up <instance>: did that instance start and answer?
+daemon_up() {
+  grep -qx "$1 up" "${RES}/daemons.txt" 2>/dev/null
 }
 
 # wait_http <url> <seconds>: until the URL answers with any HTTP status < 500.
 wait_http() {
   local url=$1 deadline=$((SECONDS + $2)) code
+  local tls=()
+  [[ -n "${PROBE_CA:-}" ]] && tls=(--cacert "${PROBE_CA}")
   while (( SECONDS < deadline )); do
-    code=$(curl -s -o /dev/null -w '%{http_code}' --noproxy '*' --max-time 5 "${url}" || true)
+    code=$(curl -s -o /dev/null -w '%{http_code}' --noproxy '*' --max-time 5 "${tls[@]}" "${url}" || true)
     if [[ "${code}" =~ ^[1-4][0-9][0-9]$ ]]; then return 0; fi
     sleep 2
   done
@@ -195,11 +206,19 @@ same_checksum() {
   fi
 }
 
+# rest <url>: GET a URL the way probes do (TLS, SPNEGO), body on stdout.
+rest() {
+  local args=(-s --noproxy '*' --max-time 30)
+  [[ -n "${PROBE_CA:-}" ]] && args+=(--cacert "${PROBE_CA}")
+  [[ "${PROBE_SPNEGO:-}" == true ]] && args+=(--negotiate -u :)
+  curl "${args[@]}" "$@"
+}
+
 # wait_app_state <application id> <state regex> <seconds>
 wait_app_state() {
   local app=$1 want=$2 deadline=$((SECONDS + $3)) state
   while (( SECONDS < deadline )); do
-    state=$(curl -s --noproxy '*' "${RM_URL}/ws/v1/cluster/apps/${app}/state" \
+    state=$(rest "${RM_URL}/ws/v1/cluster/apps/${app}/state" \
       | python3 -c 'import sys,json; print(json.load(sys.stdin).get("state",""))' 2>/dev/null || true)
     if [[ "${state}" =~ ^(${want})$ ]]; then echo "${state}"; return 0; fi
     sleep 2
@@ -210,9 +229,12 @@ wait_app_state() {
 
 # latest_app [name regex]: id of the most recently submitted application.
 latest_app() {
-  curl -s --noproxy '*' "${RM_URL}/ws/v1/cluster/apps" | python3 -c '
+  rest "${RM_URL}/ws/v1/cluster/apps" | python3 -c '
 import sys, json, re
-apps = (json.load(sys.stdin).get("apps") or {}).get("app") or []
+try:
+    apps = (json.load(sys.stdin).get("apps") or {}).get("app") or []
+except ValueError:
+    apps = []
 pat = re.compile(sys.argv[1]) if len(sys.argv) > 1 else None
 apps = [a for a in apps if not pat or pat.search(a.get("name", ""))]
 print(max(apps, key=lambda a: a["startedTime"])["id"] if apps else "")' "$@"

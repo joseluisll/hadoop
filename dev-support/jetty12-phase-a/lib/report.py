@@ -45,11 +45,14 @@ def commit(results, side):
 
 def main(results):
     cmp_dir = os.path.join(results, "compare")
-    parts = [
-        ("Artifacts and dependencies", "artifact-diff.json", "artifact-diff.md"),
-        ("End-to-end cluster", "e2e-compare.json", "e2e-compare.md"),
-        ("Unit and integration tests", "unit-compare.json", "unit-compare.md"),
-    ]
+    archs = sorted(f[len("e2e-compare-"):-len(".json")] for f in os.listdir(cmp_dir)
+                   if f.startswith("e2e-compare-") and f.endswith(".json")) \
+        if os.path.isdir(cmp_dir) else []
+    parts = [("Artifacts and dependencies", "artifact-diff.json", "artifact-diff.md")]
+    parts += [(f"End-to-end: {a}", f"e2e-compare-{a}.json", f"e2e-compare-{a}.md") for a in archs]
+    if not archs:
+        parts.append(("End-to-end", "e2e-compare-none.json", "e2e-compare-none.md"))
+    parts.append(("Unit and integration tests", "unit-compare.json", "unit-compare.md"))
     verdicts = [(name, verdict(os.path.join(cmp_dir, j))) for name, j, _ in parts]
     overall = "PASS" if all(v == "PASS" for _, v in verdicts) else \
         ("INCOMPLETE" if all(v in ("PASS", "NOT RUN") for _, v in verdicts) else "FAIL")

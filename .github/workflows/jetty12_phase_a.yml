@@ -1,0 +1,270 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Fork-only: the Jetty 12 phase A no-functional-change harness
+# (dev-support/jetty12-phase-a) in parallel jobs. Builds the baseline and the
+# candidate, runs every architecture end to end and every unit test suite on
+# both, and compares them; report.md goes to the run summary and artifacts.
+#
+# Started by hand:
+# - "Run workflow" in the Actions tab, once this file is on the default
+#   branch (GitHub only offers workflow_dispatch for workflows there), or
+# - pushing a tag named jetty12-phase-a-run-*, which runs the harness from
+#   the tagged commit with the default inputs:
+#     git tag jetty12-phase-a-run-1 origin/HADOOP-99999
+#     git push origin jetty12-phase-a-run-1
+
+name: "Jetty 12 phase A harness"
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline_ref:
+        description: "Baseline branch, tag or commit (without the patch)"
+        default: "PREPARATION"
+      candidate_ref:
+        description: "Candidate branch, tag or commit (with the patch)"
+        default: "HADOOP-99999"
+      architectures:
+        description: "End-to-end architectures, comma-separated (empty: none)"
+        default: "simple,secure,ha,federated,mixed"
+      unit_suites:
+        description: "Unit test suites, comma-separated (empty: none)"
+        default: "changed,secure,ha,federated,mixed,client"
+      unit_tier:
+        description: "Tier of the 'changed' suite"
+        type: choice
+        options: [quick, full]
+        default: quick
+      maven_mirror:
+        description: "Maven Central mirror URL, if repo.maven.apache.org rate-limits"
+        default: ""
+  push:
+    tags:
+      - "jetty12-phase-a-run-*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: jetty12-phase-a-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  WORKDIR: /home/runner/jetty12-work
+  HARNESS: dev-support/jetty12-phase-a
+  MAVEN_MIRROR_URL: ${{ inputs.maven_mirror }}
+
+jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-24.04
+    outputs:
+      baseline: ${{ steps.plan.outputs.baseline }}
+      candidate: ${{ steps.plan.outputs.candidate }}
+      archs: ${{ steps.plan.outputs.archs }}
+      suites: ${{ steps.plan.outputs.suites }}
+      tier: ${{ steps.plan.outputs.tier }}
+    steps:
+      - id: plan
+        shell: bash
+        env:
+          BASELINE: ${{ inputs.baseline_ref || 'PREPARATION' }}
+          CANDIDATE: ${{ inputs.candidate_ref || github.sha }}
+          ARCHS: ${{ github.event_name == 'push' && 'simple,secure,ha,federated,mixed' || inputs.architectures }}
+          SUITES: ${{ github.event_name == 'push' && 'changed,secure,ha,federated,mixed,client' || inputs.unit_suites }}
+          TIER: ${{ inputs.unit_tier || 'quick' }}
+        run: |
+          to_json() { python3 -c 'import json,sys; print(json.dumps([x.strip() for x in sys.argv[1].split(",") if x.strip()]))' "$1"; }
+          {
+            echo "baseline=${BASELINE}"
+            echo "candidate=${CANDIDATE}"
+            echo "archs=$(to_json "${ARCHS}")"
+            echo "suites=$(to_json "${SUITES}")"
+            echo "tier=${TIER}"
+          } >> "${GITHUB_OUTPUT}"
+          cat "${GITHUB_OUTPUT}"
+
+  build:
+    name: Build ${{ matrix.side }}
+    needs: plan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [baseline, candidate]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ needs.plan.outputs.baseline }}
+          candidate: ${{ needs.plan.outputs.candidate }}
+      - name: Build
+        shell: bash
+        run: ${HARNESS}/build.sh ${{ matrix.side }}
+      - name: Self-compare the build
+        shell: bash
+        run: ${HARNESS}/artifact-diff.sh ${{ matrix.side }} ${{ matrix.side }}
+      - name: Pack
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh pack-build ${{ matrix.side }} "${RUNNER_TEMP}/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.side }}
+          path: ${{ runner.temp }}/out
+          retention-days: 7
+          compression-level: 0
+      - name: Build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.side }}
+          path: ${{ env.WORKDIR }}/results/${{ matrix.side }}/build
+          retention-days: 7
+
+  e2e:
+    name: E2E ${{ matrix.arch }} ${{ matrix.side }}
+    needs: [plan, build]
+    if: needs.plan.outputs.archs != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [baseline, candidate]
+        arch: ${{ fromJSON(needs.plan.outputs.archs) }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ needs.plan.outputs.baseline }}
+          candidate: ${{ needs.plan.outputs.candidate }}
+          free-disk: "false"
+      - name: Kerberos client tools
+        shell: bash
+        run: sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q krb5-user > /dev/null
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.side }}
+          path: ${{ runner.temp }}/build
+      - name: Unpack
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh unpack-build ${{ matrix.side }} "${RUNNER_TEMP}/build"
+      - name: Run ${{ matrix.arch }}
+        shell: bash
+        run: ${HARNESS}/e2e/run.sh ${{ matrix.side }} ${{ matrix.arch }}
+      - name: Pack
+        if: always()
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh pack-e2e ${{ matrix.side }} ${{ matrix.arch }} "${RUNNER_TEMP}/out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-${{ matrix.side }}-${{ matrix.arch }}
+          path: ${{ runner.temp }}/out
+          retention-days: 14
+
+  unit:
+    name: Unit ${{ matrix.suite }} ${{ matrix.side }}
+    needs: plan
+    if: needs.plan.outputs.suites != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [baseline, candidate]
+        suite: ${{ fromJSON(needs.plan.outputs.suites) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ needs.plan.outputs.baseline }}
+          candidate: ${{ needs.plan.outputs.candidate }}
+      - name: Build
+        shell: bash
+        run: ${HARNESS}/build.sh ${{ matrix.side }} install
+      - name: Test ${{ matrix.suite }}
+        shell: bash
+        run: ${HARNESS}/unit-tests.sh ${{ matrix.side }} ${{ matrix.suite }} ${{ needs.plan.outputs.tier }}
+      - name: Pack
+        if: always()
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh pack-unit ${{ matrix.side }} "${RUNNER_TEMP}/out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-${{ matrix.side }}-${{ matrix.suite }}
+          path: ${{ runner.temp }}/out
+          retention-days: 14
+
+  compare:
+    name: Compare
+    needs: [plan, build, e2e, unit]
+    if: (!cancelled()) && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ needs.plan.outputs.baseline }}
+          candidate: ${{ needs.plan.outputs.candidate }}
+          free-disk: "false"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-*
+          path: ${{ runner.temp }}/builds
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "{e2e,unit}-*"
+          path: ${{ runner.temp }}/results
+      - name: Unpack
+        shell: bash
+        run: |
+          for side in baseline candidate; do
+            ${HARNESS}/ci/artifacts.sh unpack-build "${side}" "${RUNNER_TEMP}/builds/build-${side}"
+          done
+          ${HARNESS}/ci/artifacts.sh unpack-results "${RUNNER_TEMP}"/results/*
+      - name: Compare
+        id: compare
+        shell: bash
+        run: ${HARNESS}/compare.sh
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          report="${WORKDIR}/results/compare/report.md"
+          if [[ -f "${report}" ]]; then
+            # The step summary holds 1 MiB; the full report is an artifact.
+            head -c 900000 "${report}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "No report was produced; see the Compare step log." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report
+          path: ${{ env.WORKDIR }}/results/compare
+          retention-days: 30

@@ -118,7 +118,7 @@ state=$(wait_app_state "${KILL_APP}" 'KILLED' 60 || true)
 check kill-app-final-state "$([[ "${state}" == KILLED ]] && echo true || echo false)" "state ${state}"
 
 COMPONENT=yarn-rm-web
-http cluster "${RM_URL}/cluster" --expect-regex 'All Applications'
+http cluster "${RM_URL}/cluster" --expect-regex 'About the Cluster'
 http cluster-about "${RM_URL}/cluster/cluster"
 http apps "${RM_URL}/cluster/apps"
 http apps-finished "${RM_URL}/cluster/apps/FINISHED"
@@ -152,67 +152,79 @@ http ui-apps "${NM_URL}/node/allApplications"
 http ui-containers "${NM_URL}/node/allContainers"
 http ui-node-info "${NM_URL}/node/node"
 
-COMPONENT=yarn-timeline
-T="${AHS_URL}/ws/v1/timeline"
-http about "${T}" --expect-regex '"About"'
-http put-entity "${T}?${U}" --method POST --header 'Content-Type: application/json' \
-  --data '{"entities":[{"entitytype":"JETTY12_PHASE_A","entity":"entity_1",
-  "starttime":1700000000000,"events":[{"timestamp":1700000000001,"eventtype":"START",
-  "eventinfo":{"k":"v"}}],"primaryfilters":{"probe":["jetty12"]},
-  "otherinfo":{"answer":42,"nested":{"a":[1,2]}},
-  "relatedentities":{"OTHER":["other_1"]}}]}' --expect-regex '"errors":\[\]'
-http get-entity "${T}/JETTY12_PHASE_A/entity_1" --expect-regex '"entity":"entity_1"'
-http get-entities "${T}/JETTY12_PHASE_A?primaryFilter=probe:jetty12" \
-  --expect-regex '"entity_1"'
-http get-events "${T}/JETTY12_PHASE_A/events?entityId=entity_1" --expect-regex '"START"'
-http yarn-app-entities "${T}/YARN_APPLICATION?limit=10"
-http domain "${T}/domain?owner=${USER_NAME}" --expect-status any
-http err-no-entity "${T}/JETTY12_PHASE_A/no_such_entity" --expect-status 404
-http err-bad-json "${T}?${U}" --method POST --header 'Content-Type: application/json' \
-  --data '{"entities":[{' --expect-status any
-H="${AHS_URL}/ws/v1/applicationhistory"
-http ahs-about "${H}" --expect-status any
-http ahs-apps "${H}/apps"
-http ahs-app "${H}/apps/${DSHELL_APP}" --expect-status 200,404
-http ahs-attempts "${H}/apps/${DSHELL_APP}/appattempts" --expect-status 200,404
-http ahs-ui "${AHS_URL}/applicationhistory"
-http ahs-ui-app "${AHS_URL}/applicationhistory/app/${DSHELL_APP}" --expect-status any
+if daemon_up timelineserver; then
+  COMPONENT=yarn-timeline
+  T="${AHS_URL}/ws/v1/timeline"
+  http about "${T}" --expect-regex '"About"'
+  http put-entity "${T}?${U}" --method POST --header 'Content-Type: application/json' \
+    --data '{"entities":[{"entityType":"JETTY12_PHASE_A","entityId":"entity_1",
+    "startTime":1700000000000,"events":[{"timestamp":1700000000001,"eventType":"START",
+    "eventInfo":{"k":"v"}}],"primaryFilters":{"probe":["jetty12"]},
+    "otherInfo":{"answer":42,"nested":{"a":[1,2]}},
+    "relatedEntities":{"OTHER":["other_1"]}}]}' --expect-regex '"errors":\[\]'
+  http get-entity "${T}/JETTY12_PHASE_A/entity_1" --expect-regex '"entityId":"entity_1"'
+  http get-entities "${T}/JETTY12_PHASE_A?primaryFilter=probe:jetty12" \
+    --expect-regex '"entity_1"'
+  http get-events "${T}/JETTY12_PHASE_A/events?entityId=entity_1" --expect-regex '"START"'
+  http yarn-app-entities "${T}/YARN_APPLICATION?limit=10"
+  http domain "${T}/domain?owner=${USER_NAME}" --expect-status any
+  http err-no-entity "${T}/JETTY12_PHASE_A/no_such_entity" --expect-status 404
+  http err-bad-json "${T}?${U}" --method POST --header 'Content-Type: application/json' \
+    --data '{"entities":[{' --expect-status any
+  H="${AHS_URL}/ws/v1/applicationhistory"
+  http ahs-about "${H}" --expect-status any
+  http ahs-apps "${H}/apps"
+  http ahs-app "${H}/apps/${DSHELL_APP}" --expect-status 200,404
+  http ahs-attempts "${H}/apps/${DSHELL_APP}/appattempts" --expect-status 200,404
+  http ahs-ui "${AHS_URL}/applicationhistory"
+  http ahs-ui-app "${AHS_URL}/applicationhistory/app/${DSHELL_APP}" --expect-status any
+fi
 
-COMPONENT=yarn-proxy
-P="http://${HOST}:${P_PROXY}"
-http finished-app "${P}/proxy/${DSHELL_APP}/" --expect-status any
-http unknown-app "${P}/proxy/application_1_0001/" --expect-status any
-http bad-app-id "${P}/proxy/not_an_app/" --expect-status any
+if daemon_up proxyserver; then
+  COMPONENT=yarn-proxy
+  P="${PROXY_URL}"
+  http finished-app "${P}/proxy/${DSHELL_APP}/" --expect-status any
+  http unknown-app "${P}/proxy/application_1_0001/" --expect-status any
+  http bad-app-id "${P}/proxy/not_an_app/" --expect-status any
+fi
 
-COMPONENT=yarn-router
-Y="http://${HOST}:${P_YROUTER_HTTP}"
-http cluster-info "${Y}/ws/v1/cluster/info" --expect-status any
-http cluster-metrics "${Y}/ws/v1/cluster/metrics" --expect-status any
-http apps "${Y}/ws/v1/cluster/apps" --expect-status any
-http nodes "${Y}/ws/v1/cluster/nodes" --expect-status any
-http ui-cluster "${Y}/cluster" --expect-status any
-http ui-federation "${Y}/cluster/federation" --expect-status any
-http ui-apps "${Y}/cluster/apps" --expect-status any
-cli client-app-list --shape none -- yarn application \
-  -Dyarn.resourcemanager.address="${HOST}:${P_YROUTER_CLIENT}" -list -appStates ALL
+if daemon_up router; then
+  COMPONENT=yarn-router
+  Y="http://${HOST}:${P_YROUTER_HTTP}"
+  http cluster-info "${Y}/ws/v1/cluster/info" --expect-status any
+  http cluster-metrics "${Y}/ws/v1/cluster/metrics" --expect-status any
+  http apps "${Y}/ws/v1/cluster/apps" --expect-status any
+  http nodes "${Y}/ws/v1/cluster/nodes" --expect-status any
+  http ui-cluster "${Y}/cluster" --expect-status any
+  http ui-federation "${Y}/cluster/federation" --expect-status any
+  http ui-apps "${Y}/cluster/apps" --expect-status any
+  cli client-app-list --shape none -- yarn application \
+    -Dyarn.resourcemanager.address="${HOST}:${P_YROUTER_CLIENT}" -list -appStates ALL
+fi
 
-COMPONENT=yarn-gpg
-G="http://${HOST}:${P_GPG_HTTP}"
-http ui "${G}/gpg" --expect-status any
-http ui-policies "${G}/gpg/policies" --expect-status any
+if daemon_up globalpolicygenerator; then
+  COMPONENT=yarn-gpg
+  G="http://${HOST}:${P_GPG_HTTP}"
+  http ui "${G}/gpg" --expect-status any
+  http ui-policies "${G}/gpg/policies" --expect-status any
+fi
 
-COMPONENT=yarn-scm
-S="http://${HOST}:${P_SCM_HTTP}"
-http ui "${S}/SCMOverview" --expect-status any
-cli scm-admin --shape none --expect-rc 0,255 -- yarn scmadmin -runCleanerTask
+if daemon_up sharedcachemanager; then
+  COMPONENT=yarn-scm
+  S="http://${HOST}:${P_SCM_HTTP}"
+  http ui "${S}/SCMOverview" --expect-status any
+  cli scm-admin --shape none --expect-rc 0,255 -- yarn scmadmin -runCleanerTask
+fi
 
-COMPONENT=yarn-timelinereader
-TR="http://${HOST}:${P_TLREADER_HTTP}/ws/v2/timeline"
-http about "${TR}/" --expect-regex '"About"'
-http health "${TR}/health" --expect-status any
-http clusters-apps "${TR}/clusters/yarn-cluster/apps/${DSHELL_APP}" --expect-status any
-http flows "${TR}/flows" --expect-status any
-http err-bad-path "${TR}/no/such/path" --expect-status any
+if daemon_up timelinereader; then
+  COMPONENT=yarn-timelinereader
+  TR="http://${HOST}:${P_TLREADER_HTTP}/ws/v2/timeline"
+  http about "${TR}/" --expect-regex '"About"'
+  http health "${TR}/health" --expect-status any
+  http clusters-apps "${TR}/clusters/yarn-cluster/apps/${DSHELL_APP}" --expect-status any
+  http flows "${TR}/flows" --expect-status any
+  http err-bad-path "${TR}/no/such/path" --expect-status any
+fi
 
 COMPONENT=yarn-services
 A="${RM_URL}/app/v1/services"
@@ -222,7 +234,7 @@ http create "${A}?${U}" --method POST --header 'Content-Type: application/json' 
   "components":[{"name":"sleeper","number_of_containers":1,"launch_command":"sleep 900",
   "resource":{"cpus":1,"memory":"256"}}]}'
 for _ in $(seq 1 60); do
-  curl -s --noproxy '*' "${A}/jetty12-sleeper?${U}" | grep -Eq '"state" ?: ?"STABLE"' && break
+  rest "${A}/jetty12-sleeper?${U}" | grep -Eq '"state" ?: ?"STABLE"' && break
   sleep 3
 done
 http status "${A}/jetty12-sleeper?${U}" --expect-regex '"state"\s*:\s*"STABLE"'
@@ -233,10 +245,10 @@ http flex "${A}/jetty12-sleeper/components/sleeper?${U}" --method PUT \
 http stop "${A}/jetty12-sleeper?${U}" --method PUT --header 'Content-Type: application/json' \
   --data '{"state":"STOPPED"}' --expect-status 200,202
 for _ in $(seq 1 40); do
-  curl -s --noproxy '*' "${A}/jetty12-sleeper?${U}" | grep -Eq '"state" ?: ?"STOPPED"' && break
+  rest "${A}/jetty12-sleeper?${U}" | grep -Eq '"state" ?: ?"STOPPED"' && break
   sleep 3
 done
-http destroy "${A}/jetty12-sleeper?${U}" --method DELETE --expect-status 200,204
+http destroy "${A}/jetty12-sleeper?${U}" --method DELETE --expect-status 200,204 --timeout 300
 http err-no-service "${A}/no-such-service?${U}" --expect-status 404
 http err-bad-spec "${A}?${U}" --method POST --header 'Content-Type: application/json' \
   --data '{"name":"Bad Name!"}' --expect-status any

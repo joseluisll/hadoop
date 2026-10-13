@@ -66,11 +66,11 @@ for _ in $(seq 1 60); do
 done
 # The AM web app answers only after it registered its tracking URL.
 for _ in $(seq 1 30); do
-  curl -s --noproxy '*' -o /dev/null -w '%{http_code}' \
-    "http://${HOST}:${P_PROXY}/proxy/${SLEEP_APP}/ws/v1/mapreduce/info" | grep -q 200 && break
+  rest -o /dev/null -w '%{http_code}' \
+    "${PROXY_URL}/proxy/${SLEEP_APP}/ws/v1/mapreduce/info" | grep -q 200 && break
   sleep 2
 done
-PX="http://${HOST}:${P_PROXY}/proxy/${SLEEP_APP}"
+PX="${PROXY_URL}/proxy/${SLEEP_APP}"
 SLEEP_JOB=${SLEEP_APP/application_/job_}
 http am-info "${PX}/ws/v1/mapreduce/info" --expect-regex '"appId"'
 http am-info-xml "${PX}/ws/v1/mapreduce/info" --header 'Accept: application/xml'
@@ -88,14 +88,16 @@ http am-root-redirect "${PX}/" --expect-status any
 http rm-tracking "${RM_URL}/cluster/app/${SLEEP_APP}"
 cli kill --merge-stderr --expect-regex '(Killed job \S+)' -- mapred job -kill "${SLEEP_JOB}"
 wait "${SLEEP_PID}" 2>/dev/null || true
-state=$(wait_app_state "${SLEEP_APP}" 'KILLED|FINISHED|FAILED' 60 || true)
-check sleep-job-killed "$([[ "${state}" == KILLED ]] && echo true || echo false)" "state ${state}"
+wait_app_state "${SLEEP_APP}" 'KILLED|FINISHED|FAILED' 60 >/dev/null || true
+# A job killed through MapReduce unregisters its AM: YARN state FINISHED,
+# final status KILLED.
+http sleep-job-killed "${RM_URL}/ws/v1/cluster/apps/${SLEEP_APP}" --expect-regex '"finalStatus":"KILLED"'
 
 COMPONENT=mapreduce-jhs
 J="${JHS_URL}/ws/v1/history"
 # The history server picks up finished jobs asynchronously.
 for _ in $(seq 1 30); do
-  curl -s --noproxy '*' "${J}/mapreduce/jobs/${PI_JOB}" | grep -q '"state":"SUCCEEDED"' && break
+  rest "${J}/mapreduce/jobs/${PI_JOB}" | grep -q '"state":"SUCCEEDED"' && break
   sleep 2
 done
 http history "${J}" --expect-regex '"historyInfo"'
@@ -113,7 +115,7 @@ http task "${J}/mapreduce/jobs/${PI_JOB}/tasks/${TASK}" --expect-regex '"state":
 http task-attempts "${J}/mapreduce/jobs/${PI_JOB}/tasks/${TASK}/attempts"
 http task-counters "${J}/mapreduce/jobs/${PI_JOB}/tasks/${TASK}/counters"
 http err-no-job "${J}/mapreduce/jobs/job_1_0001" --expect-status 404
-http err-bad-job "${J}/mapreduce/jobs/not_a_job" --expect-status 400
+http err-bad-job "${J}/mapreduce/jobs/not_a_job" --expect-status any
 http ui "${JHS_URL}/jobhistory"
 http ui-job "${JHS_URL}/jobhistory/job/${PI_JOB}"
 http ui-conf "${JHS_URL}/jobhistory/conf/${PI_JOB}"

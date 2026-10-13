@@ -13,48 +13,62 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# The servlets and behaviour HttpServer2 gives every daemon's web server.
-# This is the layer the Jetty migration touches: request routing, filters,
-# response headers, error pages, directory listings, HTTP methods.
+# The servlets and behaviour HttpServer2 gives every daemon's web server,
+# for every daemon instance of the architecture. This is the layer the
+# Jetty migration touches: request routing, filters, authentication,
+# response headers, error pages, directory listings, HTTP methods, TLS.
 
-while read -r line; do
+# KMS and HttpFS authenticate every request; user.name is ignored by the
+# others (and under Kerberos the SPNEGO identity wins).
+U="user.name=${USER_NAME}"
+
+for line in "${INSTANCES[@]}"; do
   # shellcheck disable=SC2086
   set -- ${line}
   name=$1 url=$5
   [[ "${url}" == "-" ]] && continue
-  if ! grep -qx "${name} up" "${RES}/daemons.txt"; then
-    COMPONENT="web:${name}" check daemon-up false "$(grep "^${name} " "${RES}/daemons.txt")"
+  COMPONENT="web:${name}"
+  if ! daemon_up "${name}"; then
+    check daemon-up false "$(grep "^${name} " "${RES}/daemons.txt")"
     continue
   fi
   base=${url%/jmx}
-  COMPONENT="web:${name}"
 
   http root "${base}/" --expect-status any
-  http jmx "${base}/jmx" --shape none --expect-regex '"beans"'
-  http jmx-runtime "${base}/jmx?qry=java.lang:type=Runtime" --expect-regex 'java.lang:type=Runtime'
-  http jmx-get-attr "${base}/jmx?get=java.lang:type=Memory::HeapMemoryUsage"
-  http jmx-jsonp "${base}/jmx?qry=java.lang:type=Runtime&callback=cb" --shape none \
-    --expect-regex '^cb\('
-  http jmx-bad-query "${base}/jmx?qry=not%20a%20bean" --expect-status any
-  http jmx-head "${base}/jmx" --method HEAD --head-only
-  http jmx-options "${base}/jmx" --method OPTIONS --expect-status any --shape none
-  http jmx-trace "${base}/jmx" --method TRACE --expect-status any --shape none
-  http jmx-post "${base}/jmx" --method POST --data '' --expect-status any --shape none
-  http conf-xml "${base}/conf" --expect-regex '<configuration'
-  http conf-json "${base}/conf?format=json" --expect-regex '"properties"'
-  http conf-name "${base}/conf?name=fs.defaultFS&format=json" --expect-regex 'fs.defaultFS'
-  http conf-bad-format "${base}/conf?format=yaml" --expect-status any
-  http stacks "${base}/stacks" --shape none --expect-regex 'Thread'
-  http loglevel-get "${base}/logLevel?log=org.apache.hadoop" --expect-regex 'org.apache.hadoop'
-  http loglevel-set "${base}/logLevel?log=org.apache.hadoop.jetty12probe&level=DEBUG" \
+  http jmx "${base}/jmx?${U}" --shape none --expect-regex '"beans"'
+  http jmx-runtime "${base}/jmx?qry=java.lang:type=Runtime&${U}" \
+    --expect-regex 'java.lang:type=Runtime'
+  http jmx-get-attr "${base}/jmx?get=java.lang:type=Memory::HeapMemoryUsage&${U}"
+  http jmx-callback "${base}/jmx?qry=java.lang:type=Runtime&callback=cb&${U}" --shape none \
+    --reject-regex '^cb\('
+  http jmx-bad-query "${base}/jmx?qry=not%20a%20bean&${U}" --expect-status any
+  http jmx-no-user "${base}/jmx" --expect-status any --shape none
+  http jmx-head "${base}/jmx?${U}" --method HEAD --head-only
+  http jmx-options "${base}/jmx?${U}" --method OPTIONS --expect-status any --shape none
+  http jmx-trace "${base}/jmx?${U}" --method TRACE --expect-status any --shape none
+  http jmx-post "${base}/jmx?${U}" --method POST --data '' --expect-status any --shape none
+  http conf-xml "${base}/conf?${U}" --expect-regex '<configuration'
+  http conf-json "${base}/conf?${U}" --header 'Accept: application/json' \
+    --expect-regex '"properties"'
+  http conf-name "${base}/conf?name=fs.defaultFS&${U}" --header 'Accept: application/json' \
+    --expect-regex 'fs.defaultFS'
+  http conf-bad-name "${base}/conf?name=no.such.property&${U}" --expect-status any
+  http stacks "${base}/stacks?${U}" --shape none --expect-regex 'Thread'
+  http loglevel-get "${base}/logLevel?log=org.apache.hadoop&${U}" --expect-regex 'org.apache.hadoop'
+  http loglevel-set "${base}/logLevel?log=org.apache.hadoop.jetty12probe&level=DEBUG&${U}" \
     --expect-regex 'DEBUG'
-  http logs-listing "${base}/logs/" --expect-status any
-  http logs-missing "${base}/logs/no-such-file.log" --expect-status any
-  http logs-traversal "${base}/logs/..%2f..%2fetc%2fpasswd" --expect-status any --shape none \
+  http logs-listing "${base}/logs/?${U}" --expect-status any
+  http logs-missing "${base}/logs/no-such-file.log?${U}" --expect-status any
+  http logs-traversal "${base}/logs/..%2f..%2fetc%2fpasswd?${U}" --expect-status any --shape none \
     --reject-regex 'root:x:0:0'
-  http prometheus "${base}/prom" --shape none --expect-status any
-  http static-dir "${base}/static/" --expect-status any
-  http not-found "${base}/no/such/path" --expect-status any
-  http not-found-dotdot "${base}/static/../jmx" --expect-status any --shape none
-  http isactive "${base}/isActive" --expect-status any
-done < <(all_daemons)
+  http prometheus "${base}/prom?${U}" --shape none --expect-status any
+  http static-dir "${base}/static/?${U}" --expect-status any
+  http not-found "${base}/no/such/path?${U}" --expect-status any
+  http not-found-dotdot "${base}/static/../jmx?${U}" --expect-status any --shape none
+  http isactive "${base}/isActive?${U}" --expect-status any
+  # The other scheme: under HTTPS_ONLY the plain HTTP port must be closed.
+  if [[ "${base}" == https://* ]]; then
+    http plain-http "http://${base#https://}/jmx" --expect-status any --shape none --allow-error
+    http no-credentials "${base}/jmx" --no-auth --expect-status 401 --shape none
+  fi
+done

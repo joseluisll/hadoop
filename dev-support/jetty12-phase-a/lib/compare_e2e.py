@@ -16,7 +16,7 @@
 
 """Line up the end-to-end results of the two sides.
 
-Usage: compare_e2e.py --expected FILE --out DIR BASELINE_E2E CANDIDATE_E2E
+Usage: compare_e2e.py --expected FILE --out DIR --arch NAME BASELINE_E2E CANDIDATE_E2E
 
 Every observation (component + id) is classified:
   MATCH          both sides met the expectation and the normalized views are equal
@@ -96,6 +96,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expected", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--arch", required=True)
     ap.add_argument("baseline")
     ap.add_argument("candidate")
     a = ap.parse_args()
@@ -170,12 +171,13 @@ def main():
                          for r in allow.rules if r["hits"] == 0],
     }
     os.makedirs(a.out, exist_ok=True)
-    with open(os.path.join(a.out, "e2e-compare.json"), "w", encoding="utf-8") as f:
+    result["arch"] = a.arch
+    with open(os.path.join(a.out, f"e2e-compare-{a.arch}.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
-    with open(os.path.join(a.out, "classload-compare.json"), "w", encoding="utf-8") as f:
+    with open(os.path.join(a.out, f"classload-compare-{a.arch}.json"), "w", encoding="utf-8") as f:
         json.dump(cl, f, indent=1)
-    write_markdown(os.path.join(a.out, "e2e-compare.md"), result, blocking)
-    print(f"e2e comparison: {verdict} {counts}")
+    write_markdown(os.path.join(a.out, f"e2e-compare-{a.arch}.md"), result, blocking)
+    print(f"e2e comparison ({a.arch}): {verdict} {counts}")
     return 0 if verdict == "PASS" else 1
 
 
@@ -183,7 +185,7 @@ def write_markdown(path, result, blocking):
     rows = result["rows"]
     comps = sorted({r["component"] for r in rows})
     with open(path, "w", encoding="utf-8") as f:
-        f.write("## End-to-end cluster\n\n")
+        f.write(f"## End-to-end: {result['arch']} architecture\n\n")
         f.write(f"Verdict: **{result['verdict']}**. Observations: "
                 + ", ".join(f"{k} {v}" for k, v in sorted(result["counts"].items())) + "\n\n")
         f.write("| Component | Observations | Match | Diff | Regression | Fixed | Both fail | Missing |\n")
@@ -225,7 +227,7 @@ def write_markdown(path, result, blocking):
             f.write(f"| {d} | {r['baseline_classes']} | {r['candidate_classes']} | "
                     f"{r['only_baseline']} | {r['only_candidate']} | {r['different_jar']} |\n")
         f.write("\nClasses loaded on one side only depend on timing and are listed in "
-                "classload-compare.json; a class loaded from a different jar must be in the "
+                "classload-compare-<arch>.json; a class loaded from a different jar must be in the "
                 "allowlist.\n\n")
         moves = result["class_jar_moves"]
         if moves:

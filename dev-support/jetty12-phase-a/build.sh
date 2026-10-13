@@ -14,16 +14,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Usage: build.sh <baseline|candidate>
+# Usage: build.sh <baseline|candidate> [dist|install]
 #
-# Checks out the side's ref in its own git worktree, builds the binary
-# distribution, and records every module's resolved dependencies.
+# Checks out the side's ref in its own git worktree and builds it.
+#   dist     (default) the binary distribution, every module's resolved
+#            dependencies, and the Hadoop test code the end-to-end runs reuse
+#   install  only "mvn install" without tests, enough for unit-tests.sh
 
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
 
 SIDE="${1:-}"
 check_side "${SIDE}"
+MODE="${2:-dist}"
+[[ "${MODE}" == dist || "${MODE}" == install ]] || die "mode must be dist or install"
 LOG_TAG="build:${SIDE}"
 require_cmd git java
 
@@ -41,6 +45,14 @@ fi
 git -C "${SRC}" rev-parse HEAD > "${OUT}/commit.txt"
 git -C "${SRC}" log -1 --format='%H %s' > "${OUT}/commit-subject.txt"
 log "building $(cat "${OUT}/commit-subject.txt")"
+
+if [[ "${MODE}" == install ]]; then
+  log "mvn install (no tests); log: ${OUT}/mvn-install.log"
+  mvn_side "${SIDE}" install -DskipTests -Dmaven.javadoc.skip=true \
+    > "${OUT}/mvn-install.log" 2>&1 \
+    || die "build failed; see ${OUT}/mvn-install.log"
+  exit 0
+fi
 
 log "mvn install -Pdist (no tests); log: ${OUT}/mvn-install.log"
 mvn_side "${SIDE}" install -Pdist -Dtar -DskipTests -Dmaven.javadoc.skip=true \
@@ -62,3 +74,18 @@ log "dependencies of $(cut -f1 "${OUT}/dependencies.tsv" | sort -u | wc -l) modu
 dist=$(dist_dir "${SIDE}")
 echo "${dist}" > "${OUT}/dist-path.txt"
 log "distribution: ${dist}"
+
+# Test code of Hadoop the end-to-end runs reuse, next to the distribution:
+# hadoop-minikdc (the KDC of the secure architecture) with its runtime
+# dependencies, and the timeline service test jar (file system storage for
+# the timeline reader).
+TOOLS="$(side_dir "${SIDE}")/tools"
+rm -rf "${TOOLS}"
+mkdir -p "${TOOLS}/minikdc" "${TOOLS}/timelineservice-tests"
+mvn_side "${SIDE}" -nsu dependency:copy-dependencies -pl hadoop-common-project/hadoop-minikdc \
+  -DincludeScope=runtime -DoutputDirectory="${TOOLS}/minikdc" \
+  > "${OUT}/mvn-tools.log" 2>&1 || die "cannot stage MiniKdc; see ${OUT}/mvn-tools.log"
+cp "${SRC}"/hadoop-common-project/hadoop-minikdc/target/hadoop-minikdc-*[0-9T].jar "${TOOLS}/minikdc/"
+cp "${SRC}"/hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice/target/hadoop-yarn-server-timelineservice-*-tests.jar \
+  "${TOOLS}/timelineservice-tests/"
+log "tools staged in ${TOOLS}: $(ls "${TOOLS}/minikdc" | wc -l) MiniKdc jars"

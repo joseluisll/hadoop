@@ -33,9 +33,9 @@ COMPONENT=tools-distcp
 cli hdfs-to-hdfs -- hadoop distcp "${D}/src" "${D}/copy1"
 same_checksum hdfs-to-hdfs-a "${D}/src/a.txt" "${D}/copy1/a.txt"
 same_checksum hdfs-to-hdfs-b "${D}/src/sub/b.txt" "${D}/copy1/sub/b.txt"
-cli webhdfs-to-hdfs -- hadoop distcp "webhdfs://${HOST}:${P_NN_HTTP}${D}/src" "${D}/copy2"
+cli webhdfs-to-hdfs -- hadoop distcp "${WEBHDFS_FS}${D}/src" "${D}/copy2"
 same_checksum webhdfs-to-hdfs "${D}/src/sub/b.txt" "${D}/copy2/sub/b.txt"
-cli httpfs-to-hdfs -- hadoop distcp "webhdfs://${HOST}:${P_HTTPFS}${D}/src" "${D}/copy3"
+cli httpfs-to-hdfs -- hadoop distcp "${HTTPFS_FS}${D}/src" "${D}/copy3"
 same_checksum httpfs-to-hdfs "${D}/src/a.txt" "${D}/copy3/a.txt"
 cli update -- hadoop distcp -update -delete "${D}/src" "${D}/copy1"
 cli listing --shape lines -- sh -c "hadoop fs -ls -R ${D}/copy1 | awk '{print \$1, \$5, \$8}'"
@@ -53,10 +53,10 @@ cli output --expect-regex '^\s*(\d+)' -- hadoop fs -cat "${D}/streaming-out/part
 COMPONENT=tools-rumen
 DONE_DIR=$(hdfs getconf -confKey mapreduce.jobhistory.done-dir 2>/dev/null)
 DONE_DIR=${DONE_DIR:-/tmp/hadoop-yarn/staging/history/done}
-cli tracebuilder -- hadoop org.apache.hadoop.tools.rumen.TraceBuilder -recursive \
+cli tracebuilder -- hadoop rumentrace -recursive \
   "file://${LOCAL}/trace.json" "file://${LOCAL}/topology.json" "${FS}${DONE_DIR}"
 check trace-written "$([[ -s "${LOCAL}/trace.json" ]] && echo true || echo false)"
-cli folder --expect-rc 0,1 -- hadoop org.apache.hadoop.tools.rumen.Folder \
+cli folder --expect-rc 0,1 -- hadoop rumenfolder \
   -input-cycle 1m -output-duration 10m "file://${LOCAL}/trace.json" "file://${LOCAL}/folded.json"
 
 if [[ "${E2E_GRIDMIX:-true}" == true && -s "${LOCAL}/trace.json" ]]; then
@@ -75,28 +75,19 @@ SLS_CONF="${RUN}/conf-sls"
 rm -rf "${SLS_CONF}"
 cp -r "${DIST}/etc/hadoop" "${SLS_CONF}"
 cp "${TOOLS}"/sls/sample-conf/* "${SLS_CONF}/"
-python3 -I - "${SLS_CONF}/yarn-site.xml" <<'EOF'
-import sys, xml.etree.ElementTree as ET
-path = sys.argv[1]
-tree = ET.parse(path)
-root = tree.getroot()
-props = {
-    "yarn.resourcemanager.address": "localhost:18032",
-    "yarn.resourcemanager.scheduler.address": "localhost:18030",
-    "yarn.resourcemanager.resource-tracker.address": "localhost:18031",
-    "yarn.resourcemanager.admin.address": "localhost:18033",
-    "yarn.resourcemanager.webapp.address": "localhost:18088",
-    "yarn.timeline-service.enabled": "false",
-}
-for p in list(root.findall("property")):
-    if p.findtext("name") in props:
-        root.remove(p)
-for k, v in props.items():
-    p = ET.SubElement(root, "property")
-    ET.SubElement(p, "name").text = k
-    ET.SubElement(p, "value").text = v
-tree.write(path)
-EOF
+# SLSRunner builds the simulated RM's configuration from sls-runner.xml
+# alone (new Configuration(false)), so yarn-site.xml is not read: the
+# scheduler and the RM's ports go there.
+for f in yarn-site.xml sls-runner.xml; do
+  python3 -I "${E2E_DIR}/lib/confset.py" "${SLS_CONF}/${f}" \
+    yarn.resourcemanager.scheduler.class=org.apache.hadoop.yarn.server.resourcemanager.scheduler.capacity.CapacityScheduler \
+    yarn.resourcemanager.address=localhost:18032 \
+    yarn.resourcemanager.scheduler.address=localhost:18030 \
+    yarn.resourcemanager.resource-tracker.address=localhost:18031 \
+    yarn.resourcemanager.admin.address=localhost:18033 \
+    yarn.resourcemanager.webapp.address=localhost:18088 \
+    yarn.timeline-service.enabled=false
+done
 SLS_OUT="${LOCAL}/sls-out"
 rm -rf "${SLS_OUT}"
 ( cd "${TOOLS}/sls" && HADOOP_CONF_DIR="${SLS_CONF}" timeout 900 bin/slsrun.sh \

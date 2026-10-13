@@ -28,6 +28,10 @@ normalized view leaves out what legitimately changes from run to run:
 timestamps, application/job/container ids, counts of running things, build
 revision strings.
 
+HTTPS: PROBE_CA names the CA certificate to trust. Kerberos: with
+PROBE_SPNEGO=true requests go through curl --negotiate (ticket cache in
+KRB5CCNAME); --no-auth sends one without credentials.
+
 Exits 1 when the expectation is not met, so scenarios can stop early on a
 failed prerequisite if they want to.
 """
@@ -35,8 +39,12 @@ failed prerequisite if they want to.
 import argparse
 import hashlib
 import json
+import os
 import re
+import ssl
+import subprocess
 import sys
+import tempfile
 import urllib.error
 import urllib.request
 from html.parser import HTMLParser
@@ -198,18 +206,15 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def do_http(a):
-    data = None
-    if a.data is not None:
-        data = a.data.encode()
-    elif a.data_file:
-        with open(a.data_file, "rb") as f:
-            data = f.read()
+def fetch_urllib(a, data):
     req = urllib.request.Request(a.url, data=data, method=a.method)
     for h in a.header or []:
         k, _, v = h.partition(":")
         req.add_header(k.strip(), v.strip())
     handlers = [urllib.request.ProxyHandler({})]
+    if os.environ.get("PROBE_CA"):
+        ctx = ssl.create_default_context(cafile=os.environ["PROBE_CA"])
+        handlers.append(urllib.request.HTTPSHandler(context=ctx))
     if not a.follow:
         handlers.append(NoRedirect())
     opener = urllib.request.build_opener(*handlers)
@@ -225,6 +230,58 @@ def do_http(a):
             body = b""
     except Exception as e:  # connection refused, timeout, ...
         error = type(e).__name__ + ": " + str(e)[:200]
+    return status, headers, body, error
+
+
+def fetch_curl(a, data):
+    """SPNEGO (Kerberos) needs a GSS-API client: curl --negotiate, with the
+    ticket cache in KRB5CCNAME."""
+    with tempfile.TemporaryDirectory() as tmp:
+        hdr, out, inp = (os.path.join(tmp, n) for n in ("h", "b", "d"))
+        cmd = ["curl", "-s", "-S", "--noproxy", "*", "--max-time", str(int(a.timeout)),
+               "--negotiate", "-u", ":", "-D", hdr, "-o", out, "-w", "%{http_code}"]
+        if os.environ.get("PROBE_CA"):
+            cmd += ["--cacert", os.environ["PROBE_CA"]]
+        if a.head_only or a.method == "HEAD":
+            cmd += ["-I"]
+        else:
+            cmd += ["-X", a.method]
+        if a.follow:
+            cmd += ["-L"]
+        for h in a.header or []:
+            cmd += ["-H", h]
+        if data is not None:
+            with open(inp, "wb") as f:
+                f.write(data)
+            cmd += ["--data-binary", "@" + inp]
+        cmd.append(a.url)
+        p = subprocess.run(cmd, capture_output=True, timeout=a.timeout + 10)
+        code = p.stdout.decode().strip()
+        if not code.isdigit() or code == "000":
+            return None, {}, b"", "curl: " + p.stderr.decode(errors="replace").strip()[:200]
+        headers = {}
+        if os.path.exists(hdr):
+            # The last block is the final response (after 401 challenges,
+            # 100-continue and followed redirects).
+            blocks = [b for b in open(hdr, encoding="latin-1").read().split("\r\n\r\n") if b.strip()]
+            for line in (blocks[-1].split("\r\n")[1:] if blocks else []):
+                k, _, v = line.partition(":")
+                headers[k.strip()] = v.strip()
+        body = open(out, "rb").read() if os.path.exists(out) else b""
+        return int(code), headers, body, None
+
+
+def do_http(a):
+    data = None
+    if a.data is not None:
+        data = a.data.encode()
+    elif a.data_file:
+        with open(a.data_file, "rb") as f:
+            data = f.read()
+    if os.environ.get("PROBE_SPNEGO") == "true" and not a.no_auth:
+        status, headers, body, error = fetch_curl(a, data)
+    else:
+        status, headers, body, error = fetch_urllib(a, data)
 
     if a.out and body:
         with open(a.out, "wb") as f:
@@ -240,6 +297,12 @@ def do_http(a):
                     for k, v in sorted(lower.items()) if k not in IGNORED_HEADERS
                     and k not in (a.ignore_header or [])},
     }
+    if "set-cookie" in lower:
+        # The cookie's name and attributes (HttpOnly, Secure, Path, ...)
+        # matter; its value is random.
+        name, _, rest = lower["set-cookie"].partition("=")
+        attrs = sorted(p.strip().split("=")[0].lower() for p in rest.split(";")[1:] if p.strip())
+        obs["headers"]["set-cookie"] = "; ".join([name.strip()] + attrs)
     if "location" in lower:
         loc = re.sub(r"^https?://[^/]+", "", lower["location"])
         obs["headers"]["location"] = mask(re.sub(r"[?&](delegation|offset|"
@@ -248,7 +311,7 @@ def do_http(a):
         obs["body"] = body_shape(a.shape, body, content_type)
 
     problems = []
-    if error:
+    if error and not a.allow_error:
         problems.append(error)
     # "any": record whatever the server answers; the baseline/candidate
     # comparison is the check.
@@ -283,6 +346,42 @@ def json_get(text, path):
         return None
 
 
+def do_tls(a):
+    """TLS as negotiated by a web server: protocol, cipher, certificate
+    names, and whether protocols older than TLS 1.2 are refused."""
+    from urllib.parse import urlparse
+    u = urlparse(a.url)
+    host, port = u.hostname, u.port or 443
+    problems, obs = [], {}
+    ctx = ssl.create_default_context(cafile=os.environ.get("PROBE_CA"))
+    try:
+        import socket
+        with socket.create_connection((host, port), timeout=a.timeout) as raw:
+            with ctx.wrap_socket(raw, server_hostname=host) as s:
+                cert = s.getpeercert()
+                obs["protocol"] = s.version()
+                obs["cipher"] = s.cipher()[0]
+                obs["subject"] = dict(x[0] for x in cert.get("subject", ()))
+                obs["san"] = sorted(v for _, v in cert.get("subjectAltName", ()))
+    except Exception as e:
+        problems.append(f"handshake failed: {type(e).__name__}: {e}"[:200])
+    old = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    old.check_hostname, old.verify_mode = False, ssl.CERT_NONE
+    try:
+        old.minimum_version = ssl.TLSVersion.TLSv1
+        old.maximum_version = ssl.TLSVersion.TLSv1_1
+        old.set_ciphers("ALL:@SECLEVEL=0")
+        import socket
+        with socket.create_connection((host, port), timeout=a.timeout) as raw:
+            with old.wrap_socket(raw, server_hostname=host):
+                obs["tls1.1_accepted"] = True
+    except (ssl.SSLError, OSError, ValueError):
+        obs["tls1.1_accepted"] = False
+    if obs.get("tls1.1_accepted"):
+        problems.append("server accepts TLS 1.1 or older")
+    return obs, problems, {"url": a.url}
+
+
 def do_cli(a):
     problems = []
     expect_rc = [int(x) for x in a.expect_rc.split(",")]
@@ -309,7 +408,7 @@ def do_cli(a):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("http", "cli", "assert"):
+    for name in ("http", "cli", "assert", "tls"):
         p = sub.add_parser(name)
         p.add_argument("--obs", required=True)
         p.add_argument("--id", required=True)
@@ -329,6 +428,10 @@ def main():
                    choices=["auto", "json", "xml", "html", "text", "sha256", "lines", "none"])
     h.add_argument("--ignore-header", action="append")
     h.add_argument("--follow", action="store_true")
+    h.add_argument("--allow-error", action="store_true",
+                   help="a connection error is the expected outcome; record it")
+    h.add_argument("--no-auth", action="store_true",
+                   help="never authenticate, even when PROBE_SPNEGO is set")
     h.add_argument("--head-only", action="store_true")
     h.add_argument("--out")
     h.add_argument("--print-body", action="store_true")
@@ -339,6 +442,9 @@ def main():
     c.add_argument("--stdout-file")
     c.add_argument("--shape", default="none", choices=["none", "sha256", "text", "lines"])
     c.add_argument("--expect-regex", action="append")
+    t = sub.choices["tls"]
+    t.add_argument("--url", required=True)
+    t.add_argument("--timeout", type=float, default=30)
     s = sub.choices["assert"]
     s.add_argument("--ok", required=True, choices=["true", "false"])
     s.add_argument("--detail", default="")
@@ -348,6 +454,8 @@ def main():
         obs, problems, expect = do_http(a)
     elif a.cmd == "cli":
         obs, problems, expect = do_cli(a)
+    elif a.cmd == "tls":
+        obs, problems, expect = do_tls(a)
     else:
         obs, problems, expect = {"ok": a.ok}, ([] if a.ok == "true" else [a.detail]), {}
 

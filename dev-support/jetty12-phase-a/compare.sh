@@ -33,13 +33,19 @@ else
   log "skipping artifact diff: both sides must be built"
 fi
 
-if [[ -f "${B}/e2e/observations.jsonl" && -f "${C}/e2e/observations.jsonl" ]]; then
-  python3 -I "${HARNESS_DIR}/lib/compare_e2e.py" \
-    --expected "${HARNESS_DIR}/e2e/expected-e2e-differences.txt" --out "${OUT}" \
-    "${B}/e2e" "${C}/e2e" || true
-else
-  log "skipping e2e comparison: both sides must have run e2e/run.sh"
-fi
+compared=0
+for arch_dir in "${B}"/e2e/*/; do
+  arch=$(basename "${arch_dir}")
+  if [[ -f "${B}/e2e/${arch}/observations.jsonl" && -f "${C}/e2e/${arch}/observations.jsonl" ]]; then
+    python3 -I "${HARNESS_DIR}/lib/compare_e2e.py" \
+      --expected "${HARNESS_DIR}/e2e/expected-e2e-differences.txt" --out "${OUT}" \
+      --arch "${arch}" "${B}/e2e/${arch}" "${C}/e2e/${arch}" || true
+    compared=$((compared + 1))
+  else
+    log "skipping e2e comparison of ${arch}: both sides must have run it"
+  fi
+done
+(( compared > 0 )) || log "no architecture ran end to end on both sides"
 
 if [[ -d "${B}/unit" && -d "${C}/unit" ]]; then
   python3 -I "${HARNESS_DIR}/lib/compare_unit.py" --out "${OUT}" "${B}/unit" "${C}/unit" || true

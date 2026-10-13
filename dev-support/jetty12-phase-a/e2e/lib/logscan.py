@@ -59,8 +59,9 @@ def source_of(path, log_dir):
     if rel.startswith("userlogs" + os.sep):
         return "containers"
     base = os.path.basename(rel)
-    # hadoop-<user>-<daemon>-<host>.log / .out
-    m = re.match(r"(?:hadoop|yarn|mapred|hdfs)-[^-]+-([a-z0-9]+)-", base)
+    # hadoop-<instance>-<daemon>-<host>.log / .out (the harness sets
+    # HADOOP_IDENT_STRING to the instance name)
+    m = re.match(r"hadoop-([A-Za-z0-9_]+)-", base)
     return m.group(1) if m else base
 
 

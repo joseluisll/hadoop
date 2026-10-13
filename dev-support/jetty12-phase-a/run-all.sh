@@ -14,28 +14,31 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Usage: run-all.sh [quick|full|none]
+# Usage: run-all.sh [quick|full|none] [architectures]
 #
-# The whole comparison: build both sides, run the end-to-end cluster on
-# both, run the unit tests on both (tier quick by default, "none" to skip),
-# and write results/compare/report.md. Exits 0 only when every check passed.
-# See README.md for the environment variables.
+# The whole comparison on one machine: build both sides, run every
+# architecture end to end on both (or the comma-separated list given), run
+# all unit test suites on both (the "changed" suite in tier quick by
+# default; "none" skips unit tests), and write results/compare/report.md.
+# Exits 0 only when every check passed. See README.md for the environment
+# variables; CI runs the same steps in parallel jobs.
 
 set -uo pipefail
 source "$(dirname "$0")/lib/common.sh"
 LOG_TAG="run-all"
 TIER="${1:-quick}"
+ARCHS="${2:-all}"
 H="${HARNESS_DIR}"
 
 for side in baseline candidate; do
   "${H}/build.sh" "${side}" || die "build of ${side} failed"
 done
 for side in baseline candidate; do
-  "${H}/e2e/run.sh" "${side}" || log "e2e run of ${side} did not complete; the comparison will show it"
+  "${H}/e2e/run.sh" "${side}" "${ARCHS}" || log "e2e run of ${side} did not complete; the comparison will show it"
 done
 if [[ "${TIER}" != none ]]; then
   for side in baseline candidate; do
-    "${H}/unit-tests.sh" "${side}" "${TIER}"
+    "${H}/unit-tests.sh" "${side}" all "${TIER}"
   done
 fi
 "${H}/compare.sh"
