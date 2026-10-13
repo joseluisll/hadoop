@@ -325,7 +325,6 @@ to hours (`changed` full).
 | `E2E_NFS` | `auto` | start the NFS gateway in `simple` (`auto` = when running as root) |
 | `E2E_GRIDMIX` | `true` | run the gridmix sleep jobs |
 | `E2E_START_TIMEOUT` | 180 | seconds to wait for a daemon's web endpoint (stops early when the daemon exits) |
-| `E2E_FS_CHECK_TIMEOUT` | 120 | seconds for the file system check before the scenarios |
 | `E2E_NM_MEMORY_MB` | 6144 | node manager memory (split between sub-clusters in `federated`) |
 | `DAEMON_HEAP` | `384m` | heap of each daemon |
 
@@ -352,13 +351,12 @@ logs, surefire reports).
   unit test module with no test reports on a side fail the run.
 - An architecture given to `compare.sh` (or found on either side) that a
   side has no observations for is **NOT RUN**, and the run is not a PASS.
-- **Fail fast**: a daemon whose process exits is reported at once instead of
-  after its start timeout, and when the default file system is not usable
-  once the cluster has started (`hadoop fs -ls /`, see `fs-check.log`), the
-  scenarios are skipped; the logs and class loading are still collected. The
-  comparison then says the cluster did not start: **FAIL** for the
-  candidate, with each daemon's state on both sides and the new log errors,
-  or **NOT RUN** for the baseline.
+- **Fail fast**: a daemon whose process exits, or whose main thread dies, is
+  reported at once instead of after its start timeout, and when any daemon
+  is not up after the start (`daemons.txt`), the scenarios are skipped; the
+  logs and class loading are still collected. The comparison then says which
+  daemons did not start: **FAIL** for the candidate, **NOT RUN** for the
+  baseline.
 - **BOTH_FAIL** observations and tests failing on both sides are not caused
   by the patch, but each one hides what it was checking: look at them before
   relying on a run.

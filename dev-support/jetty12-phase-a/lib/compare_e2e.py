@@ -31,8 +31,8 @@ candidate side, no DIFF outside the allowlist, no class loaded from a jar
 outside the allowlist, no error in the logs that is new or much more frequent
 than on the baseline, and no observation id recorded twice. When either side
 has no observations at all, the verdict is NOT RUN. When a side's cluster
-did not start far enough to run the scenarios (e2e/run.sh wrote aborted.txt),
-the verdict is FAIL for the candidate and NOT RUN for the baseline.
+did not start (e2e/run.sh wrote aborted.txt), the verdict is FAIL for the
+candidate and NOT RUN for the baseline.
 
 Allowlist lines: '<kind> <regex>  # reason', kind one of
   obs        <component>:<id>
@@ -134,46 +134,6 @@ def log_errors(allow, baseline, candidate):
     return out
 
 
-def daemon_states(path):
-    states = {}
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                if line.strip():
-                    name, _, state = line.strip().partition(" ")
-                    states[name] = state
-    return states
-
-
-def not_started(a, allow, aborted):
-    """A side whose cluster did not start far enough to run the scenarios."""
-    if "baseline" in aborted:
-        return not_run(a, "the baseline's cluster did not start: " + aborted["baseline"])
-    b = daemon_states(os.path.join(a.baseline, "daemons.txt"))
-    c = daemon_states(os.path.join(a.candidate, "daemons.txt"))
-    errors = log_errors(allow, a.baseline, a.candidate)
-    result = {"verdict": "FAIL", "arch": a.arch,
-              "reason": "the candidate's cluster did not start: " + aborted["candidate"],
-              "daemons": {d: {"baseline": b.get(d), "candidate": c.get(d)}
-                          for d in sorted(set(b) | set(c))},
-              "new_log_errors": errors}
-    with open(os.path.join(a.out, f"e2e-compare-{a.arch}.json"), "w", encoding="utf-8") as f:
-        json.dump(result, f, indent=1)
-    with open(os.path.join(a.out, f"e2e-compare-{a.arch}.md"), "w", encoding="utf-8") as f:
-        f.write(f"## End-to-end: {a.arch} architecture\n\nVerdict: **FAIL**: {result['reason']}. "
-                "The scenarios were not run on the candidate.\n\n"
-                "| Daemon | Baseline | Candidate |\n|---|---|---|\n")
-        for d, st in result["daemons"].items():
-            mark = "" if st["baseline"] == st["candidate"] else " **(differs)**"
-            f.write(f"| {d} | {st['baseline'] or 'not started'} "
-                    f"| {st['candidate'] or 'not started'}{mark} |\n")
-        f.write(f"\n### Log errors new or much more frequent on the candidate: {len(errors)}\n\n")
-        for e in errors:
-            f.write(f"- {e['source']}: `{e['message']}` x{e['count']} (baseline x{e['baseline_count']})\n")
-    print(f"e2e comparison ({a.arch}): FAIL: {result['reason']}")
-    return 1
-
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expected", required=True)
@@ -192,8 +152,11 @@ def main():
         if os.path.exists(os.path.join(d, "aborted.txt")):
             with open(os.path.join(d, "aborted.txt"), encoding="utf-8") as f:
                 aborted[side] = f.read().strip()
+    if "baseline" in aborted:
+        return not_run(a, "the baseline's daemons did not all start: " + aborted["baseline"])
     if aborted:
-        return not_started(a, allow, aborted)
+        return not_run(a, "the candidate's daemons did not all start: " + aborted["candidate"],
+                       verdict="FAIL")
     absent = [side for side, p in paths.items() if not os.path.exists(p)]
     if absent:
         return not_run(a, f"no observations from the {' and '.join(absent)} run "
@@ -275,14 +238,14 @@ def main():
     return 0 if verdict == "PASS" else 1
 
 
-def not_run(a, reason):
+def not_run(a, reason, verdict="NOT RUN"):
     """An architecture that cannot be compared is reported, never skipped."""
-    result = {"verdict": "NOT RUN", "arch": a.arch, "reason": reason}
+    result = {"verdict": verdict, "arch": a.arch, "reason": reason}
     with open(os.path.join(a.out, f"e2e-compare-{a.arch}.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
     with open(os.path.join(a.out, f"e2e-compare-{a.arch}.md"), "w", encoding="utf-8") as f:
-        f.write(f"## End-to-end: {a.arch} architecture\n\nVerdict: **NOT RUN**: {reason}.\n\n")
-    print(f"e2e comparison ({a.arch}): NOT RUN: {reason}")
+        f.write(f"## End-to-end: {a.arch} architecture\n\nVerdict: **{verdict}**: {reason}.\n\n")
+    print(f"e2e comparison ({a.arch}): {verdict}: {reason}")
     return 1
 
 

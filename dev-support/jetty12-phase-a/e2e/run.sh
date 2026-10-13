@@ -49,17 +49,15 @@ for ARCH in ${ARCHS//,/ }; do
     "${CLUSTER}" "${SIDE}" "${ARCH}" start
     mkdir -p "${RES}/scenarios"
     : > "${OBS}"
-    # Every scenario needs the default file system. Without it each client
-    # command waits out its retries, and a cluster that did not start takes
-    # hours to go through the scenarios for nothing; check it once and skip
-    # them. The comparison then reports the side as not started (FAIL for the
-    # candidate, NOT RUN for the baseline), never as passing. The logs and the
-    # class loading of what did start are still collected.
+    # With a daemon down, client commands wait out their retries (15 minutes
+    # per YARN command) and the scenarios take hours for nothing: skip them.
+    # The comparison reports the side as not started (FAIL for the candidate,
+    # NOT RUN for the baseline). Logs and class loading are still collected.
     scenarios=("${E2E_DIR}"/scenarios/*.sh)
-    if ! timeout "${E2E_FS_CHECK_TIMEOUT:-120}" hadoop fs -ls / > "${RES}/fs-check.log" 2>&1; then
-      log "the default file system is not usable; skipping the scenarios (see ${RES}/fs-check.log)"
-      echo "default file system not usable after start: $(grep -m1 -E 'Exception|refused|failed' "${RES}/fs-check.log" | cut -c1-200)" \
-        > "${RES}/aborted.txt"
+    failed=$(grep -v ' up$' "${RES}/daemons.txt" | tr '\n' ' ' || true)
+    if [[ -n "${failed}" ]]; then
+      log "not all daemons are up (${failed}); skipping the scenarios"
+      echo "${failed}" > "${RES}/aborted.txt"
       scenarios=()
     fi
     for scenario in "${scenarios[@]}"; do
