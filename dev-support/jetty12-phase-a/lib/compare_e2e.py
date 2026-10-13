@@ -156,7 +156,7 @@ def main():
         return not_run(a, "the baseline's daemons did not all start: " + aborted["baseline"])
     if aborted:
         return not_run(a, "the candidate's daemons did not all start: " + aborted["candidate"],
-                       verdict="FAIL")
+                       verdict="FAIL", errors=log_errors(allow, a.baseline, a.candidate))
     absent = [side for side, p in paths.items() if not os.path.exists(p)]
     if absent:
         return not_run(a, f"no observations from the {' and '.join(absent)} run "
@@ -238,13 +238,19 @@ def main():
     return 0 if verdict == "PASS" else 1
 
 
-def not_run(a, reason, verdict="NOT RUN"):
-    """An architecture that cannot be compared is reported, never skipped."""
-    result = {"verdict": verdict, "arch": a.arch, "reason": reason}
+def not_run(a, reason, verdict="NOT RUN", errors=None):
+    """An architecture that cannot be compared is reported, never skipped.
+    errors: log errors new on the candidate, which usually say why it failed."""
+    result = {"verdict": verdict, "arch": a.arch, "reason": reason, "new_log_errors": errors or []}
     with open(os.path.join(a.out, f"e2e-compare-{a.arch}.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
     with open(os.path.join(a.out, f"e2e-compare-{a.arch}.md"), "w", encoding="utf-8") as f:
         f.write(f"## End-to-end: {a.arch} architecture\n\nVerdict: **{verdict}**: {reason}.\n\n")
+        if errors:
+            f.write(f"Log errors new or much more frequent on the candidate ({len(errors)}):\n\n")
+            for e in errors:
+                f.write(f"- {e['source']}: `{e['message']}` x{e['count']} (baseline x{e['baseline_count']})\n")
+            f.write("\n")
     print(f"e2e comparison ({a.arch}): {verdict}: {reason}")
     return 1
 
