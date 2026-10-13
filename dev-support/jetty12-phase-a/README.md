@@ -134,6 +134,17 @@ These are not caused by phase A; the harness records them, and they show as
   read and the scheduler class is null (NPE in `RMRunner.startRM`). The
   harness puts the scheduler and RM ports in `sls-runner.xml` to still
   exercise SLS.
+- MapReduce jobs fail on a cluster with service-level authorization
+  (`hadoop.security.authorization=true`, the `secure` architecture): the
+  MR application master rejects its own tasks with "Protocol interface
+  org.apache.hadoop.mapred.TaskUmbilicalProtocol is not known".
+  `TaskUmbilicalProtocolPB` declares the protocol name
+  `org.apache.hadoop.mapred.TaskUmbilicalProtocol`, so the RPC server
+  authorizes calls against that interface, but `MRAMPolicyProvider`
+  registers the ACL under `TaskUmbilicalProtocolPB`. (HDFS does it the other
+  way: `HDFSPolicyProvider` lists `ClientProtocol` for
+  `ClientNamenodeProtocolPB`.) The MapReduce observations of `secure` fail
+  on both sides until it is fixed.
 
 ## Running it
 
