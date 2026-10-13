@@ -161,7 +161,8 @@ if daemon_up timelineserver; then
     "startTime":1700000000000,"events":[{"timestamp":1700000000001,"eventType":"START",
     "eventInfo":{"k":"v"}}],"primaryFilters":{"probe":["jetty12"]},
     "otherInfo":{"answer":42,"nested":{"a":[1,2]}},
-    "relatedEntities":{"OTHER":["other_1"]}}]}' --expect-regex '"errors":\[\]'
+    "relatedEntities":{"OTHER":["other_1"]}}]}' --expect-regex '"errors":\[\]' \
+    --out "${RES}/timeline-put-entity.json"
   http get-entity "${T}/JETTY12_PHASE_A/entity_1" --expect-regex '"entityId":"entity_1"'
   http get-entities "${T}/JETTY12_PHASE_A?primaryFilter=probe:jetty12" \
     --expect-regex '"entity_1"'

@@ -21,6 +21,8 @@
 # history server.
 
 ARCH_SCENARIOS='^(00|10|20|30|40|50|60)-'
+# The YARN service registry (and so service destroy) needs ZooKeeper.
+ARCH_SERVICES=(zookeeper)
 C="${HADOOP_CONF_DIR}"
 INSTANCES=(
   "namenode hdfs namenode HDFS_NAMENODE ${NN_URL}/jmx ${C}"
@@ -51,7 +53,8 @@ arch_conf() {
   local d="${DATA}"
   base_core "fs.defaultFS=${FS}" \
     "hadoop.security.key.provider.path=${KMS_PROVIDER}" \
-    "nfs.exports.allowed.hosts=* rw"
+    "nfs.exports.allowed.hosts=* rw" \
+    "hadoop.registry.zk.quorum=${HOST}:${P_ZK}"
   base_hdfs \
     "dfs.namenode.name.dir=${d}/nn" \
     "dfs.namenode.checkpoint.dir=${d}/snn" \

@@ -62,11 +62,11 @@ cli folder --expect-rc 0,1 -- hadoop rumenfolder \
 if [[ "${E2E_GRIDMIX:-true}" == true && -s "${LOCAL}/trace.json" ]]; then
   COMPONENT=tools-gridmix
   # Gridmix wants an input directory even for sleep jobs: -generate a small one.
-  cli sleep-jobs --merge-stderr -- timeout 900 hadoop gridmix -generate 10m \
+  cli sleep-jobs --merge-stderr -- timeout 900 hadoop gridmix \
     -Dgridmix.job.type=SLEEPJOB -Dgridmix.job-submission.policy=SERIAL \
     -Dgridmix.sleep.max-map-time=200 -Dgridmix.sleep.max-reduce-time=200 \
     -Dgridmix.output.directory="${D}/gridmix-out" \
-    "${D}/gridmix" "file://${LOCAL}/trace.json"
+    -generate 10m "${D}/gridmix" "file://${LOCAL}/trace.json"
 fi
 
 # Scheduler load simulator: an in-process RM driven by a trace, with its own
