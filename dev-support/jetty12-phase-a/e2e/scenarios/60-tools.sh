@@ -61,7 +61,8 @@ cli folder --expect-rc 0,1 -- hadoop rumenfolder \
 
 if [[ "${E2E_GRIDMIX:-true}" == true && -s "${LOCAL}/trace.json" ]]; then
   COMPONENT=tools-gridmix
-  cli sleep-jobs --merge-stderr -- timeout 900 hadoop gridmix \
+  # Gridmix wants an input directory even for sleep jobs: -generate a small one.
+  cli sleep-jobs --merge-stderr -- timeout 900 hadoop gridmix -generate 10m \
     -Dgridmix.job.type=SLEEPJOB -Dgridmix.job-submission.policy=SERIAL \
     -Dgridmix.sleep.max-map-time=200 -Dgridmix.sleep.max-reduce-time=200 \
     -Dgridmix.output.directory="${D}/gridmix-out" \
@@ -101,7 +102,7 @@ if wait_http "http://${HOST}:${P_SLS_HTTP}/simulate" 180; then
   http realtime-track "http://${HOST}:${P_SLS_HTTP}/simulateMetrics" --expect-status any
   http static-js "http://${HOST}:${P_SLS_HTTP}/js/showchart.js" --expect-status any --shape sha256
   http not-found "http://${HOST}:${P_SLS_HTTP}/no/such/page" --expect-status any
-  http rm-webapp "http://${HOST}:18088/ws/v1/cluster/info" --expect-status 200
+  http rm-webapp "http://${HOST}:18088/ws/v1/cluster/info?user.name=${USER_NAME}" --expect-status 200
 else
   check web-up false "SLS web UI did not come up; see sls.log"
 fi
