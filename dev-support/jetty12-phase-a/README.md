@@ -155,6 +155,15 @@ These are not caused by phase A; the harness records them, and they show as
   exceptions in a plain `YarnException` ("invokeConcurrent Failed"), so the
   client gives up. `federated` also submits through the router's REST API,
   which works.
+- The YARN router's REST API cannot forward requests whose answer has a
+  body to read, e.g. `POST /ws/v1/cluster/apps/new-application` answers 503
+  "No active SubCluster available" after "MessageBodyReader not found for
+  media type=application/json ... NewApplication":
+  `RouterWebServiceUtil.invokeRMWebService` ignores the client it is given
+  and builds a bare `ClientBuilder.newClient()` with no JSON provider
+  registered. Seen on the candidate; phase A changes no JSON provider jar
+  on the router's classpath, and the baseline run in CI shows whether it
+  fails there too.
 - HADOOP-20018: when the ZKFC cannot bind its RPC port, it exits with a
   NullPointerException (`this.rpcServer` is null in
   `ZKFailoverController`) that hides the BindException behind it. Each ZKFC

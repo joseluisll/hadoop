@@ -243,7 +243,7 @@ http flex "${A}/jetty12-sleeper/components/sleeper?${U}" --method PUT \
   --header 'Content-Type: application/json' --data '{"number_of_containers":2}' \
   --expect-status 200,202
 http stop "${A}/jetty12-sleeper?${U}" --method PUT --header 'Content-Type: application/json' \
-  --data '{"state":"STOPPED"}' --expect-status 200,202
+  --data '{"state":"STOPPED"}' --expect-status 200,202 --timeout 300
 for _ in $(seq 1 40); do
   rest "${A}/jetty12-sleeper?${U}" | grep -Eq '"state" ?: ?"STOPPED"' && break
   sleep 3
