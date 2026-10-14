@@ -26,11 +26,8 @@
 # which provides the same javax.annotation classes, was already resolved.
 downstream-dep-removed [^|]+\|javax\.annotation:javax\.annotation-api:jar:1\.3\.2:(compile|runtime|test)  # HADOOP-20013: duplicate javax.annotation jar dropped
 
-# HADOOP-20016: hadoop-common and the shuffle handler declare jetty-http
-# directly, so a project that depends on them gets it one level nearer than
-# through jetty-server. Next to another jetty-http at that level (the older
-# Jetty client of the older-jetty scenario), Maven now takes the one declared
-# first, Hadoop's, instead of the nearer one. Either way that project mixes
-# Jetty versions (jetty-io still comes from the client); only which jar wins
-# changes.
-downstream-dep-changed older-jetty/(hadoop-common|hadoop-mapreduce-client-shuffle)\|org\.eclipse\.jetty:jetty-http:jar:[^:]+:compile -> [^:]+:compile  # HADOOP-20016: jetty-http nearer to downstream projects
+# HADOOP-20016 declares jetty-http in hadoop-common, the shuffle handler and
+# HttpFS as optional, so it is not passed on: projects that depend on them get
+# it through jetty-server as before, and Maven's mediation does not change
+# (with compile scope it did: next to an older jetty-client, jetty-http went
+# from the client's version to Hadoop's). No rule, so any change fails.

@@ -24,7 +24,7 @@ dependencies:
 | HADOOP-20013 | duplicate `javax.annotation-api` 1.3.2 removed; `jakarta.annotation-api` 1.3.5 provides the same `javax.annotation` classes | runtime classpath of every daemon, LICENSE/NOTICE |
 | HADOOP-20014 | Jersey test container moves from Jetty to the JDK HTTP server; `hadoop-client-minicluster` shades it, declares `jetty-util` and excludes `com.sun.net.httpserver` (neither changes the jar) | test classpath, shaded minicluster jar |
 | HADOOP-20015 | `jetty-webapp`/`jetty-servlet` declared in YARN common, RM, AHS, router | runtime classpath of YARN daemons |
-| HADOOP-20016 | `jetty-http` declared in hadoop-common, HttpFS, shuffle, SLS | runtime classpath |
+| HADOOP-20016 | `jetty-http` declared in hadoop-common, HttpFS, shuffle (optional, so not passed on to dependents), SLS (provided) | runtime classpath |
 
 This harness builds the tree without the patch (**baseline**, default
 `origin/PREPARATION`) and with it (**candidate**, default
