@@ -51,6 +51,12 @@
 # actions cache, can be read across branches, and every run has its own
 # branch; they expire after 7 days. The build jobs reuse the packed
 # distribution, the unit jobs the installed Maven artifacts.
+#
+# The distributions are built with the native libraries (BUILD_NATIVE) in
+# Hadoop's build image, the one apache/hadoop's "Image Cache" workflow
+# publishes from dev-support/docker and tmpl_build_and_test.yml uses: it has
+# the native toolchain. The other jobs run on the plain runner (Ubuntu 24.04,
+# as the image), which runs the native libraries.
 
 name: "Jetty 12 phase A harness (template)"
 
@@ -160,6 +166,11 @@ jobs:
     permissions:
       actions: read
       contents: read
+    container:
+      image: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
+    env:
+      BUILD_NATIVE: "true"
+      BUILD_IMAGE: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
     strategy:
       fail-fast: false
       matrix:
@@ -168,10 +179,15 @@ jobs:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
+      # Inside the container the host's preinstalled toolchains are out of reach.
       - uses: ./.github/actions/jetty12-phase-a-setup
         with:
           baseline: ${{ env.BASELINE }}
           candidate: ${{ env.CANDIDATE }}
+          free-disk: "false"
+      - name: Disk space
+        shell: bash
+        run: df -h / "${GITHUB_WORKSPACE}" | sed 1d
       - name: Look for a saved build of the same code
         id: saved
         shell: bash

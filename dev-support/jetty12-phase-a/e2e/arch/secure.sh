@@ -95,8 +95,9 @@ arch_conf() {
     "dfs.cluster.administrators=${USER_NAME}"
   # Log aggregation under Kerberos opens files with SecureIOUtils, which needs
   # the native libhadoop; without it the node manager exits ("Secure IO is
-  # not possible without native code extensions"). The distributions here
-  # are built without -Pnative.
+  # not possible without native code extensions"). CI builds the
+  # distributions with -Pnative, but a local build.sh does not by default
+  # (BUILD_NATIVE), so it stays off and both kinds of runs compare the same.
   # The node manager logs in as nm/<canonical local hostname> when its
   # principal has _HOST (SecurityUtil.login without a bind address); on CI
   # runners that is an FQDN the keytab has no entry for, so name the host.

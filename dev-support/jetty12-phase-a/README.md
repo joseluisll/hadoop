@@ -121,8 +121,9 @@ namenodes, three journalnodes, two resource managers or two routers.
 - **NFS mounts**: mounting needs a kernel NFS client; the gateway's RPC
   services are checked instead.
 - **Log aggregation under Kerberos**: it needs the native `libhadoop`
-  (SecureIOUtils), and the distributions are built without `-Pnative`, so
-  `secure` turns it off; the other architectures aggregate logs.
+  (SecureIOUtils). CI builds the distributions with it, but local builds do
+  not by default, so `secure` keeps it off everywhere; the other
+  architectures aggregate logs.
 - **MapReduce on YARN federation**: with both sub-clusters on one host, the
   AMRMProxy address a job needs is ambiguous; YARN federation is exercised
   with distributed shell, which finds its home RM through the node manager.
@@ -284,6 +285,12 @@ the wait is split over two jobs ("Wait for earlier harness runs" and its
 "Re-run failed jobs" skips the waiting job, which already succeeded, so such
 a re-run can overlap another run; push a new run branch instead.
 
+In CI the distributions are built **with the native libraries**, inside
+Hadoop's build image (`ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static`,
+published by apache/hadoop from `dev-support/docker`, as
+`tmpl_build_and_test.yml` uses); the end-to-end and unit jobs run on the
+plain Ubuntu 24.04 runner.
+
 Builds are **reused between runs**: most runs change only the harness, and
 the baseline is the same commit every time. Each fresh build is also saved
 as an artifact named after its key (`ci/build-key.sh`: the side's code
@@ -332,6 +339,7 @@ to hours (`changed` full).
 | `BASELINE_REF` / `CANDIDATE_REF` | `origin/PREPARATION` / `origin/HADOOP-99999` | the two trees |
 | `MAVEN_MIRROR_URL` | none | mirror of Maven Central, e.g. `https://maven-central.storage-download.googleapis.com/maven2` when the build host is rate-limited |
 | `MVN_EXTRA_ARGS` | none | added to every Maven call |
+| `BUILD_NATIVE` | `false` | build the distribution with the native libraries (`-Pnative`, OpenSSL and Snappy required); needs the toolchain of `start-build-env.sh`, which CI uses |
 | `M2_REPO` | `$WORKDIR/m2` | Maven repository; both sides share downloads but install into separate prefixes |
 | `UNIT_RERUNS` | 1 | re-runs of a failing test before it counts as failed |
 | `E2E_NFS` | `auto` | start the NFS gateway in `simple` (`auto` = when running as root) |

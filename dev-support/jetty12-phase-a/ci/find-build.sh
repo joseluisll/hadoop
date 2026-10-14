@@ -30,7 +30,13 @@ repo=$1
 name=$2
 auth=()
 [[ -n "${GH_TOKEN:-}" ]] && auth=(-H "Authorization: Bearer ${GH_TOKEN}")
+# python3 rather than jq: the build job runs in Hadoop's build image, which
+# has no jq.
 curl -fsS --max-time 30 --retry 3 "${auth[@]}" -H "Accept: application/vnd.github+json" \
   "${GITHUB_API_URL:-https://api.github.com}/repos/${repo}/actions/artifacts?name=${name}&per_page=10" \
-  | jq -r '[.artifacts[] | select(.expired | not)] | sort_by(.created_at) | last | .workflow_run.id // empty' \
-  || true
+  | python3 -I -c '
+import json, sys
+live = [a for a in json.load(sys.stdin)["artifacts"] if not a["expired"]]
+if live:
+    print(max(live, key=lambda a: a["created_at"])["workflow_run"]["id"])
+' 2>/dev/null || true

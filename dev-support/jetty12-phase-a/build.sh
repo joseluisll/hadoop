@@ -22,6 +22,11 @@
 #   install  only "mvn install" without tests, enough for unit-tests.sh
 #   worktree only the checkout, when CI restored the side's installed
 #            artifacts from its cache (ci/build-key.sh)
+#
+# BUILD_NATIVE=true adds the native libraries to the distribution (-Pnative,
+# failing when OpenSSL or Snappy support cannot be built). It needs the
+# native toolchain of Hadoop's build image (dev-support/docker), which the CI
+# build jobs run in.
 
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
@@ -61,8 +66,10 @@ if [[ "${MODE}" == install ]]; then
   exit 0
 fi
 
-log "mvn install -Pdist (no tests); log: ${OUT}/mvn-install.log"
-mvn_logged "${SIDE}" "${OUT}/mvn-install.log" install -Pdist -Dtar -DskipTests -Dmaven.javadoc.skip=true \
+native=()
+[[ "${BUILD_NATIVE:-false}" == true ]] && native=(-Pnative -Drequire.openssl -Drequire.snappy)
+log "mvn install -Pdist ${native[*]} (no tests); log: ${OUT}/mvn-install.log"
+mvn_logged "${SIDE}" "${OUT}/mvn-install.log" install -Pdist "${native[@]}" -Dtar -DskipTests -Dmaven.javadoc.skip=true \
   || die "build failed; see ${OUT}/mvn-install.log"
 
 # Resolved dependencies of every module, all scopes.
