@@ -289,7 +289,11 @@ In CI the distributions are built **with the native libraries**, inside
 Hadoop's build image (`ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static`,
 published by apache/hadoop from `dev-support/docker`, as
 `tmpl_build_and_test.yml` uses); the end-to-end and unit jobs run on the
-plain Ubuntu 24.04 runner.
+plain Ubuntu 24.04 runner. Both sides are built at the same path
+(`BUILD_SRC_DIR`), because the native libraries embed their source paths:
+built at the two worktree paths, identical code gives 17 differing native
+files. A local native build (both sides in one `WORKDIR`) shows those
+differences; set `BUILD_SRC_DIR` and build one side at a time to avoid them.
 
 Builds are **reused between runs**: most runs change only the harness, and
 the baseline is the same commit every time. Each fresh build is also saved
@@ -340,6 +344,7 @@ to hours (`changed` full).
 | `MAVEN_MIRROR_URL` | none | mirror of Maven Central, e.g. `https://maven-central.storage-download.googleapis.com/maven2` when the build host is rate-limited |
 | `MVN_EXTRA_ARGS` | none | added to every Maven call |
 | `BUILD_NATIVE` | `false` | build the distribution with the native libraries (`-Pnative`, OpenSSL and Snappy required); needs the toolchain of `start-build-env.sh`, which CI uses |
+| `BUILD_SRC_DIR` | `$WORKDIR/<side>/src` | worktree to build in, for either side; a CI build job builds one side and sets it so both sides' native libraries are built at the same path |
 | `M2_REPO` | `$WORKDIR/m2` | Maven repository; both sides share downloads but install into separate prefixes |
 | `UNIT_RERUNS` | 1 | re-runs of a failing test before it counts as failed |
 | `E2E_NFS` | `auto` | start the NFS gateway in `simple` (`auto` = when running as root) |

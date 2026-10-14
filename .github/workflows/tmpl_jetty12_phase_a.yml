@@ -171,6 +171,9 @@ jobs:
     env:
       BUILD_NATIVE: "true"
       BUILD_IMAGE: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
+      # Both sides at the same path: the native libraries embed their source
+      # paths (aa-3: 17 native files differed between two builds of one commit).
+      BUILD_SRC_DIR: /home/runner/jetty12-work/src
     strategy:
       fail-fast: false
       matrix:

@@ -46,9 +46,12 @@ side_dir() {
   echo "${WORKDIR}/$1"
 }
 
-# src_dir <side>: the git worktree of that side.
+# src_dir <side>: the git worktree of that side. BUILD_SRC_DIR replaces it
+# where only one side is built (a CI build job): the native libraries embed
+# their source paths, so both sides must be built at the same path to come
+# out identical.
 src_dir() {
-  echo "${WORKDIR}/$1/src"
+  echo "${BUILD_SRC_DIR:-${WORKDIR}/$1/src}"
 }
 
 # dist_dir <side>: the unpacked hadoop-<version> distribution of that side,

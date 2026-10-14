@@ -22,8 +22,9 @@
 #   - every file of the side's tree except the harness and .github, by blob id;
 #   - the harness files that shape what the build produces;
 #   - the JDK;
-#   - for a distribution, whether it has the native libraries and the image
-#     that built them (BUILD_NATIVE, BUILD_IMAGE).
+#   - for a distribution, whether it has the native libraries, the image that
+#     built them and the path they were built at, which they embed
+#     (BUILD_NATIVE, BUILD_IMAGE, BUILD_SRC_DIR).
 # Anything else that changes the build output must be added here, or a run
 # would test a stale build.
 
@@ -43,6 +44,6 @@ tree=$(git -C "${REPO_DIR}" ls-tree -r "${ref}" \
   | grep -vE $'\t(dev-support/jetty12-phase-a/|\\.github/)' | sha256sum | cut -c1-16)
 harness=$(cd "${HARNESS_DIR}" && cat "${shaping[@]}" | sha256sum | cut -c1-8)
 env_part="$(java -version 2>&1 | head -1)"
-[[ "${kind}" == dist ]] && env_part+=" native=${BUILD_NATIVE:-false} image=${BUILD_IMAGE:-none}"
+[[ "${kind}" == dist ]] && env_part+=" native=${BUILD_NATIVE:-false} image=${BUILD_IMAGE:-none} src=${BUILD_SRC_DIR:-}"
 env_hash=$(sha256sum <<< "${env_part}" | cut -c1-6)
 echo "jetty12-phase-a-${kind}-${side}-${tree}-${harness}-${env_hash}"
