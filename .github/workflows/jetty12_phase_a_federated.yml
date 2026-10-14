@@ -40,11 +40,6 @@ on:
       candidate_ref:
         description: "Candidate branch, tag or commit (with the patch)"
         default: "HADOOP-99999"
-      unit_tier:
-        description: "Unit tests: quick, or full (every test of each module, in shards)"
-        type: choice
-        options: [quick, full]
-        default: quick
       maven_mirror:
         description: "Maven Central mirror URL, if repo.maven.apache.org rate-limits"
         default: ""
