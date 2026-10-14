@@ -53,6 +53,11 @@ runs:
         BASELINE: ${{ inputs.baseline }}
         CANDIDATE: ${{ inputs.candidate }}
       run: |
+        # In a container job (the build jobs run in Hadoop's build image as
+        # root) the checkout belongs to the runner's user, and git refuses to
+        # work in it ("dubious ownership"); actions/checkout allows it only
+        # for its own steps. The container is thrown away after the job.
+        git config --global --add safe.directory '*'
         resolve() {
           git rev-parse --verify -q "origin/$1^{commit}" || git rev-parse --verify -q "$1^{commit}" || echo "$1"
         }
