@@ -57,6 +57,16 @@ JIRA that causes them, in two allowlists; anything else fails the run.
    federation and mixed-topology tests, on both trees, compared test by
    test; plus the shaded client invariant checks and
    `hadoop-client-integration-tests`.
+4. **What downstream projects resolve** (`downstream-deps.sh`): one small
+   Maven project per published Hadoop artifact (hadoop-common, the HDFS,
+   MapReduce and YARN clients, hadoop-client, the shaded clients, the
+   miniclusters), resolved against each side's installed artifacts, alone
+   and next to an older Jetty client. Check 1 compares Hadoop's own modules;
+   this one shows what Maven's nearest-wins mediation picks in a project that
+   depends on Hadoop, which a dependency declared directly in a Hadoop pom
+   can change. Allowlist: `expected-downstream-differences.txt`. It runs
+   with the `client` unit suite (the `simple` workflow) and in `run-all.sh`;
+   the report has the section only when it ran.
 
 ## Architectures
 
@@ -100,7 +110,7 @@ namenodes, three journalnodes, two resource managers or two routers.
 
 | Suite | Tests |
 |---|---|
-| `changed` | the modules phase A changes (web and Jersey tests in `quick`, everything in `full`), plus the HTTP tests of KMS, HDFS, RBF, timeline service and MR jobs |
+| `changed` | the modules phase A changes (web and Jersey tests in `quick`, everything in `full`), plus the HTTP tests of KMS, HDFS, RBF, timeline service and MR jobs (the listed tests in both tiers); `changed-1` to `changed-4` split it for CI |
 | `secure` | `TestHttpServerWithSpnego`, `TestSSLHttpServer*`, `TestKDiag*`, `TestSecureNameNode`, `TestSaslDataTransfer`, `TestWebHdfsTokens`, `TestBlockTokenWithDFS*`, `TestKMS`, `TestHttpFSWithKerberos`, `TestRouterWithSecureStartup`, `TestRouterHttpDelegationToken`, `TestRouterSecurityManager`, `TestRMWebappAuthentication`, `TestRMWebServicesDelegationTokenAuthentication`, `TestTimelineAuthenticationFilterForV1`, `TestSecureLogins`, `TestJHSSecurity` |
 | `ha` | `TestZKFailoverController`, `TestNodeFencer`, `TestWebHDFSForHA`, `TestFailoverWithBlockTokensEnabled`, `TestHAStateTransitions`, `TestDFSZKFailoverController`, `TestStandbyCheckpoints`, `TestDelegationTokensWithHA`, `TestQuorumJournalManager`, `TestRMFailover`, `TestApplicationClientProtocolOnHA`, `TestResourceTrackerOnHA`, `TestRMHA`, `TestRMEmbeddedElector` |
 | `federated` | `TestViewFileSystemHdfs`, `TestViewFsHdfs`, `TestRefreshNamenodes`, `TestWebHdfsWithMultipleNameNodes`, `TestMultipleNNPortQOP`, `TestRouterRpc`, `TestRouterAdminCLI`, `TestRouterMountTable`, `TestRouterWebHdfsMethods`, `TestRouterWebHDFSContract*`, `TestFederationClientInterceptor`, `TestFederationInterceptorREST`, `TestRouterWebServicesREST`, `TestGlobalPolicyGenerator`, `TestFederationInterceptor`, `TestZookeeperFederationStateStore` |
@@ -110,8 +120,10 @@ namenodes, three journalnodes, two resource managers or two routers.
 ## Not exercised end to end, and why
 
 - **Timeline service v2 with HBase storage**: needs an HBase cluster. The
-  reader runs with file system storage; the HBase modules' tests run in the
-  `changed` suite's `full` tier.
+  reader runs with file system storage end to end; the `changed` suite runs
+  `hadoop-yarn-server-timelineservice-hbase-tests`, whose tests start an
+  HBase minicluster: in `quick` the reader's web services on HBase storage
+  (`TestTimelineReaderWebServicesHBaseStorage`), in `full` all of them.
 - **YARN registry DNS**: needs a registry in ZooKeeper and has no web
   server; phase A does not touch it.
 - **Cloud connectors**: need cloud credentials; only class loading is
@@ -266,6 +278,11 @@ branch (or tag) name:
   (`ci/break_candidate.py`). The verdict must be FAIL; if it is not, the
   harness misses that kind of breakage.
 
+A third name runs longer, not differently: `jetty12-phase-a-simple-run-full-<n>`
+runs the `changed` suite in tier `full`, every test of the modules phase A
+changes, split into four jobs per side (`changed-1` to `changed-4`) because
+the resource manager's tests alone take hours and a job stops after 6.
+
 | Case | Change to the candidate | Kind of breakage |
 |---|---|---|
 | `annotation` (also `run-broken-<n>`) | delete `jakarta.annotation-api`, the only `javax.annotation` jar after HADOOP-20013 | a dependency the patch relies on goes missing |
@@ -368,11 +385,12 @@ with itself, which must report no differences.
 `$WORKDIR/results/compare/report.md` has one section per check and
 architecture and an overall verdict. Supporting data sits next to it
 (`artifact-diff.json`, `e2e-compare-<arch>.json`,
-`classload-compare-<arch>.json`, `unit-compare.json`) and under
+`classload-compare-<arch>.json`, `unit-compare.json`,
+`downstream-compare.json`) and under
 `results/<side>/` (raw observations, CLI output, daemon start-up, scenario
 logs, surefire reports).
 
-- **UNEXPECTED** artifact differences, **DIFF**/**REGRESSION**/**MISSING**
+- **UNEXPECTED** artifact or downstream differences, **DIFF**/**REGRESSION**/**MISSING**
   observations, classes loaded from an unexpected jar, log errors that are
   new on the candidate or much more frequent there (more than twice the
   baseline's count and at least 6 more), an observation id recorded twice,
@@ -392,6 +410,7 @@ logs, surefire reports).
 - "Allowlist rules that matched nothing" means a change the patch should
   have made did not show up; check why.
 
-When the patch changes, update `expected-differences.txt` and
+When the patch changes, update `expected-differences.txt`,
+`expected-downstream-differences.txt` and
 `e2e/expected-e2e-differences.txt`, naming the JIRA for each rule, and keep
 the patterns narrow.

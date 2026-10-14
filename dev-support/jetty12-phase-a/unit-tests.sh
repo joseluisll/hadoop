@@ -38,6 +38,9 @@
 #              hadoop-client-integration-tests (the minicluster jar used
 #              from a downstream point of view).
 #   all        every suite above.
+#   changed-<n> the n-th of the CHANGED_SHARDS below (1-4): the "changed"
+#              suite split so that "full", which runs for hours, fits CI
+#              jobs of 6 hours. Reports are named as for "changed".
 #
 # Each failing test is re-run once (surefire.rerunFailingTestsCount) so a
 # flaky test shows up as flaky, not failed. compare.sh lines up the two
@@ -76,14 +79,20 @@ SUITE_changed=(
   "${ROUTER}|org/apache/hadoop/yarn/server/router/webapp/**/Test*"
   "${YS}/hadoop-yarn-server-web-proxy|"
   "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp|"
+  # HADOOP-20012 and HADOOP-20014 change its test dependencies. Its tests
+  # start an HBase minicluster; "quick" runs the one that also starts the
+  # timeline reader's web server on HBase storage.
+  "${YS}/hadoop-yarn-server-timelineservice-hbase-tests|org/apache/hadoop/yarn/server/timelineservice/reader/TestTimelineReaderWebServicesHBaseStorage*"
   "hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-app|org/apache/hadoop/mapreduce/v2/app/webapp/**/Test*"
   "hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-hs|org/apache/hadoop/mapreduce/v2/hs/webapp/**/Test*"
   "hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-shuffle|"
   "hadoop-mapreduce-project/hadoop-mapreduce-examples|"
   "hadoop-tools/hadoop-resourceestimator|"
   "hadoop-tools/hadoop-sls|org/apache/hadoop/yarn/sls/web/**/Test*,org/apache/hadoop/yarn/sls/TestSLSRunner*"
-  # Not changed by phase A, but they run the servers whose classpath it
-  # changes.
+)
+# Part of "changed" too: not changed by phase A, but they run the servers
+# whose classpath it changes. Only the listed tests, in both tiers.
+SUITE_changed_servers=(
   "hadoop-common-project/hadoop-kms|org/apache/hadoop/crypto/key/kms/server/TestKMS.java"
   "${HDFS}|org/apache/hadoop/hdfs/web/TestWebHDFS.java,org/apache/hadoop/hdfs/server/namenode/TestNameNodeHttpServer*,org/apache/hadoop/hdfs/server/datanode/web/**/Test*,org/apache/hadoop/hdfs/server/namenode/TestStartupProgressServlet*"
   "${RBF}|org/apache/hadoop/hdfs/server/federation/router/TestRouterHttpServerXFrame*,org/apache/hadoop/hdfs/server/federation/router/web/**/Test*"
@@ -130,7 +139,7 @@ ALL_SUITES=(changed secure ha federated mixed client)
 [[ -d "$(src_dir "${SIDE}")" ]] || die "run build.sh ${SIDE} first"
 
 run_module() {
-  local suite=$1 module=$2 tests=$3
+  local suite=$1 module=$2 tests=$3 exact=${4:-false}
   local dest="${OUT}/${suite}__${module//\//__}"
   rm -rf "${dest}"
   mkdir -p "${dest}"
@@ -141,7 +150,7 @@ run_module() {
               -Dsurefire.rerunFailingTestsCount="${UNIT_RERUNS:-1}"
               -Dfailsafe.rerunFailingTestsCount="${UNIT_RERUNS:-1}"
               -Dmaven.javadoc.skip=true -Dspotbugs.skip=true -Dcheckstyle.skip=true)
-  if [[ -n "${tests}" && ( "${suite}" != changed || "${TIER}" == quick ) ]]; then
+  if [[ -n "${tests}" && ( "${suite}" != changed || "${TIER}" == quick || "${exact}" == true ) ]]; then
     args+=("-Dtest=${tests}" -Dsurefire.failIfNoSpecifiedTests=false)
   fi
   log "${suite}: ${module}${tests:+ ($(tr ',' '\n' <<< "${tests}" | wc -l) test patterns)}"
@@ -156,16 +165,45 @@ run_module() {
   log "${suite}: ${module}: maven exit ${rc}, $(ls "${dest}"/TEST-*.xml 2>/dev/null | wc -l) report files, $((SECONDS - start))s"
 }
 
+# Shards of the "changed" suite: a module goes to the first one whose regex
+# it matches, or to the last. The resource manager's tests alone take hours.
+CHANGED_SHARDS=(
+  "hadoop-yarn-server-resourcemanager"
+  "hadoop-yarn-server-(nodemanager|router|globalpolicygenerator|web-proxy|applicationhistoryservice)"
+  "hadoop-common-project|hadoop-hdfs-project|timelineservice"
+  ".*"
+)
+shard_of() {
+  local i
+  for i in "${!CHANGED_SHARDS[@]}"; do
+    [[ "$1" =~ ${CHANGED_SHARDS[$i]} ]] && { echo $((i + 1)); return; }
+  done
+}
+
 suites=("${SUITE}")
+shard=""
 [[ "${SUITE}" == all ]] && suites=("${ALL_SUITES[@]}")
+if [[ "${SUITE}" =~ ^changed-([0-9]+)$ ]]; then
+  shard=${BASH_REMATCH[1]}
+  (( shard >= 1 && shard <= ${#CHANGED_SHARDS[@]} )) || die "no shard ${shard}; there are ${#CHANGED_SHARDS[@]}"
+  suites=(changed)
+fi
 for suite in "${suites[@]}"; do
   [[ " ${ALL_SUITES[*]} " == *" ${suite} "* ]] || die "unknown suite ${suite}"
   declare -n entries="SUITE_${suite}"
   for entry in "${entries[@]}"; do
     module=${entry%%|*} tests=${entry#*|}
     [[ -z "${PATTERN}" || "${module}" =~ ${PATTERN} ]] || continue
+    [[ -z "${shard}" || "$(shard_of "${module}")" == "${shard}" ]] || continue
     run_module "${suite}" "${module}" "${tests}"
   done
   unset -n entries
+  [[ "${suite}" == changed ]] || continue
+  for entry in "${SUITE_changed_servers[@]}"; do
+    module=${entry%%|*} tests=${entry#*|}
+    [[ -z "${PATTERN}" || "${module}" =~ ${PATTERN} ]] || continue
+    [[ -z "${shard}" || "$(shard_of "${module}")" == "${shard}" ]] || continue
+    run_module "${suite}" "${module}" "${tests}" true
+  done
 done
 log "reports in ${OUT}"

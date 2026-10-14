@@ -28,6 +28,9 @@
 # which runs that commit as the candidate against PREPARATION:
 #   git tag jetty12-phase-a-simple-run-1 origin/HADOOP-99999
 #   git push origin jetty12-phase-a-simple-run-1
+# A branch named jetty12-phase-a-simple-run-full-<n> (or unit_tier "full")
+# runs the "changed" suite in tier full, in four shards that each fit a
+# 6-hour job.
 
 name: "Jetty 12 phase A: simple"
 
@@ -69,8 +72,8 @@ jobs:
     uses: ./.github/workflows/tmpl_jetty12_phase_a.yml
     with:
       arch: simple
-      unit_suites: '["changed","client"]'
+      unit_suites: ${{ (inputs.unit_tier == 'full' || contains(github.ref_name, '-run-full-')) && '["changed-1","changed-2","changed-3","changed-4","client"]' || '["changed","client"]' }}
       baseline_ref: ${{ inputs.baseline_ref || 'PREPARATION' }}
       candidate_ref: ${{ inputs.candidate_ref || github.sha }}
-      unit_tier: ${{ inputs.unit_tier || 'quick' }}
+      unit_tier: ${{ (inputs.unit_tier == 'full' || contains(github.ref_name, '-run-full-')) && 'full' || 'quick' }}
       maven_mirror: ${{ inputs.maven_mirror || '' }}

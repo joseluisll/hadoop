@@ -349,6 +349,12 @@ jobs:
       - name: Test ${{ matrix.suite }}
         shell: bash
         run: ${HARNESS}/unit-tests.sh ${{ matrix.side }} ${{ matrix.suite }} ${{ inputs.unit_tier }}
+      # The client suite is about what Hadoop gives its users; the downstream
+      # projects need the same installed artifacts.
+      - name: Downstream dependencies
+        if: matrix.suite == 'client'
+        shell: bash
+        run: ${HARNESS}/downstream-deps.sh ${{ matrix.side }}
       - name: Pack
         if: always()
         shell: bash

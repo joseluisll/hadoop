@@ -41,6 +41,9 @@ if [[ "${TIER}" != none ]]; then
     "${H}/unit-tests.sh" "${side}" all "${TIER}"
   done
 fi
+for side in baseline candidate; do
+  "${H}/downstream-deps.sh" "${side}" || log "downstream projects of ${side} did not resolve; the comparison will show it"
+done
 all_archs=(simple secure ha federated mixed)
 [[ "${ARCHS}" == all ]] && ARCHS=$(IFS=,; echo "${all_archs[*]}")
 "${H}/compare.sh" "${ARCHS}"

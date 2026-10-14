@@ -59,5 +59,8 @@ if [[ -d "${B}/unit" && -d "${C}/unit" ]]; then
 else
   log "skipping unit test comparison: both sides must have run unit-tests.sh"
 fi
+python3 -I "${HARNESS_DIR}/lib/compare_downstream.py" \
+  --expected "${HARNESS_DIR}/expected-downstream-differences.txt" --out "${OUT}" \
+  "${B}/downstream" "${C}/downstream" || true
 
 python3 -I "${HARNESS_DIR}/lib/report.py" "${WORKDIR}/results"

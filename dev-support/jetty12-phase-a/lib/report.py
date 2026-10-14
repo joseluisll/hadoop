@@ -75,6 +75,10 @@ def main(results):
     if not archs:
         parts.append(("End-to-end", "e2e-compare-none.json", "e2e-compare-none.md"))
     parts.append(("Unit and integration tests", "unit-compare.json", "unit-compare.md"))
+    # Only runs that resolve downstream projects (the client unit suite) have it.
+    if os.path.exists(os.path.join(cmp_dir, "downstream-compare.json")):
+        parts.append(("Downstream dependencies", "downstream-compare.json",
+                      "downstream-compare.md"))
     verdicts = [(name, verdict(os.path.join(cmp_dir, j))) for name, j, _ in parts]
     overall = "PASS" if all(v == "PASS" for _, v in verdicts) else \
         ("INCOMPLETE" if all(v in ("PASS", "NOT RUN") for _, v in verdicts) else "FAIL")

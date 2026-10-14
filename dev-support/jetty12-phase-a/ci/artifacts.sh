@@ -115,7 +115,9 @@ pack_e2e() {
 pack_unit() {
   local side=$1 dir=$2
   mkdir -p "${dir}"
-  tar -C "$(results_dir "${side}")" -czf "${dir}/unit-${side}.tar.gz" unit
+  local parts=(unit)
+  [[ -d "$(results_dir "${side}")/downstream" ]] && parts+=(downstream)
+  tar -C "$(results_dir "${side}")" -czf "${dir}/unit-${side}.tar.gz" "${parts[@]}"
 }
 
 unpack_results() {
