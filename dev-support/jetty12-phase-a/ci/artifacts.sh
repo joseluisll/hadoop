@@ -22,6 +22,9 @@
 #                                              for the candidate, breaks it
 #                                              when asked (BREAK_CANDIDATE,
 #                                              BREAK_REF; see below)
+#   ci/artifacts.sh reuse-build <side> <dir>   a packed build restored from the
+#                                              CI cache (ci/build-key.sh) now
+#                                              stands for the current commit
 #   ci/artifacts.sh pack-e2e <side> <arch> <dir>
 #   ci/artifacts.sh pack-unit <side> <dir>
 #   ci/artifacts.sh unpack-results <dir>...    e2e/unit results into WORKDIR
@@ -79,6 +82,22 @@ break_candidate() {
   log "candidate deliberately broken: $(tr '\n' ';' < "$(results_dir candidate)/build/broken.txt")"
 }
 
+# The cache key covers everything that shapes the build, but the build results
+# name the commit that built them, which can be an earlier harness commit:
+# name the current one, and keep the original in build/reused-from.txt.
+reuse_build() {
+  local side=$1 dir=$2 tmp ref
+  tmp=$(mktemp -d)
+  tar -C "${tmp}" -xf "${dir}/build-results.tar"
+  ref=$(ref_for_side "${side}")
+  [[ -f "${tmp}/build/reused-from.txt" ]] || cp "${tmp}/build/commit-subject.txt" "${tmp}/build/reused-from.txt"
+  git -C "${REPO_DIR}" rev-parse "${ref}" > "${tmp}/build/commit.txt"
+  git -C "${REPO_DIR}" log -1 --format='%H %s' "${ref}" > "${tmp}/build/commit-subject.txt"
+  log "reusing the cached build of ${side}: built from $(cut -c1-8 "${tmp}/build/reused-from.txt"), now $(cut -c1-8 "${tmp}/build/commit.txt")"
+  tar -C "${tmp}" -cf "${dir}/build-results.tar" build
+  rm -rf "${tmp}"
+}
+
 pack_e2e() {
   local side=$1 arch=$2 dir=$3
   local res
@@ -118,8 +137,9 @@ shift || true
 case "${cmd}" in
   pack-build) pack_build "$@" ;;
   unpack-build) unpack_build "$@" ;;
+  reuse-build) reuse_build "$@" ;;
   pack-e2e) pack_e2e "$@" ;;
   pack-unit) pack_unit "$@" ;;
   unpack-results) unpack_results "$@" ;;
-  *) die "usage: $0 pack-build|unpack-build|pack-e2e|pack-unit|unpack-results ..." ;;
+  *) die "usage: $0 pack-build|unpack-build|reuse-build|pack-e2e|pack-unit|unpack-results ..." ;;
 esac

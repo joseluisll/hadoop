@@ -284,6 +284,18 @@ the wait is split over two jobs ("Wait for earlier harness runs" and its
 "Re-run failed jobs" skips the waiting job, which already succeeded, so such
 a re-run can overlap another run; push a new run branch instead.
 
+Builds are **reused between runs**: most runs change only the harness, and
+the baseline is the same commit every time. Each fresh build is also saved
+as an artifact named after its key (`ci/build-key.sh`: the side's code
+without the harness and `.github`, the harness files that shape the build,
+the JDK), and a later run with the same key downloads it instead of building
+(`ci/find-build.sh`): the packed distribution for the build jobs, the
+installed Maven artifacts for the unit jobs, which then only check out the
+tree. Artifacts are used rather than the actions cache because a cache can
+only be read on the branch that saved it, and every run has its own branch;
+they expire after 7 days. A reused build names the current commit in the
+report and keeps the one that built it in `build/reused-from.txt`.
+
 A workflow is 5 to 7 jobs (two builds, two end-to-end runs, two or four
 unit suite runs, the comparison); each fits a standard GitHub-hosted runner
 (4 vCPUs, 16 GB, 6-hour job limit for public repositories).

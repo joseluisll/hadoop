@@ -44,8 +44,16 @@ def commit(results, side):
 
 
 def harness_check(results):
-    """Notes for runs that check the harness instead of the patch."""
+    """Notes for runs that check the harness instead of the patch, and for
+    builds reused from an earlier run of the same code."""
     notes = []
+    for side in ("baseline", "candidate"):
+        reused = os.path.join(results, side, "build", "reused-from.txt")
+        if os.path.exists(reused):
+            notes.append(f"- The {side} build was reused from an earlier build of the same code: "
+                         f"`{read(reused).strip()}`")
+    if notes:
+        notes[-1] += "\n"
     if commit(results, "baseline") == commit(results, "candidate") != "not built":
         notes.append("**Harness check, baseline against itself**: both sides are the same "
                      "commit, so every difference below is noise.\n")

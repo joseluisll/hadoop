@@ -42,6 +42,15 @@
 # waits up to 340 minutes and hands the wait on to queue-2, which returns at
 # once when queue already got the turn: up to about 11 hours in all, and no
 # job is ever skipped (a skipped job would skip everything after it).
+#
+# Builds are reused between runs: most runs change only the harness, and the
+# baseline is the same commit every time. A fresh build is also uploaded as an
+# artifact named after its key (ci/build-key.sh: the side's code, the harness
+# files that shape the build, the JDK), and a later run with the same key
+# downloads it instead of building (ci/find-build.sh). Artifacts, unlike the
+# actions cache, can be read across branches, and every run has its own
+# branch; they expire after 7 days. The build jobs reuse the packed
+# distribution, the unit jobs the installed Maven artifacts.
 
 name: "Jetty 12 phase A harness (template)"
 
@@ -148,6 +157,9 @@ jobs:
     needs: queue-2
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    permissions:
+      actions: read
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -160,15 +172,48 @@ jobs:
         with:
           baseline: ${{ env.BASELINE }}
           candidate: ${{ env.CANDIDATE }}
+      - name: Look for a saved build of the same code
+        id: saved
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          key=$(${HARNESS}/ci/build-key.sh ${{ matrix.side }} dist)
+          echo "key=${key}" >> "${GITHUB_OUTPUT}"
+          echo "run=$(${HARNESS}/ci/find-build.sh "${{ github.repository }}" "${key}")" >> "${GITHUB_OUTPUT}"
+      - uses: actions/download-artifact@v4
+        if: steps.saved.outputs.run != ''
+        with:
+          name: ${{ steps.saved.outputs.key }}
+          path: ${{ runner.temp }}/out
+          run-id: ${{ steps.saved.outputs.run }}
+          github-token: ${{ github.token }}
       - name: Build
+        if: steps.saved.outputs.run == ''
         shell: bash
         run: ${HARNESS}/build.sh ${{ matrix.side }}
       - name: Self-compare the build
+        if: steps.saved.outputs.run == ''
         shell: bash
         run: ${HARNESS}/artifact-diff.sh ${{ matrix.side }} ${{ matrix.side }}
       - name: Pack
+        if: steps.saved.outputs.run == ''
         shell: bash
         run: ${HARNESS}/ci/artifacts.sh pack-build ${{ matrix.side }} "${RUNNER_TEMP}/out"
+      - name: Save the build for later runs
+        if: steps.saved.outputs.run == ''
+        # Saving only speeds up later runs; a failed upload must not fail this one.
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.saved.outputs.key }}
+          path: ${{ runner.temp }}/out
+          retention-days: 7
+          compression-level: 0
+      - name: Reuse the saved build
+        if: steps.saved.outputs.run != ''
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh reuse-build ${{ matrix.side }} "${RUNNER_TEMP}/out"
       - uses: actions/upload-artifact@v4
         with:
           name: build-${{ matrix.side }}
@@ -234,6 +279,9 @@ jobs:
     if: inputs.unit_suites != '[]' && !contains(github.ref_name, '-run-broken-')
     runs-on: ubuntu-24.04
     timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
     strategy:
       fail-fast: false
       matrix:
@@ -247,9 +295,38 @@ jobs:
         with:
           baseline: ${{ env.BASELINE }}
           candidate: ${{ env.CANDIDATE }}
+      - name: Look for saved installed artifacts of the same code
+        id: saved
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          key=$(${HARNESS}/ci/build-key.sh ${{ matrix.side }} install)
+          echo "key=${key}" >> "${GITHUB_OUTPUT}"
+          echo "run=$(${HARNESS}/ci/find-build.sh "${{ github.repository }}" "${key}")" >> "${GITHUB_OUTPUT}"
+      - uses: actions/download-artifact@v4
+        if: steps.saved.outputs.run != ''
+        with:
+          name: ${{ steps.saved.outputs.key }}
+          path: ${{ env.WORKDIR }}/m2/installed-${{ matrix.side }}
+          run-id: ${{ steps.saved.outputs.run }}
+          github-token: ${{ github.token }}
+      # With the side's installed artifacts restored, the tests only need the
+      # source tree: each suite compiles its own modules.
       - name: Build
         shell: bash
-        run: ${HARNESS}/build.sh ${{ matrix.side }} install
+        run: ${HARNESS}/build.sh ${{ matrix.side }} ${{ steps.saved.outputs.run != '' && 'worktree' || 'install' }}
+      # Each suite of a side installs the same artifacts; the last upload wins.
+      - name: Save the installed artifacts for later runs
+        if: steps.saved.outputs.run == ''
+        # Saving only speeds up later runs; a failed upload must not fail this one.
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.saved.outputs.key }}
+          path: ${{ env.WORKDIR }}/m2/installed-${{ matrix.side }}
+          retention-days: 7
+          overwrite: true
       - name: Test ${{ matrix.suite }}
         shell: bash
         run: ${HARNESS}/unit-tests.sh ${{ matrix.side }} ${{ matrix.suite }} ${{ inputs.unit_tier }}

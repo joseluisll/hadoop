@@ -14,12 +14,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Usage: build.sh <baseline|candidate> [dist|install]
+# Usage: build.sh <baseline|candidate> [dist|install|worktree]
 #
 # Checks out the side's ref in its own git worktree and builds it.
 #   dist     (default) the binary distribution, every module's resolved
 #            dependencies, and the Hadoop test code the end-to-end runs reuse
 #   install  only "mvn install" without tests, enough for unit-tests.sh
+#   worktree only the checkout, when CI restored the side's installed
+#            artifacts from its cache (ci/build-key.sh)
 
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
@@ -27,7 +29,7 @@ source "$(dirname "$0")/lib/common.sh"
 SIDE="${1:-}"
 check_side "${SIDE}"
 MODE="${2:-dist}"
-[[ "${MODE}" == dist || "${MODE}" == install ]] || die "mode must be dist or install"
+[[ "${MODE}" =~ ^(dist|install|worktree)$ ]] || die "mode must be dist, install or worktree"
 LOG_TAG="build:${SIDE}"
 require_cmd git java
 
@@ -46,6 +48,10 @@ else
 fi
 git -C "${SRC}" rev-parse HEAD > "${OUT}/commit.txt"
 git -C "${SRC}" log -1 --format='%H %s' > "${OUT}/commit-subject.txt"
+if [[ "${MODE}" == worktree ]]; then
+  log "checked out $(cat "${OUT}/commit-subject.txt"); not building"
+  exit 0
+fi
 log "building $(cat "${OUT}/commit-subject.txt")"
 
 if [[ "${MODE}" == install ]]; then
