@@ -169,8 +169,11 @@ These are not caused by phase A; the harness records them, and they show as
   (resource profiles are off by default), but
   `FederationClientInterceptor.getResourceProfiles` wraps the sub-clusters'
   exceptions in a plain `YarnException` ("invokeConcurrent Failed"), so the
-  client gives up. `federated` also submits through the router's REST API,
-  which works.
+  client gives up. The REST submission `federated` also tries fails too
+  (YARN-12025). Without the application, the checks that read it back
+  (`router-app`, `router-app-state`, `router-app-status`,
+  `app-on-one-subcluster`) are recorded as failed rather than run against
+  an empty id.
 - YARN-12025: the YARN router's REST API cannot forward requests whose answer has a
   body to read, e.g. `POST /ws/v1/cluster/apps/new-application` answers 503
   "No active SubCluster available" after "MessageBodyReader not found for

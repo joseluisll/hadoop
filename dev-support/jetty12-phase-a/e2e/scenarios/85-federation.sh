@@ -113,13 +113,27 @@ import json, sys
 apps = ((json.load(sys.stdin).get("apps") or {}).get("app")) or []
 apps = [a for a in apps if a.get("name") == "jetty12-federated"]
 print(apps[0]["id"] if apps else "")' 2>/dev/null || true)
-  http router-app "${Y}/apps/${APP}" --expect-regex '"finalStatus":"SUCCEEDED"'
-  http router-app-state "${Y}/apps/${APP}/state" --expect-status any
-  cli router-app-status --expect-regex 'Final-State : (\w+)' -- \
-    yarn application -Dyarn.resourcemanager.address="${YROUTER_RPC}" -status "${APP}"
-  # Distributed shell fails through the router (see README, known issues),
-  # so placement is also checked with an application submitted to the
-  # router's REST API; its AM never registers, so it ends FAILED.
+  # Without an application id the checks below would query the list of
+  # applications (.../apps/) and pass without testing anything, so they are
+  # recorded as failed instead. Distributed shell does fail through the
+  # router (YARN-12024, see README, known issues).
+  if [[ -n "${APP}" ]]; then
+    http router-app "${Y}/apps/${APP}" --expect-regex '"finalStatus":"SUCCEEDED"'
+    http router-app-state "${Y}/apps/${APP}/state" --expect-status any
+    cli router-app-status --expect-regex 'Final-State : (\w+)' -- \
+      yarn application -Dyarn.resourcemanager.address="${YROUTER_RPC}" -status "${APP}"
+    # It ran on exactly one of the sub-clusters.
+    on1=$(rest "${RM_URL}/ws/v1/cluster/apps/${APP}" | grep -c '"id"' || true)
+    on2=$(rest "${RM2_URL}/ws/v1/cluster/apps/${APP}" | grep -c '"id"' || true)
+    check app-on-one-subcluster "$([[ $((on1 + on2)) -eq 1 ]] && echo true || echo false)" "sc1 ${on1}, sc2 ${on2}"
+  else
+    for id in router-app router-app-state router-app-status app-on-one-subcluster; do
+      check "${id}" false "no jetty12-federated application on the router"
+    done
+  fi
+  # Placement is also checked with an application submitted to the router's
+  # REST API; its AM never registers, so it would end FAILED. The REST
+  # forwarding fails as well for now (YARN-12025).
   http rest-new-app "${Y}/apps/new-application?user.name=${USER_NAME}" --method POST --data '' \
     --expect-regex '"application-id"' --out "${RES}/router-new-app.json"
   REST_APP=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["application-id"])' \
@@ -138,10 +152,6 @@ print(apps[0]["id"] if apps else "")' 2>/dev/null || true)
   on1=$(rest "${RM_URL}/ws/v1/cluster/apps/${REST_APP}" | grep -c '"id"' || true)
   on2=$(rest "${RM2_URL}/ws/v1/cluster/apps/${REST_APP}" | grep -c '"id"' || true)
   check rest-app-on-one-subcluster "$([[ $((on1 + on2)) -eq 1 ]] && echo true || echo false)" "sc1 ${on1}, sc2 ${on2}"
-  # It ran on exactly one of the sub-clusters.
-  on1=$(rest "${RM_URL}/ws/v1/cluster/apps/${APP}" | grep -c '"id"' || true)
-  on2=$(rest "${RM2_URL}/ws/v1/cluster/apps/${APP}" | grep -c '"id"' || true)
-  check app-on-one-subcluster "$([[ $((on1 + on2)) -eq 1 ]] && echo true || echo false)" "sc1 ${on1}, sc2 ${on2}"
   if daemon_up gpg; then
     http gpg-ui "${GPG_URL}/gpg" --expect-status any
     http gpg-overview "${GPG_URL}/gpg/overview" --expect-status any
