@@ -95,15 +95,17 @@ arch_conf() {
     "dfs.cluster.administrators=${USER_NAME}"
   # Log aggregation under Kerberos opens files with SecureIOUtils, which needs
   # the native libhadoop; without it the node manager exits ("Secure IO is
-  # not possible without native code extensions"). CI builds the
-  # distributions with -Pnative, but a local build.sh does not by default
-  # (BUILD_NATIVE), so it stays off and both kinds of runs compare the same.
+  # not possible without native code extensions"). So it is on only when the
+  # distribution has libhadoop: CI builds both sides with -Pnative, a local
+  # build.sh only with BUILD_NATIVE=true.
+  local aggregation=false
+  [[ -e "${HADOOP_HOME}/lib/native/libhadoop.so" ]] && aggregation=true
   # The node manager logs in as nm/<canonical local hostname> when its
   # principal has _HOST (SecurityUtil.login without a bind address); on CI
   # runners that is an FQDN the keytab has no entry for, so name the host.
   # shellcheck disable=SC2046
   base_yarn $(yarn_rm_addresses "" 0) \
-    "yarn.log-aggregation-enable=false" \
+    "yarn.log-aggregation-enable=${aggregation}" \
     "yarn.resourcemanager.hostname=${HOST}" \
     "yarn.http.policy=HTTPS_ONLY" \
     "yarn.nodemanager.webapp.https.address=${HOST}:${P_NM_HTTPS}" \

@@ -22,7 +22,7 @@ dependencies:
 |---|---|---|
 | HADOOP-20012 | catalog-webapp and timelineservice-hbase tests stop pulling third-party Jetty and the old servlet API | test classpath |
 | HADOOP-20013 | duplicate `javax.annotation-api` 1.3.2 removed; `jakarta.annotation-api` 1.3.5 provides the same `javax.annotation` classes | runtime classpath of every daemon, LICENSE/NOTICE |
-| HADOOP-20014 | Jersey test container moves from Jetty to the JDK HTTP server; `hadoop-client-minicluster` shades it, keeps `jetty-util`, stops copying `com.sun.net.httpserver` | test classpath, shaded minicluster jar |
+| HADOOP-20014 | Jersey test container moves from Jetty to the JDK HTTP server; `hadoop-client-minicluster` shades it, declares `jetty-util` and excludes `com.sun.net.httpserver` (neither changes the jar) | test classpath, shaded minicluster jar |
 | HADOOP-20015 | `jetty-webapp`/`jetty-servlet` declared in YARN common, RM, AHS, router | runtime classpath of YARN daemons |
 | HADOOP-20016 | `jetty-http` declared in hadoop-common, HttpFS, shuffle, SLS | runtime classpath |
 
@@ -121,9 +121,10 @@ namenodes, three journalnodes, two resource managers or two routers.
 - **NFS mounts**: mounting needs a kernel NFS client; the gateway's RPC
   services are checked instead.
 - **Log aggregation under Kerberos**: it needs the native `libhadoop`
-  (SecureIOUtils). CI builds the distributions with it, but local builds do
-  not by default, so `secure` keeps it off everywhere; the other
-  architectures aggregate logs.
+  (SecureIOUtils), so `secure` turns it on only when the distribution has
+  `lib/native/libhadoop.so`: in CI, which builds both sides with it, and
+  locally with `BUILD_NATIVE=true`. The other architectures always
+  aggregate logs.
 - **MapReduce on YARN federation**: with both sub-clusters on one host, the
   AMRMProxy address a job needs is ambiguous; YARN federation is exercised
   with distributed shell, which finds its home RM through the node manager.

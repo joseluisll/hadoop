@@ -24,10 +24,9 @@
 #   classjar  <daemon>:<class>       class loaded from a different jar
 #   logscan   <source>:<message>     error message only the candidate logs
 
-# HADOOP-20013: the javax.annotation classes come from jakarta.annotation-api
-# instead of the duplicate javax.annotation-api jar. Same classes, other jar.
-obs common-cli:load\.(hadoop|hdfs|yarn|mapred)\.javax\.annotation\.[A-Za-z.]+  # HADOOP-20013
-classjar [a-z0-9]+:javax\.annotation\..*  # HADOOP-20013
+# HADOOP-20013 drops the duplicate javax.annotation-api jar, but the
+# javax.annotation classes were already loaded from jakarta.annotation-api on
+# both sides, so no observation or loaded class differs (none in CI).
 
 # Not caused by phase A: the timeline server (ApplicationHistoryServer) registers
 # both JettisonFeature and YarnJacksonJaxbJsonProvider, and Jersey picks one of

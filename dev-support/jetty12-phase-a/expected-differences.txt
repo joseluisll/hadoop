@@ -28,23 +28,20 @@
 #
 # Keep the rules narrow: a broad pattern can hide a real regression.
 
-# --- HADOOP-20013: javax.annotation-api 1.3.2 replaced by jakarta.annotation-api.
-# jakarta.annotation-api 1.3.5 still provides the javax.annotation package, so
-# the classes stay available; only the jar they come from changes.
+# --- HADOOP-20013: the duplicate javax.annotation-api 1.3.2 is dropped.
+# jakarta.annotation-api 1.3.5, which provides the same javax.annotation
+# classes, was already in the distribution and every module that loses the
+# javax copy already resolved it: no jar is added, no dependency is added and
+# no class changes the jar it is loaded from (none of these show up in CI).
 dist-file-removed share/hadoop/[a-z]+/lib/javax\.annotation-api-1\.3\.2\.jar  # HADOOP-20013: duplicate javax.annotation jar dropped
-dist-file-added share/hadoop/[a-z]+/lib/jakarta\.annotation-api-1\.3\.5\.jar  # HADOOP-20013: if a component did not get it from common/lib before
-class-source-changed [a-z\-]+:javax\.annotation\..*  # HADOOP-20013: javax.annotation classes now come from jakarta.annotation-api
 dep-removed [^|]+\|javax\.annotation:javax\.annotation-api:jar:1\.3\.2:(compile|runtime|provided|test)  # HADOOP-20013
-dep-added [^|]+\|jakarta\.annotation:jakarta\.annotation-api:jar:1\.3\.5:(compile|runtime|provided|test)  # HADOOP-20013: modules that only had the javax copy now resolve the jakarta one
 
 # --- License files list the changed third-party artifacts.
 dist-file-changed (LICENSE-binary|NOTICE-binary)  # HADOOP-20013/20014: license entries for the swapped artifacts
 
 # --- HADOOP-20016 / HADOOP-20015: jetty-http and jetty-webapp declared where
-# they are imported. They were already on these classpaths transitively, so
-# only the declared scope can change.
-dep-(removed|added) (hadoop-common-project/hadoop-common|hadoop-hdfs-project/hadoop-hdfs-httpfs|hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-shuffle|hadoop-tools/hadoop-sls)\|org\.eclipse\.jetty:jetty-http:jar:[^:]+:(compile|provided)  # HADOOP-20016: jetty-http declared directly
-dep-(removed|added) hadoop-yarn-project/hadoop-yarn/(hadoop-yarn-common|hadoop-yarn-server/hadoop-yarn-server-(resourcemanager|applicationhistoryservice|router))\|org\.eclipse\.jetty:jetty-(webapp|servlet|xml|security):jar:[^:]+:(compile|provided)  # HADOOP-20015: jetty-webapp/servlet declared directly
+# they are imported. They were already resolved there transitively with the
+# same version and scope, so no difference is expected (none shows up in CI).
 
 # --- HADOOP-20014: Jersey test container moves from Jetty to the JDK HTTP
 # server. Test scope only; the unit-test phase covers the effect.
@@ -58,18 +55,17 @@ dep-removed [^|]+\|org\.eclipse\.jetty:jetty-[a-z\-]+:jar:[^:]+:test  # HADOOP-2
 # pulling third-party Jetty and the old servlet API. Test scope only.
 dep-removed hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp\|org\.eclipse\.jetty(\.http2)?:[a-z0-9\-]+:jar:[^:]+:test  # HADOOP-20012
 dep-removed hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn-applications-catalog/hadoop-yarn-applications-catalog-webapp\|javax\.servlet:javax\.servlet-api:jar:[^:]+:test  # HADOOP-20012
-dep-removed hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-timelineservice-hbase-tests\|javax\.servlet:javax\.servlet-api:jar:[^:]+:test  # HADOOP-20012
+# The javax.servlet-api exclusions added to timelineservice-hbase-tests show
+# no difference in CI.
 
 # --- HADOOP-20014: hadoop-client-minicluster shades the JDK HTTP test
-# container instead of the Jetty one, keeps jetty-util by declaring it, and
-# no longer copies the JDK's own com.sun.net.httpserver classes.
+# container instead of the Jetty one. Two of its changes show no difference
+# in CI: jetty-util, now declared directly, resolves as before, and the new
+# com/sun/net/httpserver shade exclude leaves the jar's entries unchanged.
 dep-(removed|added) hadoop-client-modules/hadoop-client-minicluster\|org\.glassfish\.jersey\.(test-framework\.providers|containers):jersey-(test-framework-provider|container)-(jetty|jetty-http|jdk-http):jar:[^:]+:compile  # HADOOP-20014
-dep-(removed|added) hadoop-client-modules/hadoop-client-minicluster\|org\.eclipse\.jetty:jetty-util:jar:[^:]+:compile  # HADOOP-20014: jetty-util declared directly
 jar-entry-(removed|added|changed) share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!org/apache/hadoop/shaded/org/glassfish/jersey/(test/(jetty|jdkhttp)|jetty|jdkhttp)/.*  # HADOOP-20014: shaded test container classes
 jar-entry-(removed|added|changed) share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!META-INF/(services/.*|versions/.*/org/apache/hadoop/shaded/org/glassfish/jersey/.*|maven/org\.glassfish\.jersey\..*)  # HADOOP-20014: service files and metadata of the swapped container
-jar-entry-(removed|added|changed) share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!(org/apache/hadoop/shaded/)?com/sun/net/httpserver/.*  # HADOOP-20014: JDK classes no longer copied into the jar
 class-(removed|added) client-minicluster:org\.apache\.hadoop\.shaded\.org\.glassfish\.jersey\.(test\.(jetty|jdkhttp)|jetty|jdkhttp)\..*  # HADOOP-20014
-class-(removed|added) client-minicluster:(org\.apache\.hadoop\.shaded\.)?com\.sun\.net\.httpserver\..*  # HADOOP-20014
 # jersey-container-jetty-http depended on jetty-continuation; nothing else in the
 # minicluster jar uses it, so its shaded copy goes with the Jetty test container.
 dep-removed hadoop-client-modules/hadoop-client-minicluster\|org\.eclipse\.jetty:jetty-continuation:jar:[^:]+:compile  # HADOOP-20014: came with jersey-container-jetty-http
