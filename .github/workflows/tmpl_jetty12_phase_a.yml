@@ -34,6 +34,11 @@
 #                                        ci/break_candidate.py: annotation, the
 #                                        default, jetty, static, webhdfs-user);
 #                                        the result must be FAIL
+# and one runs the unit tests longer:
+#   jetty12-phase-a-<arch>-run-full-<n>  unit tier "full" (as unit_tier:
+#                                        full): every test of each module of
+#                                        the suites, one CI job per shard
+#                                        (unit-tests.sh --shards)
 #
 # Runs go one at a time across all five architectures, oldest first: the
 # first jobs (queue, then queue-2) wait until no earlier harness run is active
@@ -99,6 +104,7 @@ env:
   CANDIDATE: ${{ contains(github.ref_name, '-run-aa-') && (inputs.baseline_ref || 'PREPARATION') || inputs.candidate_ref || github.sha }}
   BREAK_CANDIDATE: ${{ inputs.break_candidate }}
   BREAK_REF: ${{ github.ref_name }}
+  UNIT_TIER: ${{ (inputs.unit_tier == 'full' || contains(github.ref_name, '-run-full-')) && 'full' || 'quick' }}
 
 jobs:
   queue:
@@ -290,11 +296,35 @@ jobs:
           path: ${{ runner.temp }}/out
           retention-days: 14
 
-  unit:
-    name: Unit ${{ matrix.suite }} ${{ matrix.side }}
+  # The unit jobs: in tier full a suite splits into shards that each fit a
+  # 6-hour job; unit-tests.sh says which.
+  unit_plan:
+    name: Plan the unit jobs
     needs: queue-2
     # A broken-candidate run breaks the distribution, which the unit tests
     # (built from source) never see: skip them there.
+    if: inputs.unit_suites != '[]' && !contains(github.ref_name, '-run-broken-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      suites: ${{ steps.plan.outputs.suites }}
+    steps:
+      - uses: actions/checkout@v6
+      - name: Shards for tier ${{ env.UNIT_TIER }}
+        id: plan
+        shell: bash
+        env:
+          SUITES: ${{ inputs.unit_suites }}
+        run: |
+          shards=$(for s in $(python3 -c 'import json, os; print(" ".join(json.loads(os.environ["SUITES"])))'); do
+            ${HARNESS}/unit-tests.sh --shards "${s}" "${UNIT_TIER}"
+          done)
+          echo "${shards}"
+          echo "suites=$(python3 -c 'import json, sys; print(json.dumps(sys.stdin.read().split()))' <<< "${shards}")" >> "${GITHUB_OUTPUT}"
+
+  unit:
+    name: Unit ${{ matrix.suite }} ${{ matrix.side }}
+    needs: [queue-2, unit_plan]
     if: inputs.unit_suites != '[]' && !contains(github.ref_name, '-run-broken-')
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -305,7 +335,7 @@ jobs:
       fail-fast: false
       matrix:
         side: [baseline, candidate]
-        suite: ${{ fromJSON(inputs.unit_suites) }}
+        suite: ${{ fromJSON(needs.unit_plan.outputs.suites) }}
     steps:
       - uses: actions/checkout@v6
         with:
@@ -348,7 +378,7 @@ jobs:
           overwrite: true
       - name: Test ${{ matrix.suite }}
         shell: bash
-        run: ${HARNESS}/unit-tests.sh ${{ matrix.side }} ${{ matrix.suite }} ${{ inputs.unit_tier }}
+        run: ${HARNESS}/unit-tests.sh ${{ matrix.side }} ${{ matrix.suite }} ${UNIT_TIER}
       # The client suite is about what Hadoop gives its users; the downstream
       # projects need the same installed artifacts.
       - name: Downstream dependencies
@@ -403,7 +433,7 @@ jobs:
         run: |
           report="${WORKDIR}/results/compare/report.md"
           {
-            echo "Architecture: **${{ inputs.arch }}**, unit suites: \`${{ inputs.unit_suites }}\`"
+            echo "Architecture: **${{ inputs.arch }}**, unit suites: \`${{ inputs.unit_suites }}\`, tier ${UNIT_TIER}"
             echo
             if [[ -f "${report}" ]]; then
               # The step summary holds 1 MiB; the full report is an artifact.

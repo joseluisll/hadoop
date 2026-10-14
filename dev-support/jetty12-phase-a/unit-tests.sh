@@ -15,6 +15,12 @@
 # limitations under the License.
 
 # Usage: unit-tests.sh <baseline|candidate> <suite> [quick|full] [module-pattern]
+#        unit-tests.sh --shards <suite> [quick|full]
+#
+# Tiers: "quick" runs the tests listed for each module (for "changed", the
+# web and Jersey tests); "full" runs every test of each module of the suite
+# (modules with Hadoop's parallel-tests profile in parallel), except the
+# server modules of "changed", which keep their listed tests.
 #
 # Runs existing Hadoop tests on the side's tree and keeps the surefire /
 # failsafe XML reports in results/<side>/unit/<suite>__<module>/. Suites:
@@ -38,9 +44,11 @@
 #              hadoop-client-integration-tests (the minicluster jar used
 #              from a downstream point of view).
 #   all        every suite above.
-#   changed-<n> the n-th of the CHANGED_SHARDS below (1-4): the "changed"
-#              suite split so that "full", which runs for hours, fits CI
-#              jobs of 6 hours. Reports are named as for "changed".
+#   <suite>-<n> one shard of a suite, so that "full", which runs for hours,
+#              fits CI jobs of 6 hours: for "changed" the n-th of the
+#              CHANGED_SHARDS below, for the others its n-th module.
+#              Reports are named as for the whole suite. --shards prints the
+#              jobs a suite needs in a tier (just the suite in "quick").
 #
 # Each failing test is re-run once (surefire.rerunFailingTestsCount) so a
 # flaky test shows up as flaky, not failed. compare.sh lines up the two
@@ -48,14 +56,14 @@
 
 set -euo pipefail
 source "$(dirname "$0")/lib/common.sh"
-SIDE="${1:-}"
-check_side "${SIDE}"
-SUITE="${2:-changed}"
-TIER="${3:-quick}"
-PATTERN="${4:-}"
-LOG_TAG="unit:${SIDE}"
-OUT="$(results_dir "${SIDE}")/unit"
-mkdir -p "${OUT}"
+if [[ "${1:-}" == --shards ]]; then
+  SHARDS_ONLY=true SIDE="" SUITE="${2:-changed}" TIER="${3:-quick}" PATTERN=""
+else
+  SHARDS_ONLY=false SIDE="${1:-}" SUITE="${2:-changed}" TIER="${3:-quick}" PATTERN="${4:-}"
+  check_side "${SIDE}"
+fi
+[[ "${TIER}" =~ ^(quick|full)$ ]] || die "tier must be quick or full, got '${TIER}'"
+LOG_TAG="unit:${SIDE:-shards}"
 
 HDFS=hadoop-hdfs-project/hadoop-hdfs
 RBF=hadoop-hdfs-project/hadoop-hdfs-rbf
@@ -136,8 +144,6 @@ SUITE_client=(
 )
 ALL_SUITES=(changed secure ha federated mixed client)
 
-[[ -d "$(src_dir "${SIDE}")" ]] || die "run build.sh ${SIDE} first"
-
 run_module() {
   local suite=$1 module=$2 tests=$3 exact=${4:-false}
   local dest="${OUT}/${suite}__${module//\//__}"
@@ -150,8 +156,12 @@ run_module() {
               -Dsurefire.rerunFailingTestsCount="${UNIT_RERUNS:-1}"
               -Dfailsafe.rerunFailingTestsCount="${UNIT_RERUNS:-1}"
               -Dmaven.javadoc.skip=true -Dspotbugs.skip=true -Dcheckstyle.skip=true)
-  if [[ -n "${tests}" && ( "${suite}" != changed || "${TIER}" == quick || "${exact}" == true ) ]]; then
+  if [[ -n "${tests}" && ( "${TIER}" == quick || "${exact}" == true ) ]]; then
     args+=("-Dtest=${tests}" -Dsurefire.failIfNoSpecifiedTests=false)
+  elif [[ "${TIER}" == full ]] && grep -qs '<id>parallel-tests</id>' "$(src_dir "${SIDE}")/${module}/pom.xml"; then
+    # Every test of a big module (HDFS, common, RBF): in parallel, as
+    # Hadoop's own CI runs them, to fit a 6-hour CI job.
+    args+=(-Pparallel-tests -DtestsThreadCount="${UNIT_TEST_THREADS:-4}")
   fi
   log "${suite}: ${module}${tests:+ ($(tr ',' '\n' <<< "${tests}" | wc -l) test patterns)}"
   local start=${SECONDS} rc=0
@@ -180,30 +190,65 @@ shard_of() {
   done
 }
 
+# shards <suite>: the CI jobs that run the suite in this tier, one per line.
+shards() {
+  local suite=$1 i
+  [[ " ${ALL_SUITES[*]} " == *" ${suite} "* ]] || die "unknown suite ${suite}"
+  if [[ "${TIER}" == quick || "${suite}" == client ]]; then
+    echo "${suite}"
+  elif [[ "${suite}" == changed ]]; then
+    for i in "${!CHANGED_SHARDS[@]}"; do echo "changed-$((i + 1))"; done
+  else
+    declare -n e="SUITE_${suite}"
+    for i in "${!e[@]}"; do echo "${suite}-$((i + 1))"; done
+  fi
+}
+if [[ "${SHARDS_ONLY}" == true ]]; then
+  shards "${SUITE}"
+  exit 0
+fi
+
+[[ -d "$(src_dir "${SIDE}")" ]] || die "run build.sh ${SIDE} first"
+OUT="$(results_dir "${SIDE}")/unit"
+mkdir -p "${OUT}"
+
+# in_shard <suite> <index> <module>: whether the selected shard runs it.
+in_shard() {
+  [[ -z "${shard}" ]] && return 0
+  if [[ "$1" == changed ]]; then
+    [[ "$(shard_of "$3")" == "${shard}" ]]
+  else
+    (( $2 + 1 == shard ))
+  fi
+}
+
 suites=("${SUITE}")
 shard=""
 [[ "${SUITE}" == all ]] && suites=("${ALL_SUITES[@]}")
-if [[ "${SUITE}" =~ ^changed-([0-9]+)$ ]]; then
-  shard=${BASH_REMATCH[1]}
-  (( shard >= 1 && shard <= ${#CHANGED_SHARDS[@]} )) || die "no shard ${shard}; there are ${#CHANGED_SHARDS[@]}"
-  suites=(changed)
+if [[ "${SUITE}" =~ ^([a-z]+)-([0-9]+)$ ]]; then
+  suites=("${BASH_REMATCH[1]}")
+  shard=${BASH_REMATCH[2]}
 fi
+ran=0
 for suite in "${suites[@]}"; do
   [[ " ${ALL_SUITES[*]} " == *" ${suite} "* ]] || die "unknown suite ${suite}"
   declare -n entries="SUITE_${suite}"
-  for entry in "${entries[@]}"; do
-    module=${entry%%|*} tests=${entry#*|}
+  for i in "${!entries[@]}"; do
+    module=${entries[$i]%%|*} tests=${entries[$i]#*|}
     [[ -z "${PATTERN}" || "${module}" =~ ${PATTERN} ]] || continue
-    [[ -z "${shard}" || "$(shard_of "${module}")" == "${shard}" ]] || continue
+    in_shard "${suite}" "${i}" "${module}" || continue
     run_module "${suite}" "${module}" "${tests}"
+    ran=$((ran + 1))
   done
   unset -n entries
   [[ "${suite}" == changed ]] || continue
   for entry in "${SUITE_changed_servers[@]}"; do
     module=${entry%%|*} tests=${entry#*|}
     [[ -z "${PATTERN}" || "${module}" =~ ${PATTERN} ]] || continue
-    [[ -z "${shard}" || "$(shard_of "${module}")" == "${shard}" ]] || continue
+    in_shard changed 0 "${module}" || continue
     run_module "${suite}" "${module}" "${tests}" true
+    ran=$((ran + 1))
   done
 done
+(( ran > 0 )) || die "suite ${SUITE} selects no module"
 log "reports in ${OUT}"

@@ -110,12 +110,43 @@ namenodes, three journalnodes, two resource managers or two routers.
 
 | Suite | Tests |
 |---|---|
-| `changed` | the modules phase A changes (web and Jersey tests in `quick`, everything in `full`), plus the HTTP tests of KMS, HDFS, RBF, timeline service and MR jobs (the listed tests in both tiers); `changed-1` to `changed-4` split it for CI |
+| `changed` | the modules phase A changes (web and Jersey tests in `quick`, everything in `full`), plus the HTTP tests of KMS, HDFS, RBF, timeline service and MR jobs (the listed tests in both tiers) |
 | `secure` | `TestHttpServerWithSpnego`, `TestSSLHttpServer*`, `TestKDiag*`, `TestSecureNameNode`, `TestSaslDataTransfer`, `TestWebHdfsTokens`, `TestBlockTokenWithDFS*`, `TestKMS`, `TestHttpFSWithKerberos`, `TestRouterWithSecureStartup`, `TestRouterHttpDelegationToken`, `TestRouterSecurityManager`, `TestRMWebappAuthentication`, `TestRMWebServicesDelegationTokenAuthentication`, `TestTimelineAuthenticationFilterForV1`, `TestSecureLogins`, `TestJHSSecurity` |
 | `ha` | `TestZKFailoverController`, `TestNodeFencer`, `TestWebHDFSForHA`, `TestFailoverWithBlockTokensEnabled`, `TestHAStateTransitions`, `TestDFSZKFailoverController`, `TestStandbyCheckpoints`, `TestDelegationTokensWithHA`, `TestQuorumJournalManager`, `TestRMFailover`, `TestApplicationClientProtocolOnHA`, `TestResourceTrackerOnHA`, `TestRMHA`, `TestRMEmbeddedElector` |
 | `federated` | `TestViewFileSystemHdfs`, `TestViewFsHdfs`, `TestRefreshNamenodes`, `TestWebHdfsWithMultipleNameNodes`, `TestMultipleNNPortQOP`, `TestRouterRpc`, `TestRouterAdminCLI`, `TestRouterMountTable`, `TestRouterWebHdfsMethods`, `TestRouterWebHDFSContract*`, `TestFederationClientInterceptor`, `TestFederationInterceptorREST`, `TestRouterWebServicesREST`, `TestGlobalPolicyGenerator`, `TestFederationInterceptor`, `TestZookeeperFederationStateStore` |
 | `mixed` | `TestSecureNNWithQJM` (secure + HA), `TestRouterNamenodeHeartbeat`, `TestRouterNamenodeMonitoring`, `TestRouterFaultTolerant`, `TestObserverWithRouter`, `TestRouterRPCClientRetries` |
 | `client` | `hadoop-client-check-invariants`, `hadoop-client-check-test-invariants`, `hadoop-client-integration-tests` |
+
+### Unit test tiers
+
+Every suite runs in one of two tiers, a mode of the same scripts:
+
+- `quick` (the default): the tests listed above for each module; for
+  `changed`, the web and Jersey tests of the modules phase A changes.
+- `full`: every test of each module of the suite (for `changed`, except the
+  KMS, HDFS, RBF, timeline service and MR job client modules, which phase A
+  does not change and which keep their listed tests). Modules with Hadoop's
+  `parallel-tests` profile (common, HDFS, RBF) run their tests in parallel,
+  `UNIT_TEST_THREADS` (default 4) at a time, as Hadoop's own CI does. A
+  module's whole suite can take hours.
+
+Choosing the tier:
+
+| Where | `quick` | `full` |
+|---|---|---|
+| CI | push `jetty12-phase-a-<arch>-run-<n>` | push `jetty12-phase-a-<arch>-run-full-<n>` |
+| CI, "Run workflow" | `unit_tier: quick` | `unit_tier: full` (needs the workflow files on the default branch) |
+| locally, everything | `run-all.sh quick` | `run-all.sh full` |
+| locally, one suite | `unit-tests.sh <side> <suite> quick` | `unit-tests.sh <side> <suite> full` |
+
+In CI a `full` suite splits into shards that each fit a job of 6 hours:
+`changed-1` to `changed-4` (the resource manager alone in the first), and
+one per module for the other suites (`secure-1` to `secure-9`, `ha-1` to
+`ha-4`, `federated-1` to `federated-6`, `mixed-1` and `mixed-2`).
+`unit-tests.sh --shards <suite> <tier>` lists them; the workflow's first unit
+job asks it, so the shards are defined in one place. Locally,
+`unit-tests.sh <side> secure-2 full` runs one shard. Reports are named as for
+the whole suite, so the comparison does not change.
 
 ## Not exercised end to end, and why
 
@@ -278,10 +309,8 @@ branch (or tag) name:
   (`ci/break_candidate.py`). The verdict must be FAIL; if it is not, the
   harness misses that kind of breakage.
 
-A third name runs longer, not differently: `jetty12-phase-a-simple-run-full-<n>`
-runs the `changed` suite in tier `full`, every test of the modules phase A
-changes, split into four jobs per side (`changed-1` to `changed-4`) because
-the resource manager's tests alone take hours and a job stops after 6.
+A third name runs longer, not differently: `jetty12-phase-a-<arch>-run-full-<n>`
+runs the unit suites in tier `full` (see "Unit test tiers").
 
 | Case | Change to the candidate | Kind of breakage |
 |---|---|---|
@@ -356,7 +385,7 @@ dev-support/jetty12-phase-a/compare.sh simple,secure,ha,federated,mixed
 
 Rough durations on 4 cores: build 35-60 minutes per side, each
 architecture 10-30 minutes per side, unit suites from minutes (`client`)
-to hours (`changed` full).
+to hours (any suite in `full`).
 
 | Variable | Default | Meaning |
 |---|---|---|
