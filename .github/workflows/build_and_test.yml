@@ -23,8 +23,14 @@ name: "Build"
 # only by `push` (implying user has write access).
 on:
   push:
+    # Fork-only: run only for Hadoop JIRA branches, but not their
+    # <branch>-upstream copies built for apache/hadoop.
     branches:
-      - "**"
+      - "HADOOP-**"
+      - "HDFS-**"
+      - "YARN-**"
+      - "MAPREDUCE-**"
+      - "!**-upstream"
 
 jobs:
   default:
