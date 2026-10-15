@@ -1,0 +1,53 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# End-to-end differences between baseline and candidate that phase A is
+# meant to cause. lib/compare_e2e.py fails on every other one.
+#
+# Format: <kind> <regex>  # reason   (the regex must match the whole subject)
+#   obs       <component>:<observation id>
+#   obsdiff   <component>:<observation id>   excuses a DIFF only, never a REGRESSION
+#   obsfield  <component>:<observation id><json path>   excuses a DIFF when every
+#             field that differs (e.g. /headers/vary) matches such a rule
+#   classjar  <daemon>:<class>       class loaded from a different jar
+#   logscan   <source>:<message>     error message only the candidate logs
+
+# HADOOP-20013 drops the duplicate javax.annotation-api jar, but the
+# javax.annotation classes were already loaded from jakarta.annotation-api on
+# both sides, so no observation or loaded class differs (none in CI).
+
+# Not caused by phase A: the timeline server (ApplicationHistoryServer) registers
+# both JettisonFeature and YarnJacksonJaxbJsonProvider, and Jersey picks one of
+# them for these responses afresh at each start, so the same build answers in
+# either JSON shape (Jettison collapses one-element lists and writes empty ones
+# as ""). Seen restarting one build several times; YARN-12026.
+# Only the shape may differ: a check that fails on the candidate still fails.
+obsdiff yarn-timeline:(put-entity|get-events|domain|ahs-app|ahs-apps|ahs-attempts)  # timeline server JSON provider chosen at startup (YARN-12026, pre-existing)
+
+# Not caused by phase A: Jetty's DefaultServlet (precompressed "gzip" on in
+# HttpServer2) adds "Vary: Accept-Encoding" to a static file only when it
+# finds a precompressed variant, and the same build sends it in one run and
+# not in the next (the candidate sent it on yarn.css in CI runs 3 and 4 of
+# simple, not in run 5; the Jetty jars are identical on both sides). Only
+# that header may differ; any other difference in the observation still fails.
+obsfield [a-z0-9:-]+/headers/vary  # Vary on static files varies between runs of one build (pre-existing)
+
+# Not caused by phase A: the counters of the sleep job, read from its
+# application master while it runs, have groups only once a task has been
+# counted. Under Kerberos every task is rejected (MAPREDUCE-7548), so whether
+# a group exists yet is timing: secure runs 2 and 3 had none on either side,
+# run 4 had one on the baseline only. Only the presence of the groups may
+# differ; the response itself is still compared.
+obsfield mapreduce-am:am-job-counters/body/json/jobCounters/counterGroup  # job counters read mid-run depend on timing (MAPREDUCE-7548 under Kerberos)
