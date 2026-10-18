@@ -143,7 +143,9 @@ jobs:
               let check_run_head;
               for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
                 const check_runs = await github.request(check_run_endpoint, check_run_params);
-                check_run_head = check_runs.data.check_runs.find(r => r.name === "Run / Preparation");
+                check_run_head = check_runs.data.check_runs.find(
+                  r => r.name === "Run / Preparation" && r.head_sha === head_sha
+                );
                 if (check_run_head) {
                   break;
                 }
@@ -152,11 +154,7 @@ jobs:
                 }
               }
               if (!check_run_head) {
-                throw new Error(`Failed to retrieve check_run_head after ${MAX_ATTEMPTS} attempts`);
-              }
-
-              if (check_run_head.head_sha != context.payload.pull_request.head.sha) {
-                throw new Error('There was a new unsynced commit pushed. Please retrigger the workflow.');
+                throw new Error(`Failed to retrieve check_run_head for ${head_sha} after ${MAX_ATTEMPTS} attempts`);
               }
 
               const check_run_url = 'https://github.com/'
