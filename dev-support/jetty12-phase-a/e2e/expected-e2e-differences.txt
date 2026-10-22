@@ -32,9 +32,9 @@
 # both JettisonFeature and YarnJacksonJaxbJsonProvider, and Jersey picks one of
 # them for these responses afresh at each start, so the same build answers in
 # either JSON shape (Jettison collapses one-element lists and writes empty ones
-# as ""). Seen restarting one build several times; YARN-12026.
+# as ""). Seen restarting one build several times; YARN-12030.
 # Only the shape may differ: a check that fails on the candidate still fails.
-obsdiff yarn-timeline:(put-entity|get-events|domain|ahs-app|ahs-apps|ahs-attempts)  # timeline server JSON provider chosen at startup (YARN-12026, pre-existing)
+obsdiff yarn-timeline:(put-entity|get-events|domain|ahs-app|ahs-apps|ahs-attempts)  # timeline server JSON provider chosen at startup (YARN-12030, pre-existing)
 
 # Not caused by phase A: Jetty's DefaultServlet (precompressed "gzip" on in
 # HttpServer2) adds "Vary: Accept-Encoding" to a static file only when it

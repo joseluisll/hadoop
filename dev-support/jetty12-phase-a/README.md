@@ -152,7 +152,7 @@ issues below). A PASS says nothing about them:
   (YARN-12024, YARN-12025): `federated` records them failing on both sides;
   only the router's read-only REST calls and client RPC are compared.
 - **Timeline server JSON responses** (put, events, domains, application
-  history): the JSON writer is chosen at random at each start (YARN-12026), so only their
+  history): the JSON writer is chosen at random at each start (YARN-12030), so only their
   status and checks are compared, not their shape (`obsdiff`).
 
 ## Known issues found on both sides
@@ -200,7 +200,7 @@ These are not caused by phase A; the harness records them, and they show as
   `ZKFailoverController`) that hides the BindException behind it. Each ZKFC
   of the harness has its own `dfs.ha.zkfc.port`, so the runs do not hit it;
   it was seen while setting them up.
-- YARN-12026: the timeline server picks its JSON writer at random at each
+- YARN-12030: the timeline server picks its JSON writer at random at each
   start. `ApplicationHistoryServer#configure` registers both
   `JettisonFeature` and `YarnJacksonJaxbJsonProvider`, and for the put
   response, events, domains and the application history DAOs Jersey uses
