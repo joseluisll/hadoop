@@ -222,7 +222,7 @@
         </exclusion>
         <exclusion>
           <groupId>org.glassfish.jersey.test-framework.providers</groupId>
-          <artifactId>jersey-test-framework-provider-jetty</artifactId>
+          <artifactId>jersey-test-framework-provider-jdk-http</artifactId>
         </exclusion>
         <exclusion>
           <groupId>org.glassfish.jersey.test-framework</groupId>
@@ -319,6 +319,10 @@
           <groupId>org.apache.hadoop</groupId>
           <artifactId>hadoop-distcp</artifactId>
         </exclusion>
+        <exclusion>
+          <groupId>javax.servlet</groupId>
+          <artifactId>javax.servlet-api</artifactId>
+        </exclusion>
       </exclusions>
     </dependency>
 
@@ -355,6 +359,10 @@
         <exclusion>
           <groupId>org.apache.hadoop</groupId>
           <artifactId>hadoop-distcp</artifactId>
+        </exclusion>
+        <exclusion>
+          <groupId>javax.servlet</groupId>
+          <artifactId>javax.servlet-api</artifactId>
         </exclusion>
       </exclusions>
     </dependency>

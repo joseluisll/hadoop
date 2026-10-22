@@ -918,6 +918,11 @@
       </dependency>
       <dependency>
         <groupId>org.eclipse.jetty</groupId>
+        <artifactId>jetty-http</artifactId>
+        <version>${jetty.version}</version>
+      </dependency>
+      <dependency>
+        <groupId>org.eclipse.jetty</groupId>
         <artifactId>jetty-servlet</artifactId>
         <version>${jetty.version}</version>
       </dependency>
@@ -938,6 +943,11 @@
           <exclusion>
             <groupId>org.eclipse.jetty</groupId>
             <artifactId>jetty-webapp</artifactId>
+          </exclusion>
+          <!-- jakarta.annotation-api already provides the javax.annotation classes -->
+          <exclusion>
+            <groupId>javax.annotation</groupId>
+            <artifactId>javax.annotation-api</artifactId>
           </exclusion>
         </exclusions>
       </dependency>
@@ -2177,7 +2187,7 @@
       </dependency>
       <dependency>
         <groupId>org.glassfish.jersey.test-framework.providers</groupId>
-        <artifactId>jersey-test-framework-provider-jetty</artifactId>
+        <artifactId>jersey-test-framework-provider-jdk-http</artifactId>
         <version>${jersey2.version}</version>
         <exclusions>
           <exclusion>
