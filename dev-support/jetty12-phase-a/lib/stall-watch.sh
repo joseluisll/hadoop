@@ -51,6 +51,8 @@ JSTACK=jstack
 [[ -n "${JAVA_HOME:-}" && -x "${JAVA_HOME}/bin/jstack" ]] && JSTACK="${JAVA_HOME}/bin/jstack"
 
 declare -A taken last
+# Stopped by unit-tests.sh or stall-repro.sh: take the poll's sleep along.
+trap 'kill "${sleeper:-}" 2>/dev/null; exit 0' TERM
 
 section() {
   echo
@@ -104,5 +106,6 @@ while kill -0 "${PARENT}" 2>/dev/null; do
   done
   # In the background, so that killing this script does not wait for it.
   sleep "${POLL}" &
-  wait $!
+  sleeper=$!
+  wait "${sleeper}"
 done

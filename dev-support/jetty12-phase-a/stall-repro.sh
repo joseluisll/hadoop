@@ -23,7 +23,8 @@
 # symptom). Not about phase A: any side will do.
 #
 # Runs that test class again and again for STALL_REPRO_MINUTES (default
-# 270), or until STALL_REPRO_STOP_AFTER stalls (default 2). A run whose
+# 270), STALL_REPRO_MAX_RUNS times (default 0: no limit), or until
+# STALL_REPRO_STOP_AFTER stalls (default 2), whichever comes first. A run whose
 # slowest test case takes more than STALL_REPRO_SLOW_CASE seconds (default
 # 60) is a stall. lib/stall-watch.sh watches every run from 150 s on, every
 # 30 s, with loopback packet captures (STALL_TCPDUMP), so a stall leaves the
@@ -60,6 +61,7 @@ MODULE=hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-
 TEST=org/apache/hadoop/mapreduce/TestMRIntermediateDataEncryption.java
 MINUTES=${STALL_REPRO_MINUTES:-270}
 STOP_AFTER=${STALL_REPRO_STOP_AFTER:-2}
+MAX_RUNS=${STALL_REPRO_MAX_RUNS:-0}
 SLOW=${STALL_REPRO_SLOW_CASE:-60}
 VARIANT=${STALL_REPRO_VARIANT:-plain}
 [[ "${VARIANT}" =~ ^(plain|short-circuit)$ ]] || die "STALL_REPRO_VARIANT must be plain or short-circuit"
@@ -124,8 +126,10 @@ EOF
 
 deadline=$((SECONDS + MINUTES * 60))
 i=0 stalls=0 broken=0 offline=()
-log "running ${TEST} for ${MINUTES} min or until ${STOP_AFTER} stalls (a case over ${SLOW}s)"
-while (( SECONDS < deadline && stalls < STOP_AFTER )); do
+limit="${MINUTES} min"
+(( MAX_RUNS > 0 )) && limit+=" or ${MAX_RUNS} runs"
+log "running ${TEST} for ${limit}, or until ${STOP_AFTER} stalls (a case over ${SLOW}s)"
+while (( SECONDS < deadline && stalls < STOP_AFTER && (MAX_RUNS == 0 || i < MAX_RUNS) )); do
   i=$((i + 1))
   dest="${OUT}/iter-${i}"
   mkdir -p "${dest}"

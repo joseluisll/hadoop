@@ -48,6 +48,9 @@ on:
       minutes:
         description: "Minutes each shard keeps trying"
         default: "270"
+      runs:
+        description: "Runs per shard (8 x 63 = 504: enough to see a 1-in-100 stall with 99% probability); 0 for no limit"
+        default: "63"
       variant:
         description: "How the test runs (see stall-repro.sh)"
         type: choice
@@ -151,6 +154,7 @@ jobs:
         shell: bash
         env:
           STALL_REPRO_MINUTES: ${{ inputs.minutes || '270' }}
+          STALL_REPRO_MAX_RUNS: ${{ inputs.runs || '63' }}
         run: |
           ${HARNESS}/stall-repro.sh baseline
           cat "${WORKDIR}/results/baseline/stall-repro/summary.md" >> "${GITHUB_STEP_SUMMARY}"
