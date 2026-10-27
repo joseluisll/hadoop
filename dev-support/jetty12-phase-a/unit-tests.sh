@@ -97,7 +97,11 @@ SUITE_changed_servers=(
   "${HDFS}|org/apache/hadoop/hdfs/web/TestWebHDFS.java,org/apache/hadoop/hdfs/server/namenode/TestNameNodeHttpServer*,org/apache/hadoop/hdfs/server/datanode/web/**/Test*,org/apache/hadoop/hdfs/server/namenode/TestStartupProgressServlet*"
   "${RBF}|org/apache/hadoop/hdfs/server/federation/router/TestRouterHttpServerXFrame*,org/apache/hadoop/hdfs/server/federation/router/web/**/Test*"
   "${YS}/hadoop-yarn-server-timelineservice|org/apache/hadoop/yarn/server/timelineservice/reader/**/Test*"
-  "hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-jobclient|org/apache/hadoop/mapreduce/v2/TestMRJobsWithHistoryService*"
+  # TestMRIntermediateDataEncryption is not about phase A: in Hadoop's CI one
+  # of its HDFS reads over loopback once crawled for half an hour
+  # (MAPREDUCE-7099 is the same symptom). It runs here so lib/stall-watch.sh
+  # can catch the kernel's view of it if it happens again.
+  "hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-jobclient|org/apache/hadoop/mapreduce/v2/TestMRJobsWithHistoryService*,org/apache/hadoop/mapreduce/TestMRIntermediateDataEncryption.java"
 )
 SUITE_secure=(
   "${COMMON}|TestHttpServerWithSpnego,TestSSLHttpServer,TestSSLHttpServerConfigs*,TestKDiag*"
@@ -158,8 +162,13 @@ run_module() {
     args+=(-Pparallel-tests -DtestsThreadCount="${UNIT_TEST_THREADS:-4}")
   fi
   log "${suite}: ${module}${tests:+ ($(tr ',' '\n' <<< "${tests}" | wc -l) test patterns)}"
-  local start=${SECONDS} rc=0
+  local start=${SECONDS} rc=0 watch
+  "${HARNESS_DIR}/lib/stall-watch.sh" "${dest}/stalls" $$ &
+  watch=$!
   mvn_logged "${SIDE}" "${dest}/mvn.log" "${args[@]}" || rc=$?
+  kill "${watch}" 2>/dev/null || true
+  wait "${watch}" 2>/dev/null || true
+  [[ -d "${dest}/stalls" ]] && log "${suite}: ${module}: a test JVM ran past ${STALL_AFTER:-600}s; socket and thread snapshots in ${dest}/stalls"
   local src
   src="$(src_dir "${SIDE}")/${module}/target"
   cp "${src}"/surefire-reports/TEST-*.xml "${dest}/" 2>/dev/null || true

@@ -394,6 +394,15 @@ architecture and an overall verdict. Supporting data sits next to it
 `results/<side>/` (raw observations, CLI output, daemon start-up, scenario
 logs, surefire reports).
 
+A test JVM that runs for more than 600 s (`STALL_AFTER`; Hadoop kills it at
+900 s) gets snapshots of every TCP socket's kernel state (`ss -tinmoep`), the
+kernel's TCP counters and its threads, every 2 minutes, in
+`results/<side>/unit/<suite>__<module>/stalls/` (`lib/stall-watch.sh`). It
+was added after an HDFS read over loopback in
+`TestMRIntermediateDataEncryption` crawled for half an hour in Hadoop's CI
+with both ends waiting on the socket (the symptom of MAPREDUCE-7099); the
+`changed` suite runs that test for this reason only.
+
 - **UNEXPECTED** artifact or downstream differences, **DIFF**/**REGRESSION**/**MISSING**
   observations, classes loaded from an unexpected jar, log errors that are
   new on the candidate or much more frequent there (more than twice the
