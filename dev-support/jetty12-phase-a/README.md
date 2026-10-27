@@ -410,7 +410,20 @@ at 150 s there, samples every 30 s and captures loopback packets. In CI,
 pushing a branch named `jetty12-phase-a-stall-repro-*` starts the workflow
 `Stall reproduction (Jetty 12 phase A harness)`: 8 shards in Hadoop's build
 image, where the stall happened, on PREPARATION, with a summary of all
-shards. It is not part of the comparison.
+shards. It is not part of the comparison. A branch named
+`jetty12-phase-a-stall-repro-scr-*` runs the variant `short-circuit`
+(`STALL_REPRO_VARIANT`): hadoop-common's native library is built and HDFS
+short-circuit local reads are turned on, so the test's input reads go
+through a UNIX domain socket instead of TCP; each run counts the
+datanode's short-circuit grants, and none in the first run stops the
+script.
+
+The first CI run (8 shards, 525 runs) reproduced it 5 times. In every stall
+the map task's socket receive buffer had shrunk to 2 KB (once to 27 KB) after
+the kernel pruned its receive queue, and the datanode, with 64 KB loopback
+segments, could send only 2 KB per 200 ms persist-timer probe. The runners'
+kernel was 6.17.0-1022-azure; HDFS sets no receive buffer size on these
+sockets.
 
 - **UNEXPECTED** artifact or downstream differences, **DIFF**/**REGRESSION**/**MISSING**
   observations, classes loaded from an unexpected jar, log errors that are

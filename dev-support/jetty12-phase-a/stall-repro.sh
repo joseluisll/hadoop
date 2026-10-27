@@ -29,8 +29,22 @@
 # 30 s, with loopback packet captures (STALL_TCPDUMP), so a stall leaves the
 # kernel's view of its sockets behind.
 #
+# STALL_REPRO_VARIANT picks how the test runs:
+#   plain          as in Hadoop's CI without native libraries (default)
+#   short-circuit  with HDFS short-circuit local reads: the datanode hands
+#                  the map task the block files through a UNIX domain socket,
+#                  so input reads never cross TCP. Builds hadoop-common's
+#                  native library (libhadoop, which surefire finds in that
+#                  module's target directory) and adds
+#                  dfs.client.read.shortcircuit and dfs.domain.socket.path to
+#                  jobclient's test hdfs-site.xml in the side's worktree. Each
+#                  run counts the datanode's "REQUEST_SHORT_CIRCUIT_FDS ...
+#                  success: true" log lines, and the script stops if the first
+#                  run has none: a fallback to TCP must not pass as a result.
+#
 # Writes results/<side>/stall-repro/:
-#   iterations.tsv  one line per run: seconds, maven exit, slowest case
+#   iterations.tsv  one line per run: seconds, maven exit, slowest case,
+#                   short-circuit reads
 #   summary.md      runs, stalls, slowest times
 #   iter-<n>/       for a stall only: maven log, surefire reports and test
 #                   output, and the watcher's snapshots (stalls/)
@@ -47,6 +61,8 @@ TEST=org/apache/hadoop/mapreduce/TestMRIntermediateDataEncryption.java
 MINUTES=${STALL_REPRO_MINUTES:-270}
 STOP_AFTER=${STALL_REPRO_STOP_AFTER:-2}
 SLOW=${STALL_REPRO_SLOW_CASE:-60}
+VARIANT=${STALL_REPRO_VARIANT:-plain}
+[[ "${VARIANT}" =~ ^(plain|short-circuit)$ ]] || die "STALL_REPRO_VARIANT must be plain or short-circuit"
 export STALL_AFTER=${STALL_AFTER:-150} STALL_REPEAT=${STALL_REPEAT:-30}
 export STALL_SNAPSHOTS=${STALL_SNAPSHOTS:-30} STALL_TCPDUMP=${STALL_TCPDUMP:-1}
 
@@ -56,7 +72,37 @@ TARGET="${SRC}/${MODULE}/target"
 OUT=$(results_dir "${SIDE}")/stall-repro
 rm -rf "${OUT}"
 mkdir -p "${OUT}"
-printf 'iteration\tstarted\tseconds\tmaven_exit\tslowest_case_s\tslowest_case\tstall\n' > "${OUT}/iterations.tsv"
+printf 'iteration\tstarted\tseconds\tmaven_exit\tslowest_case_s\tslowest_case\tstall\tscr_reads\n' > "${OUT}/iterations.tsv"
+
+if [[ "${VARIANT}" == short-circuit ]]; then
+  log "building hadoop-common's native library; log: ${OUT}/mvn-native.log"
+  mvn_logged "${SIDE}" "${OUT}/mvn-native.log" -nsu compile -pl hadoop-common-project/hadoop-common \
+    -Pnative -Dmaven.javadoc.skip=true -Dspotbugs.skip=true -Dcheckstyle.skip=true \
+    || die "native build failed; see ${OUT}/mvn-native.log"
+  lib="${SRC}/hadoop-common-project/hadoop-common/target/native/target/usr/local/lib/libhadoop.so"
+  [[ -e "${lib}" ]] || die "no ${lib} after the native build"
+  # A UNIX socket path must stay short (108 bytes), and DomainSocket refuses
+  # one whose directories others can write to.
+  sockdir="${WORKDIR}/scr"
+  mkdir -p "${sockdir}"
+  chmod 755 "${sockdir}"
+  site="${SRC}/${MODULE}/src/test/resources/hdfs-site.xml"
+  python3 -I - "${site}" "${sockdir}/dn._PORT.sock" <<'EOF'
+import sys
+path, sock = sys.argv[1], sys.argv[2]
+text = open(path).read()
+props = (f"  <property><name>dfs.client.read.shortcircuit</name><value>true</value></property>\n"
+         f"  <property><name>dfs.domain.socket.path</name><value>{sock}</value></property>\n")
+open(path, "w").write(text.replace("</configuration>", props + "</configuration>"))
+EOF
+  log "short-circuit reads on: ${lib}, socket ${sockdir}/dn._PORT.sock"
+fi
+
+# Short-circuit reads the datanode granted during the last run.
+scr_reads() {
+  cat "${TARGET}"/surefire-reports/*-output.txt 2>/dev/null \
+    | grep -c 'op: REQUEST_SHORT_CIRCUIT_FDS.*success: true' || true
+}
 
 # "<seconds> <name>" of the slowest test case in the surefire reports, or
 # "-1 none" without reports.
@@ -95,6 +141,11 @@ while (( SECONDS < deadline && stalls < STOP_AFTER )); do
   wait "${watch}" 2>/dev/null || true
   secs=$((SECONDS - start))
   read -r case_s case_name <<< "$(slowest_case)"
+  scr=$(scr_reads)
+  if [[ "${VARIANT}" == short-circuit && "${case_s}" != -1.0 && "${scr}" == 0 ]] && (( i == 1 )); then
+    cp -r "${TARGET}/surefire-reports" "${dest}/" 2>/dev/null || true
+    die "run 1 made no short-circuit read (they fell back to TCP); see ${dest}"
+  fi
   stall=no
   if [[ "${case_s}" == -1.0 ]]; then
     broken=$((broken + 1))
@@ -109,7 +160,7 @@ while (( SECONDS < deadline && stalls < STOP_AFTER )); do
       stalls=$((stalls + 1))
     fi
   fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${i}" "${started}" "${secs}" "${rc}" "${case_s}" "${case_name}" "${stall}" >> "${OUT}/iterations.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${i}" "${started}" "${secs}" "${rc}" "${case_s}" "${case_name}" "${stall}" "${scr}" >> "${OUT}/iterations.tsv"
   if [[ "${stall}" == yes || "${case_s}" == -1.0 ]]; then
     cp -r "${TARGET}/surefire-reports" "${dest}/" 2>/dev/null || true
     log "run ${i}: ${secs}s, slowest case ${case_s}s (${case_name}); kept in ${dest}"
@@ -122,12 +173,15 @@ while (( SECONDS < deadline && stalls < STOP_AFTER )); do
 done
 rm -rf "${TARGET}/test-dir"
 
-python3 -I - "${OUT}/iterations.tsv" "${SLOW}" > "${OUT}/summary.md" <<'EOF'
+python3 -I - "${OUT}/iterations.tsv" "${SLOW}" "${VARIANT}" > "${OUT}/summary.md" <<'EOF'
 import csv, sys
 rows = [r for r in csv.DictReader(open(sys.argv[1]), delimiter="\t") if float(r["slowest_case_s"]) >= 0]
 stalls = [r for r in rows if r["stall"] == "yes"]
 cases = sorted(float(r["slowest_case_s"]) for r in rows)
-print(f"Runs of TestMRIntermediateDataEncryption: {len(rows)}; stalls (a case over {sys.argv[2]} s): **{len(stalls)}**")
+print(f"Variant: {sys.argv[3]}. Runs of TestMRIntermediateDataEncryption: {len(rows)}; "
+      f"stalls (a case over {sys.argv[2]} s): **{len(stalls)}**")
+if sys.argv[3] == "short-circuit":
+    print(f"\nRuns without a short-circuit read: {sum(1 for r in rows if r['scr_reads'] == '0')}")
 if cases:
     print(f"\nSlowest case per run: median {cases[len(cases) // 2]:.1f} s, max {cases[-1]:.1f} s")
 for r in stalls:

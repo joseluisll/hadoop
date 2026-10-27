@@ -27,7 +27,9 @@
 # sockets, TCP counters, threads and loopback packets of any slow run.
 #
 # Started by "Run workflow" once this file is on the default branch, or by
-# pushing a branch named jetty12-phase-a-stall-repro-*.
+# pushing a branch named jetty12-phase-a-stall-repro-* (variant "plain") or
+# jetty12-phase-a-stall-repro-scr-* (variant "short-circuit": HDFS
+# short-circuit local reads, so the test's input reads skip TCP).
 #
 # The name does not start with "Jetty 12 phase A: ", so ci/wait-turn.sh does
 # not make the harness runs wait for this one.
@@ -46,6 +48,11 @@ on:
       minutes:
         description: "Minutes each shard keeps trying"
         default: "270"
+      variant:
+        description: "How the test runs (see stall-repro.sh)"
+        type: choice
+        options: [plain, short-circuit]
+        default: plain
   push:
     branches:
       - "jetty12-phase-a-stall-repro-*"
@@ -62,6 +69,7 @@ env:
   WORKDIR: /home/runner/jetty12-work
   HARNESS: dev-support/jetty12-phase-a
   REF: ${{ inputs.ref || 'PREPARATION' }}
+  STALL_REPRO_VARIANT: ${{ inputs.variant || (contains(github.ref_name, '-stall-repro-scr-') && 'short-circuit') || 'plain' }}
 
 jobs:
   prepare:
@@ -102,7 +110,7 @@ jobs:
           overwrite: true
 
   repro:
-    name: Shard ${{ matrix.shard }}
+    name: Shard ${{ matrix.shard }} (${{ inputs.variant || (contains(github.ref_name, '-stall-repro-scr-') && 'short-circuit') || 'plain' }})
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 345
@@ -177,6 +185,7 @@ jobs:
                   runs += 1
                   if r["stall"] == "yes":
                       stalls.append(f"- {shard} run {r['iteration']}: {r['slowest_case']} took {r['slowest_case_s']} s")
-          print(f"## Stall reproduction\n\nRuns of TestMRIntermediateDataEncryption: {runs}; stalls: **{len(stalls)}**\n")
+          print(f"## Stall reproduction ({os.environ['STALL_REPRO_VARIANT']})\n\n"
+                f"Runs of TestMRIntermediateDataEncryption: {runs}; stalls: **{len(stalls)}**\n")
           print("\n".join(stalls))
           EOF

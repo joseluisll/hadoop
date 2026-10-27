@@ -102,5 +102,7 @@ while kill -0 "${PARENT}" 2>/dev/null; do
     last[${pid}]=${now}
     snapshot "${pid}" "${age}" $((n + 1))
   done
-  sleep "${POLL}"
+  # In the background, so that killing this script does not wait for it.
+  sleep "${POLL}" &
+  wait $!
 done
