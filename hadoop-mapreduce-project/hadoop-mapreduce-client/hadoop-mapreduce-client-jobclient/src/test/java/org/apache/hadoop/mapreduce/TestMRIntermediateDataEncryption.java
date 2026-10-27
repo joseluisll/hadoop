@@ -45,7 +45,9 @@ import org.apache.hadoop.fs.FileChecksum;
 import org.apache.hadoop.fs.FileStatus;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.Path;
+import org.apache.hadoop.hdfs.DFSConfigKeys;
 import org.apache.hadoop.hdfs.MiniDFSCluster;
+import org.apache.hadoop.hdfs.client.HdfsClientConfigKeys;
 import org.apache.hadoop.io.LongWritable;
 import org.apache.hadoop.io.Text;
 import org.apache.hadoop.mapred.MiniMRClientCluster;
@@ -59,6 +61,8 @@ import org.apache.hadoop.mapreduce.lib.reduce.LongSumReducer;
 import org.apache.hadoop.mapreduce.security.IntermediateEncryptedStream;
 import org.apache.hadoop.mapreduce.security.SpillCallBackPathsFinder;
 import org.apache.hadoop.mapreduce.util.MRJobConfUtil;
+import org.apache.hadoop.net.unix.DomainSocket;
+import org.apache.hadoop.net.unix.TemporarySocketDirectory;
 import org.apache.hadoop.test.GenericTestUtils;
 import org.apache.hadoop.util.Time;
 import org.apache.hadoop.util.ToolRunner;
@@ -110,6 +114,7 @@ public class TestMRIntermediateDataEncryption {
   private static FileChecksum checkSumReference;
   private static Path jobInputDirPath;
   private static long inputFileSize;
+  private static TemporarySocketDirectory sockDir;
   /**
    * Test parameters.
    */
@@ -161,6 +166,18 @@ public class TestMRIntermediateDataEncryption {
     final Path jobsDirPath = new Path(JOB_DIR_PATH);
 
     commonConfig = createBaseConfiguration();
+    // With the native libraries, read the job input through short-circuit
+    // local reads: over loopback TCP, a map task's read from a datanode can
+    // collapse to a few KB/s and make the test run for half an hour
+    // (MAPREDUCE-7099).
+    if (DomainSocket.getLoadingFailureReason() == null) {
+      sockDir = new TemporarySocketDirectory();
+      DomainSocket.disableBindPathValidation();
+      commonConfig.setBoolean(HdfsClientConfigKeys.Read.ShortCircuit.KEY, true);
+      commonConfig.set(DFSConfigKeys.DFS_DOMAIN_SOCKET_PATH_KEY,
+          new File(sockDir.getDir(),
+              "TestMRIntermediateDataEncryption._PORT.sock").getAbsolutePath());
+    }
     dfsCluster =
         new MiniDFSCluster.Builder(commonConfig, dfsFolder)
             .numDataNodes(2).build();
@@ -189,6 +206,9 @@ public class TestMRIntermediateDataEncryption {
     }
     if (dfsCluster != null) {
       dfsCluster.shutdown();
+    }
+    if (sockDir != null) {
+      sockDir.close();
     }
     // make sure that generated input file is deleted
     final File textInputFile = new File(testRootDir, "input.txt");
