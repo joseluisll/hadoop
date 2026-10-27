@@ -29,6 +29,9 @@
 #   jstack        the JVM's threads.
 # Then again every STALL_REPEAT seconds (default 120), at most STALL_SNAPSHOTS
 # times (default 8), so successive snapshots show whether bytes still move.
+# With STALL_TCPDUMP=1, the first and every tenth snapshot also capture 20 s
+# of loopback packet headers into <dir>/<pid>-<n>.pcap (needs tcpdump and the
+# right to capture, e.g. root in a container).
 # Written for a test whose HDFS read over loopback slowed to a trickle for
 # half an hour (TestMRIntermediateDataEncryption in Hadoop's CI): the thread
 # dump showed both ends waiting on the socket, and only the kernel's view
@@ -63,6 +66,12 @@ section() {
 snapshot() {
   local pid=$1 age=$2 n=$3
   mkdir -p "${DIR}"
+  if [[ "${STALL_TCPDUMP:-}" == 1 ]] && (( n == 1 || n % 10 == 0 )) && command -v tcpdump >/dev/null 2>&1; then
+    # Headers only (-s 96), at most 200000 packets; in the background so the
+    # snapshot below is taken at the same time.
+    timeout 20 tcpdump -i lo -p -nn -s 96 -c 200000 -w "${DIR}/${pid}-${n}.pcap" \
+      > "${DIR}/${pid}-${n}.tcpdump.log" 2>&1 &
+  fi
   {
     echo "test JVM ${pid}, running for ${age}s, snapshot ${n} at $(date -u +%FT%TZ)"
     section "ps" ps -o pid,etimes,pcpu,rss,args -p "${pid}"

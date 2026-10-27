@@ -403,6 +403,15 @@ was added after an HDFS read over loopback in
 with both ends waiting on the socket (the symptom of MAPREDUCE-7099); the
 `changed` suite runs that test for this reason only.
 
+To reproduce that stall on purpose, `stall-repro.sh <side>` runs the test
+class in a loop (4.5 hours by default) and keeps the reports, test output
+and watcher snapshots of every run with a case over 60 s; the watcher starts
+at 150 s there, samples every 30 s and captures loopback packets. In CI,
+pushing a branch named `jetty12-phase-a-stall-repro-*` starts the workflow
+`Stall reproduction (Jetty 12 phase A harness)`: 8 shards in Hadoop's build
+image, where the stall happened, on PREPARATION, with a summary of all
+shards. It is not part of the comparison.
+
 - **UNEXPECTED** artifact or downstream differences, **DIFF**/**REGRESSION**/**MISSING**
   observations, classes loaded from an unexpected jar, log errors that are
   new on the candidate or much more frequent there (more than twice the
