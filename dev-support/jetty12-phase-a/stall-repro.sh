@@ -42,6 +42,11 @@
 #                  run counts the datanode's "REQUEST_SHORT_CIRCUIT_FDS ...
 #                  success: true" log lines, and the script stops if the first
 #                  run has none: a fallback to TCP must not pass as a result.
+#   native         builds the same native library as short-circuit but adds
+#                  no hdfs-site.xml keys: the control for libhadoop alone
+#                  (native checksums and crypto). Short-circuit reads are
+#                  still counted, so a test that turns them on by itself
+#                  shows it.
 #
 # Writes results/<side>/stall-repro/:
 #   iterations.tsv  one line per run: seconds, maven exit, slowest case,
@@ -64,7 +69,7 @@ STOP_AFTER=${STALL_REPRO_STOP_AFTER:-2}
 MAX_RUNS=${STALL_REPRO_MAX_RUNS:-0}
 SLOW=${STALL_REPRO_SLOW_CASE:-60}
 VARIANT=${STALL_REPRO_VARIANT:-plain}
-[[ "${VARIANT}" =~ ^(plain|short-circuit)$ ]] || die "STALL_REPRO_VARIANT must be plain or short-circuit"
+[[ "${VARIANT}" =~ ^(plain|short-circuit|native)$ ]] || die "STALL_REPRO_VARIANT must be plain, short-circuit or native"
 export STALL_AFTER=${STALL_AFTER:-150} STALL_REPEAT=${STALL_REPEAT:-30}
 export STALL_SNAPSHOTS=${STALL_SNAPSHOTS:-30} STALL_TCPDUMP=${STALL_TCPDUMP:-1}
 
@@ -76,13 +81,17 @@ rm -rf "${OUT}"
 mkdir -p "${OUT}"
 printf 'iteration\tstarted\tseconds\tmaven_exit\tslowest_case_s\tslowest_case\tstall\tscr_reads\n' > "${OUT}/iterations.tsv"
 
-if [[ "${VARIANT}" == short-circuit ]]; then
+if [[ "${VARIANT}" =~ ^(short-circuit|native)$ ]]; then
   log "building hadoop-common's native library; log: ${OUT}/mvn-native.log"
   mvn_logged "${SIDE}" "${OUT}/mvn-native.log" -nsu compile -pl hadoop-common-project/hadoop-common \
     -Pnative -Dmaven.javadoc.skip=true -Dspotbugs.skip=true -Dcheckstyle.skip=true \
     || die "native build failed; see ${OUT}/mvn-native.log"
   lib="${SRC}/hadoop-common-project/hadoop-common/target/native/target/usr/local/lib/libhadoop.so"
   [[ -e "${lib}" ]] || die "no ${lib} after the native build"
+  log "native library: ${lib}"
+fi
+
+if [[ "${VARIANT}" == short-circuit ]]; then
   # A UNIX socket path must stay short (108 bytes), and DomainSocket refuses
   # one whose directories others can write to.
   sockdir="${WORKDIR}/scr"
@@ -97,7 +106,7 @@ props = (f"  <property><name>dfs.client.read.shortcircuit</name><value>true</val
          f"  <property><name>dfs.domain.socket.path</name><value>{sock}</value></property>\n")
 open(path, "w").write(text.replace("</configuration>", props + "</configuration>"))
 EOF
-  log "short-circuit reads on: ${lib}, socket ${sockdir}/dn._PORT.sock"
+  log "short-circuit reads on: socket ${sockdir}/dn._PORT.sock"
 fi
 
 # Short-circuit reads the datanode granted during the last run.
@@ -184,8 +193,9 @@ stalls = [r for r in rows if r["stall"] == "yes"]
 cases = sorted(float(r["slowest_case_s"]) for r in rows)
 print(f"Variant: {sys.argv[3]}. Runs of TestMRIntermediateDataEncryption: {len(rows)}; "
       f"stalls (a case over {sys.argv[2]} s): **{len(stalls)}**")
-if sys.argv[3] == "short-circuit":
-    print(f"\nRuns without a short-circuit read: {sum(1 for r in rows if r['scr_reads'] == '0')}")
+if sys.argv[3] in ("short-circuit", "native"):
+    print(f"\nRuns without a short-circuit read: {sum(1 for r in rows if r['scr_reads'] == '0')}; "
+          f"short-circuit reads in all: {sum(int(r['scr_reads']) for r in rows)}")
 if cases:
     print(f"\nSlowest case per run: median {cases[len(cases) // 2]:.1f} s, max {cases[-1]:.1f} s")
 for r in stalls:

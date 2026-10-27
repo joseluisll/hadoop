@@ -416,7 +416,10 @@ shards. It is not part of the comparison. A branch named
 short-circuit local reads are turned on, so the test's input reads go
 through a UNIX domain socket instead of TCP; each run counts the
 datanode's short-circuit grants, and none in the first run stops the
-script.
+script. A branch named `jetty12-phase-a-stall-repro-native-*` runs the variant
+`native`: the same native library, but no short-circuit keys, as the control
+for libhadoop alone; short-circuit grants are still counted. A run branch
+can change `REF` in the workflow to run the tests of another branch.
 
 The first CI run (8 shards, 525 runs) reproduced it 5 times. In every stall
 the map task's socket receive buffer had shrunk to 2 KB (once to 27 KB) after

@@ -29,7 +29,9 @@
 # Started by "Run workflow" once this file is on the default branch, or by
 # pushing a branch named jetty12-phase-a-stall-repro-* (variant "plain") or
 # jetty12-phase-a-stall-repro-scr-* (variant "short-circuit": HDFS
-# short-circuit local reads, so the test's input reads skip TCP).
+# short-circuit local reads, so the test's input reads skip TCP) or
+# jetty12-phase-a-stall-repro-native-* (variant "native": the native library
+# alone). A run branch may change REF below to test another branch.
 #
 # The name does not start with "Jetty 12 phase A: ", so ci/wait-turn.sh does
 # not make the harness runs wait for this one.
@@ -54,7 +56,7 @@ on:
       variant:
         description: "How the test runs (see stall-repro.sh)"
         type: choice
-        options: [plain, short-circuit]
+        options: [plain, short-circuit, native]
         default: plain
   push:
     branches:
@@ -72,7 +74,7 @@ env:
   WORKDIR: /home/runner/jetty12-work
   HARNESS: dev-support/jetty12-phase-a
   REF: ${{ inputs.ref || 'PREPARATION' }}
-  STALL_REPRO_VARIANT: ${{ inputs.variant || (contains(github.ref_name, '-stall-repro-scr-') && 'short-circuit') || 'plain' }}
+  STALL_REPRO_VARIANT: ${{ inputs.variant || (contains(github.ref_name, '-stall-repro-scr-') && 'short-circuit') || (contains(github.ref_name, '-stall-repro-native-') && 'native') || 'plain' }}
 
 jobs:
   prepare:
@@ -113,7 +115,7 @@ jobs:
           overwrite: true
 
   repro:
-    name: Shard ${{ matrix.shard }} (${{ inputs.variant || (contains(github.ref_name, '-stall-repro-scr-') && 'short-circuit') || 'plain' }})
+    name: Shard ${{ matrix.shard }} (${{ inputs.variant || (contains(github.ref_name, '-stall-repro-scr-') && 'short-circuit') || (contains(github.ref_name, '-stall-repro-native-') && 'native') || 'plain' }})
     needs: prepare
     runs-on: ubuntu-24.04
     timeout-minutes: 345
@@ -180,16 +182,20 @@ jobs:
         run: |
           python3 -I - shards >> "${GITHUB_STEP_SUMMARY}" <<'EOF'
           import csv, glob, os, sys
-          runs, stalls = 0, []
+          runs, scr_runs, scr, stalls = 0, 0, 0, []
           for f in sorted(glob.glob(os.path.join(sys.argv[1], "*", "iterations.tsv"))):
               shard = os.path.basename(os.path.dirname(f))
               for r in csv.DictReader(open(f), delimiter="\t"):
                   if float(r["slowest_case_s"]) < 0:
                       continue
                   runs += 1
+                  n = int(r.get("scr_reads") or 0)
+                  scr += n
+                  scr_runs += n > 0
                   if r["stall"] == "yes":
                       stalls.append(f"- {shard} run {r['iteration']}: {r['slowest_case']} took {r['slowest_case_s']} s")
-          print(f"## Stall reproduction ({os.environ['STALL_REPRO_VARIANT']})\n\n"
-                f"Runs of TestMRIntermediateDataEncryption: {runs}; stalls: **{len(stalls)}**\n")
+          print(f"## Stall reproduction ({os.environ['STALL_REPRO_VARIANT']}, {os.environ['REF']})\n\n"
+                f"Runs of TestMRIntermediateDataEncryption: {runs}; stalls: **{len(stalls)}**; "
+                f"runs with short-circuit reads: {scr_runs} ({scr} reads)\n")
           print("\n".join(stalls))
           EOF
