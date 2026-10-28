@@ -150,12 +150,6 @@
       <groupId>org.glassfish.jersey.test-framework.providers</groupId>
       <artifactId>jersey-test-framework-provider-jetty</artifactId>
       <scope>test</scope>
-      <exclusions>
-        <exclusion>
-          <artifactId>jetty-servlet-api</artifactId>
-          <groupId>org.eclipse.jetty.toolchain</groupId>
-        </exclusion>
-      </exclusions>
     </dependency>
     <dependency>
       <groupId>jakarta.ws.rs</groupId>

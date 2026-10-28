@@ -620,10 +620,6 @@
           <artifactId>jakarta.ws.rs-api</artifactId>
         </exclusion>
         <exclusion>
-          <groupId>org.eclipse.jetty.toolchain</groupId>
-          <artifactId>jetty-servlet-api</artifactId>
-        </exclusion>
-        <exclusion>
           <artifactId>junit-jupiter</artifactId>
           <groupId>org.junit.jupiter</groupId>
         </exclusion>

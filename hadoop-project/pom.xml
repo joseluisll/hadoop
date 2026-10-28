@@ -2195,6 +2195,9 @@
             It declares the servlet API under the jakarta.servlet coordinate.
             Those are the same javax.servlet classes jetty-servlet-api carries,
             so letting it through puts two of them on the test classpath.
+            Managed exclusions also apply where it arrives transitively (the
+            Jersey test provider) or is declared with exclusions of its own
+            (hadoop-client-minicluster), so it is excluded only here.
           -->
           <exclusion>
             <groupId>jakarta.servlet</groupId>
@@ -2210,11 +2213,6 @@
           <exclusion>
             <groupId>javax.servlet</groupId>
             <artifactId>javax.servlet-api</artifactId>
-          </exclusion>
-          <!-- Reaches the servlet API again through jersey-test-framework-core. -->
-          <exclusion>
-            <groupId>jakarta.servlet</groupId>
-            <artifactId>jakarta.servlet-api</artifactId>
           </exclusion>
         </exclusions>
       </dependency>
