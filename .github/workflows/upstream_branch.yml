@@ -22,6 +22,10 @@
 # ready for an apache/hadoop pull request. PRs that only change .github/ are
 # skipped. Then rebuild PREPARATION as apache/hadoop trunk plus .github/
 # (rebuild_preparation.yml), so the merged PR does not stay in it.
+#
+# Pushes with the PREPARATION_PUSH_TOKEN secret (a token with contents and
+# workflows write access). Without it, GITHUB_TOKEN is used and the pushed
+# <branch>-upstream gets no Build run for the apache/hadoop pull request.
 
 name: "Upstream branch"
 
@@ -58,6 +62,11 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
+          # The push below must start the Build workflow on <branch>-upstream:
+          # apache/hadoop's "Build" check looks for that run in this fork.
+          # A push with GITHUB_TOKEN starts no workflows, and GITHUB_TOKEN
+          # cannot push apache/hadoop commits that change .github/workflows/.
+          token: ${{ secrets.PREPARATION_PUSH_TOKEN || github.token }}
       - name: Build and push the upstream branch
         run: |
           git config user.name "github-actions[bot]"
@@ -79,8 +88,8 @@ jobs:
           elif [[ ${status} -ne 0 ]]; then
             exit "${status}"
           fi
-          # Pushed with GITHUB_TOKEN, so it does not start the Build workflow
-          # that apache/hadoop's own files would run on that branch.
+          # Pushed with PREPARATION_PUSH_TOKEN, so it starts the Build workflow
+          # from apache/hadoop's own files on that branch.
           git push --force origin "${FEATURE}-upstream"
           echo "::notice::Pushed ${FEATURE}-upstream for an apache/hadoop pull request."
 
