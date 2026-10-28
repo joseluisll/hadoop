@@ -967,6 +967,14 @@
         <artifactId>jakarta.servlet.jsp-api</artifactId>
         <version>2.3.6</version>
       </dependency>
+      <!--
+        The one servlet API (javax.servlet 4.0). It is the artifact and version
+        Jetty 12's ee8 environment manages, so the move to Jetty 12 does not
+        change the coordinate again. Downstream projects that also declare
+        javax.servlet:javax.servlet-api or jakarta.servlet:jakarta.servlet-api
+        4.x get two jars with the same javax.servlet classes, as Maven cannot
+        mediate between different coordinates: they should exclude one of them.
+      -->
       <dependency>
         <groupId>org.eclipse.jetty.toolchain</groupId>
         <artifactId>jetty-servlet-api</artifactId>
