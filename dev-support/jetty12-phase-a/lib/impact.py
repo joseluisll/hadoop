@@ -47,7 +47,8 @@ def load(path):
 
 def announced(reason):
     m = re.search(r"announced:\s*([^;]+)", reason or "", re.I)
-    return None if not m or m.group(1).strip().lower() in ("no", "none", "not yet") else m.group(1).strip()
+    value = m.group(1).strip() if m else ""
+    return None if not value or value.lower().startswith(("no", "not")) else value
 
 
 def status_counts(items):
