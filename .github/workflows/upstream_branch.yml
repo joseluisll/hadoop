@@ -17,19 +17,21 @@
 # under the License.
 #
 
-# Fork-only: when a pull request is merged into PREPARATION, build
-# <branch>-upstream with .github/scripts/make-upstream-branch.sh and push it,
-# ready for an apache/hadoop pull request. PRs that only change .github/ are
-# skipped. Then rebuild PREPARATION as apache/hadoop trunk plus .github/
-# (rebuild_preparation.yml), so the merged PR does not stay in it.
+# Fork-only: each push to a Hadoop JIRA branch (HADOOP-, HDFS-, YARN-,
+# MAPREDUCE-) builds <branch>-upstream from it with
+# .github/scripts/make-upstream-branch.sh and pushes it, ready for an
+# apache/hadoop pull request. No pull request into PREPARATION is needed.
+# Branches that only change .github/ get no upstream branch, and a push that
+# leaves <branch>-upstream unchanged does not push it again.
 #
-# When a feature branch that already has a <branch>-upstream is pushed again,
-# <branch>-upstream is rebuilt from it and pushed too. Feature branches
-# without one are left alone until they are merged into PREPARATION.
+# Each new <branch>-upstream is tested, never the feature branch itself:
+# - Build: apache/hadoop's build_and_test.yml on that branch, started by the
+#   push (the fork's own build_and_test.yml is never started by a push).
+# - Yetus: yetus.yml, called below for that branch.
+# Then PREPARATION is rebuilt as apache/hadoop trunk plus .github/
+# (rebuild_preparation.yml), so it keeps following trunk.
 #
-# Pushing <branch>-upstream is what starts the Build workflow for it
-# (apache/hadoop's build_and_test.yml on that branch); the fork's own
-# build_and_test.yml is not started by pushes to feature branches.
+# A push with [skip ci] in its commit message runs none of this.
 #
 # Pushes with the PREPARATION_PUSH_TOKEN secret (a token with contents and
 # workflows write access). Without it, GITHUB_TOKEN is used and the pushed
@@ -38,9 +40,6 @@
 name: "Upstream branch"
 
 on:
-  pull_request:
-    types: [closed]
-    branches: [PREPARATION]
   push:
     # Hadoop JIRA branches, but never their <branch>-upstream copies.
     branches:
@@ -56,32 +55,23 @@ permissions:
 jobs:
   upstream-branch:
     name: Build upstream branch
-    # Pushes to a feature branch (not its deletion), and merged PRs from
-    # Hadoop JIRA branches (HADOOP-, HDFS-, YARN-, MAPREDUCE-) that live in
-    # this repository, never from a <branch>-upstream branch itself.
-    if: >-
-      (github.event_name == 'push' && !github.event.deleted) ||
-      (github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
-      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-')) &&
-      !endsWith(github.head_ref, '-upstream'))
+    # Not when the branch is deleted.
+    if: ${{ !github.event.deleted }}
     runs-on: ubuntu-24.04
     # One run per feature at a time, so pushes land on <branch>-upstream in order.
     concurrency:
-      group: upstream-branch-${{ github.event.pull_request.head.ref || github.ref_name }}
+      group: upstream-branch-${{ github.ref_name }}
       cancel-in-progress: false
+    outputs:
+      commit: ${{ steps.upstream.outputs.commit }}
     env:
-      FEATURE: ${{ github.event.pull_request.head.ref || github.ref_name }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-      MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+      FEATURE: ${{ github.ref_name }}
       # Author and committer of the upstream commit; Claude is added as co-author.
       UPSTREAM_AUTHOR: "Jose Luis López López <joseluisll@gmail.com>"
     steps:
-      - name: Checkout the merged PREPARATION or the pushed feature branch
+      - name: Checkout the pushed feature branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
           fetch-depth: 0
           # The push below must start the Build workflow on <branch>-upstream:
           # apache/hadoop's "Build" check looks for that run in this fork.
@@ -89,31 +79,18 @@ jobs:
           # cannot push apache/hadoop commits that change .github/workflows/.
           token: ${{ secrets.PREPARATION_PUSH_TOKEN || github.token }}
       - name: Build and push the upstream branch
+        id: upstream
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if [[ "${GITHUB_EVENT_NAME}" == push ]]; then
-            # Only refresh an upstream branch that a merge into PREPARATION
-            # already created.
-            if ! git ls-remote --exit-code --heads origin "${FEATURE}-upstream" >/dev/null; then
-              echo "::notice::${FEATURE}-upstream does not exist yet; it is built when ${FEATURE} is merged into PREPARATION."
-              exit 0
-            fi
-            feature_commit=${GITHUB_SHA}
-            # The apache/hadoop trunk commit the feature is based on, not the
-            # current PREPARATION: that may still hold this feature's merge
-            # until it is rebuilt. PREPARATION only adds .github/ to trunk,
-            # which the script leaves out anyway.
-            git remote add apache https://github.com/apache/hadoop.git
-            git fetch --quiet --no-tags apache trunk
-            base_commit=$(git merge-base FETCH_HEAD "${feature_commit}")
-          else
-            # The PR's head, even if its branch was deleted on merge.
-            git fetch --quiet origin "refs/pull/${PR_NUMBER}/head"
-            feature_commit=$(git rev-parse FETCH_HEAD)
-            # PREPARATION as it was just before this PR was merged.
-            base_commit=$(git rev-parse "${MERGE_COMMIT}^1")
-          fi
+          feature_commit=${GITHUB_SHA}
+          # The apache/hadoop trunk commit the feature is based on, not the
+          # current PREPARATION, which may have been rebuilt on a newer trunk
+          # since. PREPARATION only adds .github/ to trunk, which the script
+          # leaves out anyway.
+          git remote add apache https://github.com/apache/hadoop.git
+          git fetch --quiet --no-tags apache trunk
+          base_commit=$(git merge-base FETCH_HEAD "${feature_commit}")
           # Keep a copy of the script: it checks out apache/hadoop trunk.
           script="${RUNNER_TEMP}/make-upstream-branch.sh"
           cp .github/scripts/make-upstream-branch.sh "${script}"
@@ -127,7 +104,7 @@ jobs:
             exit "${status}"
           fi
           # Nothing changed for apache/hadoop (e.g. a push that only touched
-          # .github/): keep the branch and its Build run as they are.
+          # .github/): keep the branch and its Build and Yetus runs as they are.
           if git fetch --quiet origin "${FEATURE}-upstream" 2>/dev/null &&
               [[ "$(git rev-parse 'FETCH_HEAD^{tree}')" == "$(git rev-parse 'HEAD^{tree}')" ]]; then
             echo "::notice::${FEATURE}-upstream is already up to date."
@@ -136,17 +113,23 @@ jobs:
           # Pushed with PREPARATION_PUSH_TOKEN, so it starts the Build workflow
           # from apache/hadoop's own files on that branch.
           git push --force origin "${FEATURE}-upstream"
+          echo "commit=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
           echo "::notice::Pushed ${FEATURE}-upstream for an apache/hadoop pull request."
+
+  yetus:
+    name: Yetus
+    needs: upstream-branch
+    # Only when <branch>-upstream was created or changed.
+    if: needs.upstream-branch.outputs.commit != ''
+    permissions:
+      contents: read
+    uses: ./.github/workflows/yetus.yml
+    with:
+      branch: ${{ github.ref_name }}-upstream
+      commit: ${{ needs.upstream-branch.outputs.commit }}
 
   rebuild-preparation:
     name: Rebuild PREPARATION
     needs: upstream-branch
-    # After any merged PR from this repository, unless its upstream branch
-    # failed: then PREPARATION keeps the merge so the job can be re-run.
-    if: >-
-      always() &&
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (needs.upstream-branch.result == 'success' || needs.upstream-branch.result == 'skipped')
     uses: ./.github/workflows/rebuild_preparation.yml
     secrets: inherit
