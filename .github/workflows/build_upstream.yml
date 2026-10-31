@@ -26,7 +26,8 @@
 # (workflow_dispatch would need this file on trunk, the fork's default
 # branch). The request branch is deleted at the end, so the same push works
 # again later. "Upstream branch" (upstream_branch.yml) stages the commit as
-# the tag staged/<branch>-upstream on each push to the feature branch.
+# the tag feat/<branch> (e.g. feat/HADOOP-12345) on each push to the feature
+# branch.
 #
 # Pushing <branch>-upstream starts apache/hadoop's build_and_test.yml on it,
 # the run apache/hadoop's "Build" check looks for in this fork. A push that
@@ -75,9 +76,10 @@ jobs:
       - name: Publish the staged commit
         run: |
           branch=${GITHUB_REF_NAME#build/}
-          staged="staged/${branch}"
+          feature=${branch%-upstream}
+          staged="feat/${feature}"
           if ! git fetch --quiet --no-tags --depth=2 origin "refs/tags/${staged}" 2>/dev/null; then
-            echo "::error::Nothing is staged for ${branch}: push ${branch%-upstream} (with the current PREPARATION merged) first."
+            echo "::error::Nothing is staged as ${staged}: push ${feature} (with the current PREPARATION merged) first."
             exit 1
           fi
           commit=$(git rev-parse 'FETCH_HEAD^{commit}')

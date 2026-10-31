@@ -20,7 +20,8 @@
 # Fork-only: each push to a Hadoop JIRA branch (HADOOP-, HDFS-, YARN-,
 # MAPREDUCE-) builds the commit for its apache/hadoop pull request with
 # .github/scripts/make-upstream-branch.sh and stages it as the tag
-# staged/<branch>-upstream. No pull request into PREPARATION is needed.
+# feat/<branch> (e.g. feat/HADOOP-12345). No pull request into PREPARATION
+# is needed.
 # Branches that only change .github/ get no upstream commit, and a push that
 # leaves it unchanged does not push the tag again.
 #
@@ -99,7 +100,7 @@ jobs:
           elif [[ ${status} -ne 0 ]]; then
             exit "${status}"
           fi
-          staged="staged/${FEATURE}-upstream"
+          staged="feat/${FEATURE}"
           # Nothing changed for apache/hadoop (e.g. a push that only touched
           # .github/): keep the staged commit as it is.
           if git fetch --quiet --no-tags origin "refs/tags/${staged}" 2>/dev/null &&
