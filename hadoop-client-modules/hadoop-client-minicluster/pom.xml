@@ -736,6 +736,15 @@
                         <exclude>**/Test*.class</exclude>
                       </excludes>
                     </filter>
+                    <!-- Test support of hadoop-common's TestJettyClasspath tests: it checks a
+                         module's own test classpath and is not for minicluster users. -->
+                    <filter>
+                      <artifact>org.apache.hadoop:hadoop-common:*</artifact>
+                      <excludes>
+                        <exclude>org/apache/hadoop/test/AbstractJettyClasspathTest.class</exclude>
+                        <exclude>org/apache/hadoop/test/ClasspathTestUtils.class</exclude>
+                      </excludes>
+                    </filter>
                     <!-- Since runtime has classes for these jars, we exclude them.
                          We still want the java services api files, since those were excluded in runtime
                       -->
