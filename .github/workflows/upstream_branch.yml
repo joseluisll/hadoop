@@ -24,12 +24,12 @@
 # Branches that only change .github/ get no upstream branch, and a push that
 # leaves <branch>-upstream unchanged does not push it again.
 #
-# Each new <branch>-upstream is tested, never the feature branch itself:
-# - Build: apache/hadoop's build_and_test.yml on that branch, started by the
-#   push (the fork's own build_and_test.yml is never started by a push).
-# - Yetus: yetus.yml, called below for that branch.
-# Then PREPARATION is rebuilt as apache/hadoop trunk plus .github/
-# (rebuild_preparation.yml), so it keeps following trunk.
+# Each new <branch>-upstream gets a Build run, never the feature branch
+# itself: apache/hadoop's build_and_test.yml on that branch, started by the
+# push (the fork's own build_and_test.yml is never started by a push). Yetus
+# only runs on request (see yetus.yml). Then PREPARATION is rebuilt as
+# apache/hadoop trunk plus .github/ (rebuild_preparation.yml), so it keeps
+# following trunk.
 #
 # A push with [skip ci] in its commit message runs none of this.
 #
@@ -62,8 +62,6 @@ jobs:
     concurrency:
       group: upstream-branch-${{ github.ref_name }}
       cancel-in-progress: false
-    outputs:
-      commit: ${{ steps.upstream.outputs.commit }}
     env:
       FEATURE: ${{ github.ref_name }}
       # Author and committer of the upstream commit; Claude is added as co-author.
@@ -79,7 +77,6 @@ jobs:
           # cannot push apache/hadoop commits that change .github/workflows/.
           token: ${{ secrets.PREPARATION_PUSH_TOKEN || github.token }}
       - name: Build and push the upstream branch
-        id: upstream
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -104,7 +101,7 @@ jobs:
             exit "${status}"
           fi
           # Nothing changed for apache/hadoop (e.g. a push that only touched
-          # .github/): keep the branch and its Build and Yetus runs as they are.
+          # .github/): keep the branch and its Build run as they are.
           if git fetch --quiet origin "${FEATURE}-upstream" 2>/dev/null &&
               [[ "$(git rev-parse 'FETCH_HEAD^{tree}')" == "$(git rev-parse 'HEAD^{tree}')" ]]; then
             echo "::notice::${FEATURE}-upstream is already up to date."
@@ -113,20 +110,7 @@ jobs:
           # Pushed with PREPARATION_PUSH_TOKEN, so it starts the Build workflow
           # from apache/hadoop's own files on that branch.
           git push --force origin "${FEATURE}-upstream"
-          echo "commit=$(git rev-parse HEAD)" >> "${GITHUB_OUTPUT}"
           echo "::notice::Pushed ${FEATURE}-upstream for an apache/hadoop pull request."
-
-  yetus:
-    name: Yetus
-    needs: upstream-branch
-    # Only when <branch>-upstream was created or changed.
-    if: needs.upstream-branch.outputs.commit != ''
-    permissions:
-      contents: read
-    uses: ./.github/workflows/yetus.yml
-    with:
-      branch: ${{ github.ref_name }}-upstream
-      commit: ${{ needs.upstream-branch.outputs.commit }}
 
   rebuild-preparation:
     name: Rebuild PREPARATION
