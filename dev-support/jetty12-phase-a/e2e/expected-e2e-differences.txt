@@ -51,3 +51,9 @@ obsfield [a-z0-9:-]+/headers/vary  # Vary on static files varies between runs of
 # run 4 had one on the baseline only. Only the presence of the groups may
 # differ; the response itself is still compared.
 obsfield mapreduce-am:am-job-counters/body/json/jobCounters/counterGroup  # job counters read mid-run depend on timing (MAPREDUCE-7548 under Kerberos)
+
+# HADOOP-19970: the launchers load the servlet API from jetty-servlet-api 4.0.9.
+obsdiff common-cli:load\.(hadoop|hdfs|mapred|yarn)\.javax\.servlet\.(Filter|http\.HttpServlet)  # HADOOP-19970; announced: HADOOP-19970 release note
+# HADOOP-19970: every daemon loads the javax.servlet classes from jetty-servlet-api 4.0.9
+# instead of javax.servlet-api 3.1.0.
+classjar [a-z]+:javax\.servlet\..*  # HADOOP-19970; announced: HADOOP-19970 release note

@@ -27,3 +27,12 @@
 # with jars relative to the distribution. Say where the impact is announced
 # ("announced: HADOOP-19970 release note"); a rule without it, or with
 # "announced: no", shows in the report as an impact nobody was told about.
+
+# --- HADOOP-19970: the servlet API moves to jetty-servlet-api 4.0.9.
+# Servlet 4.0 adds abstract methods to ServletContext. Callers are unaffected;
+# code that implements ServletContext and compiled against javax.servlet-api 3.1.0
+# (direct consumers of hadoop-common got only that jar) must add them.
+api-abstract-method-added javax\.servlet-api-3\.1\.0\.jar -> jetty-servlet-api-4\.0\.9\.jar\|javax\.servlet\.ServletContext#(addJspFile|getSessionTimeout|setSessionTimeout|getRequestCharacterEncoding|setRequestCharacterEncoding|getResponseCharacterEncoding|setResponseCharacterEncoding)\(.*  # HADOOP-19970: Servlet 4.0 ServletContext methods; announced: HADOOP-19970 release note
+# JPMS module name of the servlet API: java.servlet (jakarta 4.0.4) and
+# javax.servlet.api (3.1.0, derived) become jetty.servlet.api (module-info).
+jar-module-name-changed (jakarta\.servlet-api-4\.0\.4|javax\.servlet-api-3\.1\.0)\.jar -> jetty-servlet-api-4\.0\.9\.jar  # HADOOP-19970: module jetty.servlet.api; announced: HADOOP-19970 release note

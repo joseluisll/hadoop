@@ -31,3 +31,17 @@ downstream-dep-removed [^|]+\|javax\.annotation:javax\.annotation-api:jar:1\.3\.
 # it through jetty-server as before, and Maven's mediation does not change
 # (with compile scope it did: next to an older jetty-client, jetty-http went
 # from the client's version to Hadoop's). No rule, so any change fails.
+
+# --- HADOOP-19970: one servlet API, jetty-servlet-api 4.0.9, instead of
+# jakarta.servlet-api 4.0.4 and javax.servlet-api 3.1.0.
+downstream-dep-removed [^|]+\|(jakarta\.servlet:jakarta\.servlet-api:jar:4\.0\.4|javax\.servlet:javax\.servlet-api:jar:3\.1\.0):(compile|test)  # HADOOP-19970; announced: HADOOP-19970 release note
+downstream-dep-added [^|]+\|org\.eclipse\.jetty\.toolchain:jetty-servlet-api:jar:4\.0\.9:(compile|test)  # HADOOP-19970; announced: HADOOP-19970 release note
+# Projects alone (plain, older-jetty) no longer get two servlet APIs; neither do
+# those declaring their own, where the old Hadoop copy is replaced by jetty-servlet-api.
+downstream-dup-removed (plain|older-jetty|own-javax-servlet|own-jakarta-servlet)/[^|]+\|javax\.servlet(\.[a-z]+)?\|jakarta\.servlet:jakarta\.servlet-api,javax\.servlet:javax\.servlet-api  # HADOOP-19970; announced: HADOOP-19970 release note
+# A project that declares its own servlet API now has it next to jetty-servlet-api.
+downstream-dup-added own-javax-servlet/[^|]+\|javax\.servlet(\.[a-z]+)?\|javax\.servlet:javax\.servlet-api,org\.eclipse\.jetty\.toolchain:jetty-servlet-api  # HADOOP-19970: duplicate servlet API; announced: HADOOP-19970 release note
+downstream-dup-added own-jakarta-servlet/[^|]+\|javax\.servlet(\.[a-z]+)?\|jakarta\.servlet:jakarta\.servlet-api,org\.eclipse\.jetty\.toolchain:jetty-servlet-api  # HADOOP-19970: duplicate servlet API; announced: HADOOP-19970 release note
+
+# --- HADOOP-20013: the duplicate javax.annotation-api is gone.
+downstream-dup-removed (plain|older-jetty|own-javax-servlet|own-jakarta-servlet)/[^|]+\|javax\.annotation(\.[a-z]+)?\|jakarta\.annotation:jakarta\.annotation-api,javax\.annotation:javax\.annotation-api  # HADOOP-20013; announced: HADOOP-20013 JIRA
