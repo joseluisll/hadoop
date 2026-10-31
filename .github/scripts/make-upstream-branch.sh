@@ -23,9 +23,12 @@
 #
 # The feature branch's own changes are taken relative to the fork's base
 # branch (PREPARATION by default), so anything that reached the feature branch
-# by merging that base (fork workflows, other JIRAs) is left out. Changes
-# under .github/ are dropped as well. The result is applied on top of
-# apache/hadoop trunk as a single commit.
+# by merging that base (fork workflows, other JIRAs) is left out. Changes to
+# the fork's own .github/ files are dropped as well: those PREPARATION adds or
+# changes on top of the trunk it is built on, and those that "Fork-only"
+# commits in the feature's history touch (older PREPARATIONs). Changes to
+# other .github/ files (e.g. .github/gha-tests/) are kept. The result is
+# applied on top of apache/hadoop trunk as a single commit.
 #
 # Usage: make-upstream-branch.sh <feature-branch> [<upstream-branch>]
 #   <feature-branch> is feat/<name> (e.g. feat/HADOOP-12345).
@@ -45,17 +48,18 @@
 #                    (default: git config user.name and user.email)
 #
 # The commit message joins the feature's commits that start with its JIRA
-# (the start of <name>, e.g. HADOOP-12345) and change something outside
-# .github/ (or else takes its oldest commit), without Claude-Session lines,
-# and with Claude as co-author. The new branch is only created locally; push
-# it yourself once reviewed.
+# (the start of <name>, e.g. HADOOP-12345) and change something outside the
+# fork's own files (or else takes its oldest commit), without Claude-Session
+# lines, and with Claude as co-author. The new branch is only created
+# locally; push it yourself once reviewed.
 #
-# Exit status: 0 created, 3 nothing outside .github/ to send, other on error.
+# Exit status: 0 created, 3 nothing outside the fork's own files to send,
+# other on error.
 
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  sed -n '20,53p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '20,57p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 
@@ -107,22 +111,36 @@ else
   feature_ref="${fork_remote}/${feature}"
 fi
 
-# Only the feature branch's own changes, without .github/.
+# The fork's own .github/ files, which never go to apache/hadoop: those the
+# current PREPARATION adds or changes on top of the trunk it is built on, and
+# those that "Fork-only" commits in the feature's history touch.
+git fetch --quiet "${fork_remote}" "${fork_base}"
+fork_ref="${fork_remote}/${fork_base}"
+fork_files=$( {
+  git diff --name-only "$(git merge-base "${upstream_ref}" "${fork_ref}")" "${fork_ref}" -- .github
+  git log --format= --name-only -E --grep='^Fork-only' "${base_ref}..${feature_ref}" -- .github
+} | sed '/^$/d' | sort -u)
+fork_excludes=()
+while read -r path; do
+  if [[ -n "${path}" ]]; then fork_excludes+=(":(exclude,literal)${path}"); fi
+done <<< "${fork_files}"
+
+# Only the feature branch's own changes, without the fork's own files.
 patch=$(mktemp)
 trap 'rm -f "${patch}"' EXIT
-git diff --binary "${base_ref}...${feature_ref}" -- . ':(exclude).github' > "${patch}"
+git diff --binary "${base_ref}...${feature_ref}" -- . "${fork_excludes[@]}" > "${patch}"
 if [[ ! -s "${patch}" ]]; then
-  echo "Nothing to do: ${feature} has no changes outside .github/ relative to its base."
+  echo "Nothing to do: ${feature} has no changes outside the fork's own files relative to its base."
   exit 3
 fi
 
 # The message comes from the feature's own commits: those that name its JIRA
-# and change something outside .github/, oldest first, so
+# and change something outside the fork's own files, oldest first, so
 # empty "re-trigger CI" commits are skipped. Once PREPARATION is rebuilt,
 # commits that came in by merging an older PREPARATION are in this range too.
 commits=()
 while read -r commit; do
-  if ! git diff --quiet "${commit}^" "${commit}" -- . ':(exclude).github'; then
+  if ! git diff --quiet "${commit}^" "${commit}" -- . "${fork_excludes[@]}"; then
     commits+=("${commit}")
   fi
 done < <(git rev-list --reverse --no-merges -E --grep="^${jira}([^0-9]|$)" \
@@ -168,7 +186,8 @@ GIT_AUTHOR_NAME="${author_name}" GIT_AUTHOR_EMAIL="${author_email}" \
 echo "Created ${target} on ${upstream_ref}:"
 git log --oneline -1
 git diff --stat "${upstream_ref}" "${target}"
-dropped=$(git diff --name-only "${base_ref}...${feature_ref}" -- .github)
+dropped=$(git diff --name-only "${base_ref}...${feature_ref}" -- .github \
+  | grep -F -x -f <(printf '%s\n' "${fork_files}") || true)
 if [[ -n "${dropped}" ]]; then
   echo "Left out (fork-only):"
   echo "${dropped}" | sed 's/^/  /'

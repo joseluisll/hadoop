@@ -22,8 +22,9 @@
 # Each push to one builds the commit for its apache/hadoop pull request with
 # .github/scripts/make-upstream-branch.sh and stages it as the tag
 # staged/<name>. No pull request into PREPARATION is needed. Branches that
-# only change .github/ get no upstream commit, and a push that leaves it
-# unchanged does not push the tag again.
+# only change the fork's own files (its workflows and scripts) get no
+# upstream commit, and a push that leaves it unchanged does not push the tag
+# again.
 #
 # Nothing is built automatically. Pushing a branch would start
 # apache/hadoop's build_and_test.yml on it, but every apache/hadoop workflow
@@ -95,7 +96,7 @@ jobs:
           BASE_COMMIT="${base_commit}" FEATURE_COMMIT="${feature_commit}" \
             bash "${script}" "${FEATURE}" || status=$?
           if [[ ${status} -eq 3 ]]; then
-            echo "::notice::${FEATURE} only changes .github/; no upstream branch needed."
+            echo "::notice::${FEATURE} only changes the fork's own files; no upstream commit needed."
             exit 0
           elif [[ ${status} -ne 0 ]]; then
             exit "${status}"
