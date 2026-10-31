@@ -34,6 +34,11 @@ permissions:
 
 jobs:
   triage:
+    # Fork-only: run only for Hadoop JIRA work branches (feat/HADOOP-, feat/HDFS-,
+    # feat/YARN-, feat/MAPREDUCE-), not the branches built for apache/hadoop.
+    if: >-
+      startsWith(github.head_ref, 'feat/HADOOP-') || startsWith(github.head_ref, 'feat/HDFS-') ||
+      startsWith(github.head_ref, 'feat/YARN-') || startsWith(github.head_ref, 'feat/MAPREDUCE-')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3

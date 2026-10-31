@@ -1,0 +1,91 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Fork-only: rebuild PREPARATION as apache/hadoop trunk plus this fork's
+# .github/ with .github/scripts/rebuild-preparation.sh, and force-push it, so
+# it keeps following trunk. Anything else merged into PREPARATION is dropped.
+# "Upstream branch" calls this workflow after each push to a feature branch
+# (workflow_dispatch and schedule would need the file on trunk, the fork's
+# default branch). Several can run at once: the first to push wins, and the
+# others find PREPARATION moved and leave it, so none waits in a queue
+# (GitHub cancels all but one waiting job of a concurrency group).
+#
+# Pushes with the PREPARATION_PUSH_TOKEN secret when it is set (a token with
+# contents and workflows write access), otherwise with GITHUB_TOKEN.
+
+name: "Rebuild PREPARATION"
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+jobs:
+  rebuild-preparation:
+    name: Rebuild PREPARATION
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout PREPARATION
+        uses: actions/checkout@v4
+        with:
+          ref: PREPARATION
+          fetch-depth: 0
+          token: ${{ secrets.PREPARATION_PUSH_TOKEN || github.token }}
+      - name: Rebuild and push PREPARATION
+        run: |
+          # The script's exit status, not tee's.
+          set -o pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          old_commit=$(git rev-parse HEAD)
+          # Keep a copy of the script: it checks out apache/hadoop trunk.
+          script="${RUNNER_TEMP}/rebuild-preparation.sh"
+          cp .github/scripts/rebuild-preparation.sh "${script}"
+          status=0
+          SOURCE_COMMIT="${old_commit}" bash "${script}" PREPARATION \
+            | tee "${RUNNER_TEMP}/rebuild.log" || status=$?
+          if [[ ${status} -eq 3 ]]; then
+            echo "::notice::PREPARATION is already apache/hadoop trunk plus .github/."
+            exit 0
+          elif [[ ${status} -ne 0 ]]; then
+            exit "${status}"
+          fi
+          # Never overwrites a PREPARATION that moved in the meantime: another
+          # rebuild got there first (or someone pushed), so leave it.
+          if ! git push --force-with-lease="PREPARATION:${old_commit}" origin PREPARATION; then
+            now=$(git ls-remote origin refs/heads/PREPARATION | cut -f1)
+            if [[ -n "${now}" && "${now}" != "${old_commit}" ]]; then
+              echo "::notice::PREPARATION moved to ${now} meanwhile; left as it is."
+              exit 0
+            fi
+            exit 1
+          fi
+          {
+            echo "### PREPARATION rebuilt"
+            echo
+            echo "Previous PREPARATION: \`${old_commit}\`. To undo:"
+            echo
+            echo "\`git push --force origin ${old_commit}:PREPARATION\`"
+            echo
+            echo '```'
+            cat "${RUNNER_TEMP}/rebuild.log"
+            echo '```'
+          } >> "${GITHUB_STEP_SUMMARY}"
+          echo "::notice::PREPARATION rebuilt on apache/hadoop trunk (was ${old_commit})."
