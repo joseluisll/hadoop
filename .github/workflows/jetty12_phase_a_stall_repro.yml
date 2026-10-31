@@ -1,0 +1,195 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Fork-only: tries to reproduce the loopback HDFS read stall that once made
+# TestMRIntermediateDataEncryption run for half an hour in Hadoop's CI (see
+# dev-support/jetty12-phase-a/stall-repro.sh). Not part of the differential
+# harness: one side only (PREPARATION by default), no comparison.
+#
+# Each shard runs the test class in a loop for up to 4.5 hours in Hadoop's
+# build image, where the stall happened, with the stall watcher sampling
+# sockets, TCP counters, threads and loopback packets of any slow run.
+#
+# Started by "Run workflow" once this file is on the default branch, or by
+# pushing a branch named jetty12-phase-a-stall-repro-* (variant "plain") or
+# jetty12-phase-a-stall-repro-scr-* (variant "short-circuit": HDFS
+# short-circuit local reads, so the test's input reads skip TCP).
+#
+# The name does not start with "Jetty 12 phase A: ", so ci/wait-turn.sh does
+# not make the harness runs wait for this one.
+
+name: "Stall reproduction (Jetty 12 phase A harness)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch, tag or commit whose tests to run"
+        default: "PREPARATION"
+      shards:
+        description: "Shards, as a JSON list"
+        default: "[1,2,3,4,5,6,7,8]"
+      minutes:
+        description: "Minutes each shard keeps trying"
+        default: "270"
+      runs:
+        description: "Runs per shard (8 x 63 = 504: enough to see a 1-in-100 stall with 99% probability); 0 for no limit"
+        default: "63"
+      variant:
+        description: "How the test runs (see stall-repro.sh)"
+        type: choice
+        options: [plain, short-circuit]
+        default: plain
+  push:
+    branches:
+      - "jetty12-phase-a-stall-repro-*"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: jetty12-phase-a-stall-repro-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  WORKDIR: /home/runner/jetty12-work
+  HARNESS: dev-support/jetty12-phase-a
+  REF: ${{ inputs.ref || 'PREPARATION' }}
+  STALL_REPRO_VARIANT: ${{ inputs.variant || (contains(github.ref_name, '-stall-repro-scr-') && 'short-circuit') || 'plain' }}
+
+jobs:
+  prepare:
+    name: Installed artifacts
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    outputs:
+      key: ${{ steps.saved.outputs.key }}
+      run: ${{ steps.saved.outputs.run || github.run_id }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ env.REF }}
+          candidate: ${{ env.REF }}
+      - name: Look for saved installed artifacts of the same code
+        id: saved
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          key=$(${HARNESS}/ci/build-key.sh baseline install)
+          echo "key=${key}" >> "${GITHUB_OUTPUT}"
+          echo "run=$(${HARNESS}/ci/find-build.sh "${{ github.repository }}" "${key}")" >> "${GITHUB_OUTPUT}"
+      - name: Build
+        if: steps.saved.outputs.run == ''
+        shell: bash
+        run: ${HARNESS}/build.sh baseline install
+      - name: Save the installed artifacts
+        if: steps.saved.outputs.run == ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.saved.outputs.key }}
+          path: ${{ env.WORKDIR }}/m2/installed-baseline
+          retention-days: 7
+          overwrite: true
+
+  repro:
+    name: Shard ${{ matrix.shard }} (${{ inputs.variant || (contains(github.ref_name, '-stall-repro-scr-') && 'short-circuit') || 'plain' }})
+    needs: prepare
+    runs-on: ubuntu-24.04
+    timeout-minutes: 345
+    container:
+      image: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: ${{ fromJSON(inputs.shards || '[1,2,3,4,5,6,7,8]') }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ env.REF }}
+          candidate: ${{ env.REF }}
+          free-disk: "false"
+      # ss and nstat (iproute2) and tcpdump are not in Hadoop's build image;
+      # the job runs as root in it. Without them the watcher still records
+      # the threads.
+      - name: Network tools
+        shell: bash
+        run: |
+          apt-get update -q > /dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -q iproute2 tcpdump > /dev/null \
+            || echo "::warning::could not install iproute2 and tcpdump"
+          command -v ss nstat tcpdump || true
+      - uses: actions/download-artifact@v4
+        with:
+          name: ${{ needs.prepare.outputs.key }}
+          path: ${{ env.WORKDIR }}/m2/installed-baseline
+          run-id: ${{ needs.prepare.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Check out the tests
+        shell: bash
+        run: ${HARNESS}/build.sh baseline worktree
+      - name: Run the test until it stalls
+        shell: bash
+        env:
+          STALL_REPRO_MINUTES: ${{ inputs.minutes || '270' }}
+          STALL_REPRO_MAX_RUNS: ${{ inputs.runs || '63' }}
+        run: |
+          ${HARNESS}/stall-repro.sh baseline
+          cat "${WORKDIR}/results/baseline/stall-repro/summary.md" >> "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: stall-repro-${{ matrix.shard }}
+          path: ${{ env.WORKDIR }}/results/baseline/stall-repro
+          retention-days: 14
+
+  summary:
+    name: Summary
+    needs: repro
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: stall-repro-*
+          path: shards
+      - name: Stalls over all shards
+        shell: bash
+        run: |
+          python3 -I - shards >> "${GITHUB_STEP_SUMMARY}" <<'EOF'
+          import csv, glob, os, sys
+          runs, stalls = 0, []
+          for f in sorted(glob.glob(os.path.join(sys.argv[1], "*", "iterations.tsv"))):
+              shard = os.path.basename(os.path.dirname(f))
+              for r in csv.DictReader(open(f), delimiter="\t"):
+                  if float(r["slowest_case_s"]) < 0:
+                      continue
+                  runs += 1
+                  if r["stall"] == "yes":
+                      stalls.append(f"- {shard} run {r['iteration']}: {r['slowest_case']} took {r['slowest_case_s']} s")
+          print(f"## Stall reproduction ({os.environ['STALL_REPRO_VARIANT']})\n\n"
+                f"Runs of TestMRIntermediateDataEncryption: {runs}; stalls: **{len(stalls)}**\n")
+          print("\n".join(stalls))
+          EOF

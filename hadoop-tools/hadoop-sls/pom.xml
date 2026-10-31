@@ -54,7 +54,7 @@
       <scope>provided</scope>
       <exclusions>
         <exclusion>
-          <groupId>org.eclipse.jetty</groupId>
+          <groupId>javax.servlet</groupId>
           <artifactId>javax.servlet-api</artifactId>
         </exclusion>
       </exclusions>
@@ -62,6 +62,11 @@
     <dependency>
       <groupId>org.eclipse.jetty</groupId>
       <artifactId>jetty-util</artifactId>
+      <scope>provided</scope>
+    </dependency>
+    <dependency>
+      <groupId>org.eclipse.jetty</groupId>
+      <artifactId>jetty-http</artifactId>
       <scope>provided</scope>
     </dependency>
     <dependency>

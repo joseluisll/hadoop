@@ -1,0 +1,420 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Fork-only: one architecture of the Jetty 12 phase A no-functional-change
+# harness (dev-support/jetty12-phase-a), called by jetty12_phase_a_<arch>.yml.
+# Builds the baseline and the candidate, runs the architecture end to end
+# and its unit test suites on both, and compares them; report.md goes to the
+# run summary and the report artifact.
+#
+# Two runs check the harness rather than the patch, chosen by the name of the
+# branch that starts the caller:
+#   jetty12-phase-a-<arch>-run-aa-*      baseline against itself: the
+#                                        candidate is baseline_ref too; any
+#                                        difference is noise
+#   jetty12-phase-a-<arch>-run-broken-<case>-<n>
+#                                        the candidate's distribution is broken
+#                                        on purpose (cases in
+#                                        ci/break_candidate.py: annotation, the
+#                                        default, jetty, static, webhdfs-user);
+#                                        the result must be FAIL
+#
+# Runs go one at a time across all five architectures, oldest first: the
+# first jobs (queue, then queue-2) wait until no earlier harness run is active
+# (ci/wait-turn.sh). GitHub's concurrency groups would cancel all but one
+# pending run instead of queueing them. A job runs 6 hours at most, so queue
+# waits up to 340 minutes and hands the wait on to queue-2, which returns at
+# once when queue already got the turn: up to about 11 hours in all, and no
+# job is ever skipped (a skipped job would skip everything after it).
+#
+# Builds are reused between runs: most runs change only the harness, and the
+# baseline is the same commit every time. A fresh build is also uploaded as an
+# artifact named after its key (ci/build-key.sh: the side's code, the harness
+# files that shape the build, the JDK), and a later run with the same key
+# downloads it instead of building (ci/find-build.sh). Artifacts, unlike the
+# actions cache, can be read across branches, and every run has its own
+# branch; they expire after 7 days. The build jobs reuse the packed
+# distribution, the unit jobs the installed Maven artifacts.
+#
+# The distributions are built with the native libraries (BUILD_NATIVE) in
+# Hadoop's build image, the one apache/hadoop's "Image Cache" workflow
+# publishes from dev-support/docker and tmpl_build_and_test.yml uses: it has
+# the native toolchain. The other jobs run on the plain runner (Ubuntu 24.04,
+# as the image), which runs the native libraries.
+
+name: "Jetty 12 phase A harness (template)"
+
+on:
+  workflow_call:
+    inputs:
+      arch:
+        description: "Architecture from dev-support/jetty12-phase-a/e2e/arch"
+        type: string
+        required: true
+      unit_suites:
+        description: "Unit test suites, as a JSON list"
+        type: string
+        required: true
+      baseline_ref:
+        type: string
+        default: "PREPARATION"
+      candidate_ref:
+        type: string
+        default: ""
+      unit_tier:
+        type: string
+        default: "quick"
+      maven_mirror:
+        type: string
+        default: ""
+      break_candidate:
+        description: "Specs for ci/break_candidate.py, to break the candidate on purpose"
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+env:
+  WORKDIR: /home/runner/jetty12-work
+  HARNESS: dev-support/jetty12-phase-a
+  MAVEN_MIRROR_URL: ${{ inputs.maven_mirror }}
+  BASELINE: ${{ inputs.baseline_ref || 'PREPARATION' }}
+  CANDIDATE: ${{ contains(github.ref_name, '-run-aa-') && (inputs.baseline_ref || 'PREPARATION') || inputs.candidate_ref || github.sha }}
+  BREAK_CANDIDATE: ${{ inputs.break_candidate }}
+  BREAK_REF: ${{ github.ref_name }}
+
+jobs:
+  queue:
+    name: Wait for earlier harness runs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      turn: ${{ steps.wait.outputs.turn }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: dev-support/jetty12-phase-a/ci
+      - name: Wait for the runs started before this one
+        id: wait
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rc=0
+          ${HARNESS}/ci/wait-turn.sh "${{ github.repository }}" "${{ github.run_id }}" --budget 340 || rc=$?
+          case "${rc}" in
+            0) echo "turn=true" >> "${GITHUB_OUTPUT}" ;;
+            3) echo "turn=false" >> "${GITHUB_OUTPUT}" ;;
+            *) exit "${rc}" ;;
+          esac
+
+  queue-2:
+    name: Wait for earlier harness runs (continued)
+    needs: queue
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Already our turn
+        if: needs.queue.outputs.turn == 'true'
+        shell: bash
+        run: echo "the first waiting job got the turn"
+      - uses: actions/checkout@v6
+        if: needs.queue.outputs.turn != 'true'
+        with:
+          sparse-checkout: dev-support/jetty12-phase-a/ci
+      - name: Keep waiting for the runs started before this one
+        if: needs.queue.outputs.turn != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rc=0
+          ${HARNESS}/ci/wait-turn.sh "${{ github.repository }}" "${{ github.run_id }}" --budget 340 || rc=$?
+          if (( rc == 3 )); then
+            echo "::error::still not this run's turn after about 11 hours of waiting; start it again later"
+          fi
+          exit "${rc}"
+
+  build:
+    name: Build ${{ matrix.side }}
+    needs: queue-2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      actions: read
+      contents: read
+    container:
+      image: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
+    env:
+      BUILD_NATIVE: "true"
+      BUILD_IMAGE: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
+      # Both sides at the same path: the native libraries embed their source
+      # paths (aa-3: 17 native files differed between two builds of one commit).
+      BUILD_SRC_DIR: /home/runner/jetty12-work/src
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [baseline, candidate]
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      # Inside the container the host's preinstalled toolchains are out of reach.
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ env.BASELINE }}
+          candidate: ${{ env.CANDIDATE }}
+          free-disk: "false"
+      - name: Disk space
+        shell: bash
+        run: df -h / "${GITHUB_WORKSPACE}" | sed 1d
+      - name: Look for a saved build of the same code
+        id: saved
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          key=$(${HARNESS}/ci/build-key.sh ${{ matrix.side }} dist)
+          echo "key=${key}" >> "${GITHUB_OUTPUT}"
+          echo "run=$(${HARNESS}/ci/find-build.sh "${{ github.repository }}" "${key}")" >> "${GITHUB_OUTPUT}"
+      - uses: actions/download-artifact@v4
+        if: steps.saved.outputs.run != ''
+        with:
+          name: ${{ steps.saved.outputs.key }}
+          path: ${{ runner.temp }}/out
+          run-id: ${{ steps.saved.outputs.run }}
+          github-token: ${{ github.token }}
+      - name: Build
+        if: steps.saved.outputs.run == ''
+        shell: bash
+        run: ${HARNESS}/build.sh ${{ matrix.side }}
+      - name: Self-compare the build
+        if: steps.saved.outputs.run == ''
+        shell: bash
+        run: ${HARNESS}/artifact-diff.sh ${{ matrix.side }} ${{ matrix.side }}
+      - name: Pack
+        if: steps.saved.outputs.run == ''
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh pack-build ${{ matrix.side }} "${RUNNER_TEMP}/out"
+      - name: Save the build for later runs
+        if: steps.saved.outputs.run == ''
+        # Saving only speeds up later runs; a failed upload must not fail this one.
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.saved.outputs.key }}
+          path: ${{ runner.temp }}/out
+          retention-days: 7
+          compression-level: 0
+      - name: Reuse the saved build
+        if: steps.saved.outputs.run != ''
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh reuse-build ${{ matrix.side }} "${RUNNER_TEMP}/out"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.side }}
+          path: ${{ runner.temp }}/out
+          retention-days: 7
+          compression-level: 0
+      - name: Build logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-logs-${{ matrix.side }}
+          path: ${{ env.WORKDIR }}/results/${{ matrix.side }}/build
+          retention-days: 7
+
+  e2e:
+    name: E2E ${{ inputs.arch }} ${{ matrix.side }}
+    needs: build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [baseline, candidate]
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ env.BASELINE }}
+          candidate: ${{ env.CANDIDATE }}
+          free-disk: "false"
+      - name: Kerberos client tools
+        if: inputs.arch == 'secure'
+        shell: bash
+        run: |
+          sudo apt-get update -q > /dev/null
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y -q krb5-user > /dev/null
+      - uses: actions/download-artifact@v4
+        with:
+          name: build-${{ matrix.side }}
+          path: ${{ runner.temp }}/build
+      - name: Unpack
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh unpack-build ${{ matrix.side }} "${RUNNER_TEMP}/build"
+      - name: Run ${{ inputs.arch }}
+        shell: bash
+        run: ${HARNESS}/e2e/run.sh ${{ matrix.side }} ${{ inputs.arch }}
+      - name: Pack
+        if: always()
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh pack-e2e ${{ matrix.side }} ${{ inputs.arch }} "${RUNNER_TEMP}/out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-${{ matrix.side }}-${{ inputs.arch }}
+          path: ${{ runner.temp }}/out
+          retention-days: 14
+
+  unit:
+    name: Unit ${{ matrix.suite }} ${{ matrix.side }}
+    needs: queue-2
+    # A broken-candidate run breaks the distribution, which the unit tests
+    # (built from source) never see: skip them there.
+    if: inputs.unit_suites != '[]' && !contains(github.ref_name, '-run-broken-')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        side: [baseline, candidate]
+        suite: ${{ fromJSON(inputs.unit_suites) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ env.BASELINE }}
+          candidate: ${{ env.CANDIDATE }}
+      - name: Look for saved installed artifacts of the same code
+        id: saved
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          key=$(${HARNESS}/ci/build-key.sh ${{ matrix.side }} install)
+          echo "key=${key}" >> "${GITHUB_OUTPUT}"
+          echo "run=$(${HARNESS}/ci/find-build.sh "${{ github.repository }}" "${key}")" >> "${GITHUB_OUTPUT}"
+      - uses: actions/download-artifact@v4
+        if: steps.saved.outputs.run != ''
+        with:
+          name: ${{ steps.saved.outputs.key }}
+          path: ${{ env.WORKDIR }}/m2/installed-${{ matrix.side }}
+          run-id: ${{ steps.saved.outputs.run }}
+          github-token: ${{ github.token }}
+      # With the side's installed artifacts restored, the tests only need the
+      # source tree: each suite compiles its own modules.
+      - name: Build
+        shell: bash
+        run: ${HARNESS}/build.sh ${{ matrix.side }} ${{ steps.saved.outputs.run != '' && 'worktree' || 'install' }}
+      # Each suite of a side installs the same artifacts; the last upload wins.
+      - name: Save the installed artifacts for later runs
+        if: steps.saved.outputs.run == ''
+        # Saving only speeds up later runs; a failed upload must not fail this one.
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.saved.outputs.key }}
+          path: ${{ env.WORKDIR }}/m2/installed-${{ matrix.side }}
+          retention-days: 7
+          overwrite: true
+      - name: Test ${{ matrix.suite }}
+        shell: bash
+        run: ${HARNESS}/unit-tests.sh ${{ matrix.side }} ${{ matrix.suite }} ${{ inputs.unit_tier }}
+      # The client suite is about what Hadoop gives its users; the downstream
+      # projects need the same installed artifacts.
+      - name: Downstream dependencies
+        if: matrix.suite == 'client'
+        shell: bash
+        run: ${HARNESS}/downstream-deps.sh ${{ matrix.side }}
+      - name: Pack
+        if: always()
+        shell: bash
+        run: ${HARNESS}/ci/artifacts.sh pack-unit ${{ matrix.side }} "${RUNNER_TEMP}/out"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: unit-${{ matrix.side }}-${{ matrix.suite }}
+          path: ${{ runner.temp }}/out
+          retention-days: 14
+
+  compare:
+    name: Compare
+    needs: [build, e2e, unit]
+    if: (!cancelled()) && needs.build.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v6
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ env.BASELINE }}
+          candidate: ${{ env.CANDIDATE }}
+          free-disk: "false"
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: build-*
+          path: ${{ runner.temp }}/builds
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "{e2e,unit}-*"
+          path: ${{ runner.temp }}/results
+      - name: Unpack
+        shell: bash
+        run: |
+          for side in baseline candidate; do
+            ${HARNESS}/ci/artifacts.sh unpack-build "${side}" "${RUNNER_TEMP}/builds/build-${side}"
+          done
+          ${HARNESS}/ci/artifacts.sh unpack-results "${RUNNER_TEMP}"/results/*
+      - name: Compare
+        shell: bash
+        run: ${HARNESS}/compare.sh ${{ inputs.arch }}
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          report="${WORKDIR}/results/compare/report.md"
+          {
+            echo "Architecture: **${{ inputs.arch }}**, unit suites: \`${{ inputs.unit_suites }}\`"
+            echo
+            if [[ -f "${report}" ]]; then
+              # The step summary holds 1 MiB; the full report is an artifact.
+              head -c 900000 "${report}"
+            else
+              echo "No report was produced; see the Compare step log."
+            fi
+          } >> "${GITHUB_STEP_SUMMARY}"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: report-${{ inputs.arch }}
+          path: ${{ env.WORKDIR }}/results/compare
+          retention-days: 30
