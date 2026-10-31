@@ -21,24 +21,36 @@
 name: "Yetus"
 
 # Runs the same precommit as the ASF Jenkins job in dev-support/Jenkinsfile:
-# the same Yetus build, the Ubuntu Noble run on every PR, and the optional
-# Rocky Linux 8 and Debian 13 runs that jenkins.sh only carries out when a PR
-# changes C/C++ code or the build platform.
+# the same Yetus build, the Ubuntu Noble run on every change, and the optional
+# Rocky Linux 8 and Debian 13 runs that jenkins.sh only carries out when a
+# change touches C/C++ code or the build platform.
+#
+# Fork-only: only runs when requested, for the <name> branch an
+# apache/hadoop pull request is opened from (published by
+# build_upstream.yml). Request it by pushing a yetus/<name> branch that
+# carries this file, e.g.:
+#
+#   git push origin PREPARATION:yetus/HADOOP-12345
+#
+# (workflow_dispatch would need this file on trunk, the fork's default
+# branch). yetus/<name>-upstream tests a <name>-upstream branch, for pull
+# requests opened before feat/ branches. The request branch is deleted right
+# away, so the same push works again later. Yetus tests the branch's current
+# commit as a patch on apache/hadoop trunk, as Jenkins tests an
+# apache/hadoop pull request.
+# Results stay in the run (job summary and report artifact); nothing is
+# written back to GitHub, since there is no pull request here to comment on.
 
 on:
-  pull_request:
-    types: [opened, reopened, synchronize]
-    # Fork-only: only PRs into PREPARATION.
-    branches: [PREPARATION]
+  push:
+    branches:
+      - "yetus/HADOOP-*"
+      - "yetus/HDFS-*"
+      - "yetus/YARN-*"
+      - "yetus/MAPREDUCE-*"
 
 permissions:
   contents: read
-  pull-requests: write
-  statuses: write
-
-concurrency:
-  group: yetus-${{ github.event.pull_request.number }}
-  cancel-in-progress: true
 
 env:
   # a7d29a6 changed GitHub PR patch downloads in a way that fails in Actions.
@@ -51,22 +63,46 @@ env:
   BUILD_IMAGE_SUFFIX: -image-cache:trunk-static
 
 jobs:
+  request:
+    name: Read the request
+    # Not when a request branch is deleted.
+    if: ${{ !github.event.deleted }}
+    runs-on: ubuntu-24.04
+    permissions:
+      # To delete the request branch.
+      contents: write
+    outputs:
+      branch: ${{ steps.request.outputs.branch }}
+      commit: ${{ steps.request.outputs.commit }}
+    steps:
+      - name: Find the upstream branch and delete the request
+        id: request
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          branch=${GITHUB_REF_NAME#yetus/}
+          commit=$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/heads/${branch}" \
+            --jq .object.sha 2>/dev/null) || commit=
+          gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${GITHUB_REF_NAME}"
+          if [[ -z "${commit}" ]]; then
+            echo "::error::There is no ${branch} branch to test; publish it first: git push origin PREPARATION:build/${branch}"
+            exit 1
+          fi
+          echo "branch=${branch}" >> "${GITHUB_OUTPUT}"
+          echo "commit=${commit}" >> "${GITHUB_OUTPUT}"
+          echo "::notice::Testing ${branch} at ${commit}."
+
   yetus:
     name: Yetus precommit (${{ matrix.platform }})
-    # A run that starts after its PR was merged can get the base branch as
-    # github.ref instead of refs/pull/<N>/merge, and Yetus cannot tell which
-    # PR to test. Skip it. "Run Yetus" also skips PRs that are no longer open.
-    # Fork-only: also run only for Hadoop JIRA branches (HADOOP-, HDFS-, YARN-, MAPREDUCE-),
-    # but not their <branch>-upstream copies built for apache/hadoop.
-    if: >-
-      startsWith(github.ref, 'refs/pull/') &&
-      (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
-      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-')) &&
-      !endsWith(github.head_ref, '-upstream')
+    needs: request
     runs-on: ubuntu-24.04
     # GitHub-hosted runners stop a job after 6 hours.
     timeout-minutes: 360
     continue-on-error: ${{ matrix.optional == '1' }}
+    # A newer request for the same branch replaces the one being tested.
+    concurrency:
+      group: yetus-${{ needs.request.outputs.branch }}-${{ matrix.platform }}
+      cancel-in-progress: true
     strategy:
       fail-fast: false
       matrix:
@@ -87,19 +123,32 @@ jobs:
       PATCHDIR: ${{ github.workspace }}/out
       DOCKERFILE: ${{ github.workspace }}/yetus-base/Dockerfile
       IS_OPTIONAL: ${{ matrix.optional }}
-      CHANGE_URL: ${{ github.event.pull_request.html_url }}
-      PATCH_OR_ISSUE: ${{ github.event.pull_request.html_url }}
-      BRANCH_NAME: ${{ github.event.pull_request.base.ref }}
-      BUILD_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      GITHUB_USER: ${{ github.actor }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
+      PLATFORM: ${{ matrix.platform }}
+      UPSTREAM_BRANCH: ${{ needs.request.outputs.branch }}
+      UPSTREAM_COMMIT: ${{ needs.request.outputs.commit }}
+      # Outside SOURCEDIR, which Yetus resets and cleans.
+      PATCH_FILE: ${{ github.workspace }}/patch/${{ needs.request.outputs.branch }}.patch
     steps:
-      - name: Checkout Hadoop
+      - name: Checkout apache/hadoop trunk
+        # Yetus resets SOURCEDIR to trunk and pulls it from origin, so origin
+        # must be apache/hadoop.
         uses: actions/checkout@v4
         with:
+          repository: apache/hadoop
+          ref: trunk
           path: src
           fetch-depth: 0
+      - name: Make the patch from ${{ needs.request.outputs.branch }}
+        # jenkins.sh decides whether the optional platforms run from what
+        # HEAD changes against origin/trunk, so HEAD is the upstream commit.
+        run: |
+          git -C "${SOURCEDIR}" fetch --quiet --no-tags \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" "${UPSTREAM_COMMIT}"
+          git -C "${SOURCEDIR}" checkout --quiet --detach "${UPSTREAM_COMMIT}"
+          base=$(git -C "${SOURCEDIR}" merge-base origin/trunk HEAD)
+          mkdir -p "$(dirname "${PATCH_FILE}")"
+          git -C "${SOURCEDIR}" format-patch --stdout "${base}..HEAD" > "${PATCH_FILE}"
+          git -C "${SOURCEDIR}" log --oneline "${base}..HEAD"
       - name: Checkout Yetus
         uses: actions/checkout@v4
         with:
@@ -116,25 +165,28 @@ jobs:
           cat "${DOCKERFILE}"
       - name: Run Yetus
         run: |
-          # A run that only starts after its PR was merged would test the
-          # patch against a base branch that already contains it.
-          state=$(curl -fsSL -H "Authorization: Bearer ${GITHUB_TOKEN}" \
-            -H "Accept: application/vnd.github+json" \
-            "${GITHUB_API_URL}/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-            | jq -r .state) || state=unknown
-          if [[ "${state}" == closed ]]; then
-            echo "::notice::PR #${PR_NUMBER} is already merged or closed; skipping Yetus."
-            exit 0
-          fi
-          git -C "$SOURCEDIR" fetch origin "${BRANCH_NAME}:refs/remotes/origin/${BRANCH_NAME}" || true
+          # Yetus' GitHub Actions support would test the pushed request
+          # branch as a full build; with any other event name it tests the
+          # patch below against trunk.
+          export GITHUB_EVENT_NAME=workflow_call
+          # jenkins.sh hands JIRA_ISSUE_KEY to Yetus as what to test.
+          export JIRA_ISSUE_KEY="${PATCH_FILE}"
           bash "$SOURCEDIR/dev-support/jenkins.sh" run_ci
-      - name: Send GitHub status if it was missed
-        # YETUS-1059; Jenkins does this for the Ubuntu Noble run only.
-        if: always() && matrix.optional == '0'
-        run: bash "$SOURCEDIR/dev-support/jenkins.sh" github_status_recovery
       - name: Clean up Yetus processes
         if: always()
         run: bash "$SOURCEDIR/dev-support/jenkins.sh" cleanup_ci_proc
+      - name: Summarize the Yetus report
+        if: always()
+        run: |
+          if [[ -f "${PATCHDIR}/console.txt" ]]; then
+            {
+              echo "### Yetus (${PLATFORM}) on ${UPSTREAM_BRANCH} ${UPSTREAM_COMMIT}"
+              echo
+              echo '```'
+              head -c 500000 "${PATCHDIR}/console.txt"
+              echo '```'
+            } >> "${GITHUB_STEP_SUMMARY}"
+          fi
       - name: Upload Yetus report
         # Like Jenkins: always for Ubuntu Noble, on failure for the optional
         # platforms.

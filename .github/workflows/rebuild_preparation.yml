@@ -18,10 +18,11 @@
 #
 
 # Fork-only: rebuild PREPARATION as apache/hadoop trunk plus this fork's
-# .github/ with .github/scripts/rebuild-preparation.sh, and force-push it.
-# Merged JIRA pull requests are dropped from PREPARATION; their upstream
-# branches have already been built by "Upstream branch", which calls this
-# workflow once it is done (workflow_dispatch would need the file on trunk).
+# .github/ with .github/scripts/rebuild-preparation.sh, and force-push it, so
+# it keeps following trunk. Anything else merged into PREPARATION is dropped.
+# "Upstream branch" calls this workflow after each push to a feature branch
+# (workflow_dispatch and schedule would need the file on trunk, the fork's
+# default branch).
 #
 # Pushes with the PREPARATION_PUSH_TOKEN secret when it is set (a token with
 # contents and workflows write access), otherwise with GITHUB_TOKEN.
