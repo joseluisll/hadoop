@@ -20,17 +20,14 @@
 name: "Build"
 
 # Security: write privileges are safe since this is triggered
-# only by `push` (implying user has write access).
+# only by `workflow_dispatch` (implying user has write access).
+#
+# Fork-only: never started by a push. The Build run that apache/hadoop's
+# "Build" check looks for runs on <branch>-upstream, from apache/hadoop's own
+# build_and_test.yml on that branch, when "Upstream branch"
+# (upstream_branch.yml) pushes it.
 on:
-  push:
-    # Fork-only: run only for Hadoop JIRA branches, but not their
-    # <branch>-upstream copies built for apache/hadoop.
-    branches:
-      - "HADOOP-**"
-      - "HDFS-**"
-      - "YARN-**"
-      - "MAPREDUCE-**"
-      - "!**-upstream"
+  workflow_dispatch:
 
 jobs:
   default:
