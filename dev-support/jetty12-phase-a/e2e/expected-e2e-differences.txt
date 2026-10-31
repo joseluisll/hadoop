@@ -54,6 +54,7 @@ obsfield mapreduce-am:am-job-counters/body/json/jobCounters/counterGroup  # job 
 
 # HADOOP-19970: the launchers load the servlet API from jetty-servlet-api 4.0.9.
 obsdiff common-cli:load\.(hadoop|hdfs|mapred|yarn)\.javax\.servlet\.(Filter|http\.HttpServlet)  # HADOOP-19970; announced: HADOOP-19970 release note
-# HADOOP-19970: every daemon loads the javax.servlet classes from jetty-servlet-api 4.0.9
+# HADOOP-19970: every daemon (jn1, nn1, ... in the multi-instance architectures) loads
+# the javax.servlet classes from jetty-servlet-api 4.0.9
 # instead of javax.servlet-api 3.1.0.
-classjar [a-z]+:javax\.servlet\..*  # HADOOP-19970; announced: HADOOP-19970 release note
+classjar [A-Za-z0-9_.-]+:javax\.servlet\..*  # HADOOP-19970; announced: HADOOP-19970 release note
