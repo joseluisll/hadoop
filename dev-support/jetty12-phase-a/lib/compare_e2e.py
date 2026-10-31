@@ -21,6 +21,11 @@ Usage: compare_e2e.py --expected FILE --out DIR --arch NAME BASELINE_E2E CANDIDA
 Every observation (component + id) is classified:
   MATCH          both sides met the expectation and the normalized views are equal
   DIFF           both met it, but the normalized views differ
+
+Before comparing, line numbers in Java stack frames ("(HttpServlet.java:687)")
+are dropped from every string: an error page or message that prints a stack
+trace changes with any recompiled or upgraded jar in it, while the frames
+themselves (which classes and methods) still count.
   REGRESSION     baseline met it, candidate did not
   FIXED          candidate met it, baseline did not
   BOTH_FAIL      neither met it (an environment problem, or broken on both)
@@ -76,6 +81,21 @@ def load_json(path):
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     return {}
+
+
+# "(HttpServlet.java:687)" -> "(HttpServlet.java)"; Kotlin/Scala/Groovy frames too.
+STACK_FRAME_LINE = re.compile(r"\(([\w$]+\.(?:java|kt|scala|groovy)):\d+\)")
+
+
+def normalize(value):
+    """value with the line numbers of Java stack frames removed from every string."""
+    if isinstance(value, str):
+        return STACK_FRAME_LINE.sub(r"(\1)", value)
+    if isinstance(value, dict):
+        return {k: normalize(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [normalize(v) for v in value]
+    return value
 
 
 def first_difference(a, b, path=""):
@@ -170,6 +190,7 @@ def main():
         if rb is None or rc is None:
             cls, detail = "MISSING", "only on " + ("candidate" if rb is None else "baseline")
         elif rb["ok"] and rc["ok"]:
+            rb, rc = {**rb, "obs": normalize(rb["obs"])}, {**rc, "obs": normalize(rc["obs"])}
             d = first_difference(rb["obs"], rc["obs"])
             cls, detail = ("MATCH", None) if d is None else ("DIFF", d)
         elif rb["ok"]:

@@ -23,12 +23,21 @@
 # compared by artifact-diff.sh, but a downstream project mediates them with
 # its own: declaring a jar directly in a Hadoop pom moves it nearer to the
 # downstream project, and Maven's nearest-wins rule can then pick another
-# version there although nothing changes inside Hadoop. Two scenarios, one
-# small project per Hadoop artifact and scenario:
-#   plain        the Hadoop artifact alone;
-#   older-jetty  the Hadoop artifact, then a Jetty client of another
-#                version (DOWNSTREAM_JETTY_CLIENT), which brings its own
-#                jetty-http and jetty-io one level down.
+# version there although nothing changes inside Hadoop. One small project per
+# Hadoop artifact and scenario:
+#   plain                the Hadoop artifact alone;
+#   older-jetty          the Hadoop artifact, then a Jetty client of another
+#                        version (DOWNSTREAM_JETTY_CLIENT), which brings its
+#                        own jetty-http and jetty-io one level down;
+#   own-javax-servlet    the Hadoop artifact, then its own servlet API under
+#                        the javax.servlet coordinate (DOWNSTREAM_JAVAX_SERVLET,
+#                        as HBase declares it);
+#   own-jakarta-servlet  the same under the jakarta.servlet coordinate
+#                        (DOWNSTREAM_JAKARTA_SERVLET, as Spark and Hive).
+# Maven mediates versions of one coordinate only: when Hadoop brings the same
+# classes under another coordinate, both jars end up on the classpath. So each
+# project also records its classpath, and lib/downstream_classes.py writes the
+# classes more than one jar provides to results/<side>/downstream/duplicates.tsv.
 # Needs the side's artifacts installed (build.sh <side> install, or restored
 # from a saved build) and Maven Central for the third-party ones.
 
@@ -43,6 +52,14 @@ SRC=$(src_dir "${SIDE}")
 OUT=$(results_dir "${SIDE}")/downstream
 PROJ=$(side_dir "${SIDE}")/downstream-project
 COMPETITOR=${DOWNSTREAM_JETTY_CLIENT:-org.eclipse.jetty:jetty-client:9.4.40.v20210413}
+# The extra dependency each scenario declares after the Hadoop artifact.
+declare -A EXTRA=(
+  [plain]=""
+  [older-jetty]="${COMPETITOR}"
+  [own-javax-servlet]="${DOWNSTREAM_JAVAX_SERVLET:-javax.servlet:javax.servlet-api:3.1.0}"
+  [own-jakarta-servlet]="${DOWNSTREAM_JAKARTA_SERVLET:-jakarta.servlet:jakarta.servlet-api:4.0.4}"
+)
+SCENARIOS=(plain older-jetty own-javax-servlet own-jakarta-servlet)
 # <artifactId>[:<scope>], the Hadoop artifacts downstream projects use.
 ARTIFACTS=(
   hadoop-common hadoop-hdfs-client hadoop-hdfs
@@ -84,14 +101,16 @@ EOF
 
 rm -rf "${PROJ}" "${OUT}"
 mkdir -p "${PROJ}" "${OUT}"
-IFS=: read -r cg ca cv <<< "${COMPETITOR}"
 modules=""
-for scenario in plain older-jetty; do
+for scenario in "${SCENARIOS[@]}"; do
   for entry in "${ARTIFACTS[@]}"; do
     artifact=${entry%%:*} scope=compile
     [[ "${entry}" == *:* ]] && scope=${entry#*:}
     deps=$(dep org.apache.hadoop "${artifact}" "${version}" "${scope}")
-    [[ "${scenario}" == older-jetty ]] && deps+=$'\n'$(dep "${cg}" "${ca}" "${cv}" compile)
+    if [[ -n "${EXTRA[${scenario}]}" ]]; then
+      IFS=: read -r eg ea ev <<< "${EXTRA[${scenario}]}"
+      deps+=$'\n'$(dep "${eg}" "${ea}" "${ev}" compile)
+    fi
     mkdir -p "${PROJ}/${scenario}/${artifact}"
     pom "${scenario}-${artifact}" pom "  <dependencies>
 ${deps}
@@ -103,15 +122,22 @@ pom aggregator pom "  <modules>
 ${modules}  </modules>" > "${PROJ}/pom.xml"
 {
   echo "hadoop ${version}"
-  echo "older-jetty competitor ${COMPETITOR}"
+  for scenario in "${SCENARIOS[@]}"; do
+    echo "scenario ${scenario} ${EXTRA[${scenario}]:-(none)}"
+  done
   printf 'artifact %s\n' "${ARTIFACTS[@]}"
 } > "${OUT}/scenarios.txt"
 
-log "resolving ${#ARTIFACTS[@]} Hadoop ${version} artifacts in 2 scenarios; log: ${OUT}/mvn-dependency-list.log"
+log "resolving ${#ARTIFACTS[@]} Hadoop ${version} artifacts in ${#SCENARIOS[@]} scenarios; log: ${OUT}/mvn-dependency-list.log"
 # -nsu: the side's installed SNAPSHOT jars, never remote ones.
 mvn_logged "${SIDE}" "${OUT}/mvn-dependency-list.log" -nsu -f "${PROJ}/pom.xml" \
   "org.apache.maven.plugins:maven-dependency-plugin:3.8.1:list" \
+  "org.apache.maven.plugins:maven-dependency-plugin:3.8.1:build-classpath" \
   -Dmdep.outputScope=true -DoutputFile=target/jetty12-deps.txt -Dsort=true \
+  -Dmdep.outputFile=target/jetty12-cp.txt \
   || die "dependency:list failed; see ${OUT}/mvn-dependency-list.log"
 python3 -I "${HARNESS_DIR}/lib/collect_deps.py" "${PROJ}" > "${OUT}/dependencies.tsv"
 log "$(wc -l < "${OUT}/dependencies.tsv") resolved dependencies in ${OUT}/dependencies.tsv"
+python3 -I "${HARNESS_DIR}/lib/downstream_classes.py" "${PROJ}" "${M2_REPO:-${WORKDIR}/m2}" \
+  > "${OUT}/duplicates.tsv"
+log "$(wc -l < "${OUT}/duplicates.tsv") packages with classes from more than one jar in ${OUT}/duplicates.tsv"

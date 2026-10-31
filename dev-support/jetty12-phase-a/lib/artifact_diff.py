@@ -62,13 +62,19 @@ ARCHIVE = (".jar", ".war")
 
 class Allowlist:
     """Lines of '<kind> <regex>  # reason'. Both are regexes; each matches the
-    whole kind or subject (a kind such as 'dep-(removed|added)' covers two)."""
+    whole kind or subject (a kind such as 'dep-(removed|added)' covers two).
+    The reason starts at a '#' with whitespace on both sides (or at the start
+    of the line), so a regex may contain '#', as API subjects do
+    ('Class#method')."""
+
+    COMMENT = re.compile(r"(^|\s)#(\s|$)")
 
     def __init__(self, path):
         self.rules = []
         with open(path, encoding="utf-8") as f:
             for n, line in enumerate(f, 1):
-                body, _, reason = line.partition("#")
+                m = self.COMMENT.search(line)
+                body, reason = (line[:m.start()], line[m.end():]) if m else (line, "")
                 body = body.strip()
                 if not body:
                     continue

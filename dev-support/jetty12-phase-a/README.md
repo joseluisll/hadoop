@@ -30,7 +30,11 @@ This harness builds the tree without the patch (**baseline**, default
 `origin/PREPARATION`) and with it (**candidate**, default
 `origin/HADOOP-99999`), runs the same checks on both, and reports every
 difference. Differences the patch is meant to cause are listed, with the
-JIRA that causes them, in two allowlists; anything else fails the run.
+JIRA that causes them, in allowlists; anything else fails the run. The
+point is to find what the patch changes for Hadoop's users that its JIRA,
+PR or release note does not say: each rule's reason names the ticket and,
+for user-visible changes, where users are told (`announced: <where>`), and
+the report lists the accepted changes nobody was told about.
 
 ## What is checked
 
@@ -43,7 +47,23 @@ JIRA that causes them, in two allowlists; anything else fails the run.
      reader, shaded client, minicluster) and the jar each class is first
      loaded from;
    - every module's resolved dependencies, all scopes (`dependency:list`).
-2. **End to end, in five architectures** (`e2e/run.sh`): real daemons
+2. **API compatibility** (`lib/api_compat.py`, run by `artifact-diff.sh`):
+   every class that changes, read from the class files (no JVM): the classes
+   the launchers load from another jar or with other bytes (what the daemons
+   run), the changed classes of jars on both sides (Hadoop's jars and the
+   shaded clients) and both copies of a replaced jar (a third-party version
+   or coordinate change, which is also what Maven consumers of the
+   non-shaded artifacts get). It classifies what breaks code built against
+   the old classes: removed or less visible classes and members, final,
+   static or kind changes, a changed superclass or field type (breaking);
+   abstract methods added to interfaces and abstract classes (code that
+   implements or extends them no longer compiles); a changed JPMS module
+   name; class files for a newer Java than `--max-class-version` (61, Java
+   17). Relocated packages (`org.apache.hadoop.shaded.*`) and
+   `@InterfaceAudience.Private` classes are listed but do not fail.
+   Allowlist: `expected-api-differences.txt`. Behaviour changes inside a
+   method are left to checks 3 and 4.
+3. **End to end, in five architectures** (`e2e/run.sh`): real daemons
    started from each side's distribution tarball on one host, the same
    scenarios run against both sides. Each observation records whether the
    expectation held and a normalized view (HTTP status, content type,
@@ -51,22 +71,40 @@ JIRA that causes them, in two allowlists; anything else fails the run.
    assets, TLS protocol and cipher, CLI exit code, checksums of
    deterministic job output) that must be identical on both sides. Every
    daemon JVM logs the classes it loads, and all daemon and container logs
-   are scanned for class loading, linkage and JAX-RS provider errors.
-3. **Hadoop's own tests, by architecture** (`unit-tests.sh`): the tests of
+   are scanned for class loading, linkage and JAX-RS provider errors. Line
+   numbers in Java stack frames are dropped before comparing, so an error
+   page that prints a stack trace does not differ just because a jar in it
+   was recompiled or upgraded.
+4. **Hadoop's own tests, by architecture** (`unit-tests.sh`): the tests of
    every module whose build phase A changes, and existing MiniKdc, HA,
    federation and mixed-topology tests, on both trees, compared test by
    test; plus the shaded client invariant checks and
    `hadoop-client-integration-tests`.
-4. **What downstream projects resolve** (`downstream-deps.sh`): one small
+5. **What downstream projects resolve** (`downstream-deps.sh`): one small
    Maven project per published Hadoop artifact (hadoop-common, the HDFS,
    MapReduce and YARN clients, hadoop-client, the shaded clients, the
-   miniclusters), resolved against each side's installed artifacts, alone
-   and next to an older Jetty client. Check 1 compares Hadoop's own modules;
-   this one shows what Maven's nearest-wins mediation picks in a project that
-   depends on Hadoop, which a dependency declared directly in a Hadoop pom
-   can change. Allowlist: `expected-downstream-differences.txt`. It runs
-   with the `client` unit suite (the `simple` workflow) and in `run-all.sh`;
-   the report has the section only when it ran.
+   miniclusters), resolved against each side's installed artifacts in four
+   scenarios: alone, next to an older Jetty client, and next to the
+   project's own servlet API under the `javax.servlet` coordinate (as HBase
+   declares it) and under `jakarta.servlet` (as Spark and Hive). Check 1
+   compares Hadoop's own modules; this one shows what Maven's nearest-wins
+   mediation picks in a project that depends on Hadoop, which a dependency
+   declared directly in a Hadoop pom can change. Maven mediates versions of
+   one coordinate only, so each project's classpath is also scanned for
+   classes that more than one jar provides (`lib/downstream_classes.py`):
+   a new set of such jars (`downstream-dup-added`) means a downstream
+   project now gets two copies of the same classes and classpath order
+   decides which one loads. Allowlist:
+   `expected-downstream-differences.txt`. It runs with the `client` unit
+   suite (the `simple` workflow) and in `run-all.sh`; the report has the
+   section only when it ran.
+
+The report starts with **Impact on users** (`lib/impact.py`), built from all
+the checks: for the daemons and applications on the Hadoop classpath, the
+users of each shaded client jar and the Maven projects in each downstream
+scenario, what changes, how much of it is accepted by a rule, and which
+accepted user-visible differences have no `announced:` in their rule. It has
+no verdict of its own.
 
 ## Architectures
 
@@ -388,9 +426,9 @@ with itself, which must report no differences.
 
 `$WORKDIR/results/compare/report.md` has one section per check and
 architecture and an overall verdict. Supporting data sits next to it
-(`artifact-diff.json`, `e2e-compare-<arch>.json`,
+(`artifact-diff.json`, `api-compat.json`, `e2e-compare-<arch>.json`,
 `classload-compare-<arch>.json`, `unit-compare.json`,
-`downstream-compare.json`) and under
+`downstream-compare.json`, `impact.md`) and under
 `results/<side>/` (raw observations, CLI output, daemon start-up, scenario
 logs, surefire reports).
 
@@ -425,7 +463,7 @@ segments, could send only 2 KB per 200 ms persist-timer probe. The runners'
 kernel was 6.17.0-1022-azure; HDFS sets no receive buffer size on these
 sockets.
 
-- **UNEXPECTED** artifact or downstream differences, **DIFF**/**REGRESSION**/**MISSING**
+- **UNEXPECTED** artifact, API or downstream differences, **DIFF**/**REGRESSION**/**MISSING**
   observations, classes loaded from an unexpected jar, log errors that are
   new on the candidate or much more frequent there (more than twice the
   baseline's count and at least 6 more), an observation id recorded twice,
@@ -446,6 +484,10 @@ sockets.
   have made did not show up; check why.
 
 When the patch changes, update `expected-differences.txt`,
-`expected-downstream-differences.txt` and
+`expected-api-differences.txt`, `expected-downstream-differences.txt` and
 `e2e/expected-e2e-differences.txt`, naming the JIRA for each rule, and keep
-the patterns narrow.
+the patterns narrow. Before adding a rule for a user-visible difference
+(an API finding, a downstream dependency or duplicate, a change in a shaded
+client or a lib jar), make sure the JIRA, the PR or the release note says
+it, and write where in the rule (`# HADOOP-NNNNN: why; announced: release
+note`).

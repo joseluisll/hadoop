@@ -70,7 +70,8 @@ def main(results):
     archs = sorted(f[len("e2e-compare-"):-len(".json")] for f in os.listdir(cmp_dir)
                    if f.startswith("e2e-compare-") and f.endswith(".json")) \
         if os.path.isdir(cmp_dir) else []
-    parts = [("Artifacts and dependencies", "artifact-diff.json", "artifact-diff.md")]
+    parts = [("Artifacts and dependencies", "artifact-diff.json", "artifact-diff.md"),
+             ("API compatibility", "api-compat.json", "api-compat.md")]
     parts += [(f"End-to-end: {a}", f"e2e-compare-{a}.json", f"e2e-compare-{a}.md") for a in archs]
     if not archs:
         parts.append(("End-to-end", "e2e-compare-none.json", "e2e-compare-none.md"))
@@ -90,6 +91,9 @@ def main(results):
            "| Check | Verdict |", "|---|---|"]
     out += [f"| {n} | {v} |" for n, v in verdicts]
     out.append("")
+    impact = read(os.path.join(cmp_dir, "impact.md"))
+    if impact:
+        out.append(impact)
     for _, _, md in parts:
         text = read(os.path.join(cmp_dir, md))
         if text:
