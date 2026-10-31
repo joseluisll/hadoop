@@ -37,12 +37,10 @@ on:
 jobs:
   notify:
     name: "Notify Test Workflow"
-    # Fork-only: run only for Hadoop JIRA branches (HADOOP-, HDFS-, YARN-, MAPREDUCE-),
-    # but not their <branch>-upstream copies built for apache/hadoop.
-    if: >-
-      (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
-      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-')) &&
-      !endsWith(github.head_ref, '-upstream')
+    # Fork-only: feature branches get no Build run here (build_and_test.yml
+    # is not started by a push), so there is no run to link to on PRs into
+    # PREPARATION. Only apache/hadoop runs this, for its own PRs.
+    if: github.repository == 'apache/hadoop'
     runs-on: ubuntu-slim
     permissions:
       actions: read
