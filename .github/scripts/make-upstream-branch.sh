@@ -28,7 +28,8 @@
 # apache/hadoop trunk as a single commit.
 #
 # Usage: make-upstream-branch.sh <feature-branch> [<upstream-branch>]
-#   <upstream-branch> defaults to <feature-branch>-upstream.
+#   <feature-branch> is feat/<name> (e.g. feat/HADOOP-12345).
+#   <upstream-branch> defaults to <name> (e.g. HADOOP-12345).
 #
 # Environment:
 #   FORK_REMOTE      remote of this fork            (default: origin)
@@ -43,23 +44,30 @@
 #   UPSTREAM_AUTHOR  author and committer, as "Name <email>"
 #                    (default: git config user.name and user.email)
 #
-# The commit message joins the feature's commits that start with the feature
-# branch name (its JIRA) and change something outside .github/ (or else takes
-# its oldest commit), without Claude-Session lines, and with Claude as
-# co-author. The new branch is only created locally; push it yourself once
-# reviewed.
+# The commit message joins the feature's commits that start with its JIRA
+# (the start of <name>, e.g. HADOOP-12345) and change something outside
+# .github/ (or else takes its oldest commit), without Claude-Session lines,
+# and with Claude as co-author. The new branch is only created locally; push
+# it yourself once reviewed.
 #
 # Exit status: 0 created, 3 nothing outside .github/ to send, other on error.
 
 set -euo pipefail
 
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  sed -n '20,52p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '20,53p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 
 feature=$1
-target=${2:-${feature}-upstream}
+name=${feature#feat/}
+target=${2:-${name}}
+# The JIRA the feature's commits start with.
+if [[ "${name}" =~ ^[A-Z][A-Z0-9]*-[0-9]+ ]]; then
+  jira=${BASH_REMATCH[0]}
+else
+  jira=${name}
+fi
 fork_remote=${FORK_REMOTE:-origin}
 fork_base=${FORK_BASE:-PREPARATION}
 upstream_remote=${UPSTREAM_REMOTE:-apache}
@@ -109,7 +117,7 @@ if [[ ! -s "${patch}" ]]; then
 fi
 
 # The message comes from the feature's own commits: those that name its JIRA
-# (the branch name) and change something outside .github/, oldest first, so
+# and change something outside .github/, oldest first, so
 # empty "re-trigger CI" commits are skipped. Once PREPARATION is rebuilt,
 # commits that came in by merging an older PREPARATION are in this range too.
 commits=()
@@ -117,7 +125,7 @@ while read -r commit; do
   if ! git diff --quiet "${commit}^" "${commit}" -- . ':(exclude).github'; then
     commits+=("${commit}")
   fi
-done < <(git rev-list --reverse --no-merges -E --grep="^${feature}([^0-9]|$)" \
+done < <(git rev-list --reverse --no-merges -E --grep="^${jira}([^0-9]|$)" \
   "${base_ref}..${feature_ref}")
 if [[ ${#commits[@]} -eq 0 ]]; then
   commits=("$(git rev-list --reverse --no-merges "${base_ref}..${feature_ref}" | head -n 1)")
@@ -136,7 +144,7 @@ message=$(git log -1 --format=%s "${commits[0]}")
 body=$(body_of "${commits[0]}")
 if [[ -n "${body}" ]]; then message+=$'\n\n'"${body}"; fi
 for commit in "${commits[@]:1}"; do
-  subject=$(git log -1 --format=%s "${commit}" | sed -E "s/^${feature}[.:]?[[:space:]]*//")
+  subject=$(git log -1 --format=%s "${commit}" | sed -E "s/^${jira}[.:]?[[:space:]]*//")
   message+=$'\n\n'"${subject}"
   body=$(body_of "${commit}")
   if [[ -n "${body}" ]]; then message+=$'\n\n'"${body}"; fi

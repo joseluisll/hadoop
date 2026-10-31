@@ -17,20 +17,26 @@
 # under the License.
 #
 
-# Fork-only: publish a staged upstream commit as <branch>-upstream, which
-# starts its Build run, only when requested. Request it by pushing a
-# build/<branch>-upstream branch that carries this file, e.g.:
+# Fork-only: publish a staged upstream commit as the <name> branch, which
+# the apache/hadoop pull request is opened from, and so start its Build run,
+# only when requested. Request it by pushing a build/<name> branch that
+# carries this file, e.g.:
 #
-#   git push origin PREPARATION:build/HADOOP-12345-upstream
+#   git push origin PREPARATION:build/HADOOP-12345
 #
 # (workflow_dispatch would need this file on trunk, the fork's default
 # branch). The request branch is deleted at the end, so the same push works
 # again later. "Upstream branch" (upstream_branch.yml) stages the commit as
-# the tag feat/<branch> (e.g. feat/HADOOP-12345) on each push to the feature
-# branch.
+# the tag staged/<name> on each push to feat/<name>. Pull requests opened
+# before feat/ branches, from <name>-upstream, are updated with
+# build/<name>-upstream, which publishes staged/<name> there.
 #
-# Pushing <branch>-upstream starts apache/hadoop's build_and_test.yml on it,
-# the run apache/hadoop's "Build" check looks for in this fork. A push that
+# It never overwrites work: an existing branch is only replaced when it is
+# what this workflow publishes (one commit on apache/hadoop trunk) or when
+# feat/<name> already contains it.
+#
+# Pushing the branch starts apache/hadoop's build_and_test.yml on it, the
+# run apache/hadoop's "Build" check looks for in this fork. A push that
 # leaves the branch where it is starts nothing, so when the staged commit is
 # already published, the same commit is published again with a new
 # committer date, and the tag is moved along with it.
@@ -43,7 +49,10 @@ name: "Build upstream branch"
 on:
   push:
     branches:
-      - "build/*-upstream"
+      - "build/HADOOP-*"
+      - "build/HDFS-*"
+      - "build/YARN-*"
+      - "build/MAPREDUCE-*"
 
 permissions:
   contents: write
@@ -74,23 +83,48 @@ jobs:
           sparse-checkout: .github
           token: ${{ secrets.PREPARATION_PUSH_TOKEN }}
       - name: Publish the staged commit
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           branch=${GITHUB_REF_NAME#build/}
-          feature=${branch%-upstream}
-          staged="feat/${feature}"
+          # <name>, or <name>-upstream for pull requests opened before feat/.
+          name=${branch%-upstream}
+          staged="staged/${name}"
           if ! git fetch --quiet --no-tags --depth=2 origin "refs/tags/${staged}" 2>/dev/null; then
-            echo "::error::Nothing is staged as ${staged}: push ${feature} (with the current PREPARATION merged) first."
+            echo "::error::Nothing is staged as ${staged}: push feat/${name} (with the current PREPARATION merged) first."
             exit 1
           fi
           commit=$(git rev-parse 'FETCH_HEAD^{commit}')
           published=$(git ls-remote origin "refs/heads/${branch}" | cut -f1)
+          if [[ -n "${published}" && "${published}" != "${commit}" ]]; then
+            # Only replace a branch that feat/<name> contains, or one commit
+            # on apache/hadoop trunk (what this workflow publishes).
+            feat=$(git ls-remote origin "refs/heads/feat/${name}" | cut -f1)
+            contained=
+            if [[ -n "${feat}" ]]; then
+              contained=$(gh api "repos/${GITHUB_REPOSITORY}/compare/${published}...${feat}" \
+                --jq .status 2>/dev/null) || contained=
+            fi
+            parents=$(gh api "repos/${GITHUB_REPOSITORY}/commits/${published}" \
+              --jq '[.parents[].sha] | join(" ")')
+            on_trunk=
+            if [[ -n "${parents}" && "${parents}" != *" "* ]]; then
+              on_trunk=$(gh api "repos/apache/hadoop/compare/${parents}...trunk" \
+                --jq .status 2>/dev/null) || on_trunk=
+            fi
+            if [[ "${contained}" != ahead && "${contained}" != identical &&
+                  "${on_trunk}" != ahead && "${on_trunk}" != identical ]]; then
+              echo "::error::${branch} holds work that is not in feat/${name}; rename it to feat/${name} (or merge it there) first."
+              exit 1
+            fi
+          fi
           refs=()
           if [[ "${published}" == "${commit}" ]]; then
             # Same author and message, new committer date, so the push moves
             # the branch and starts a Build.
-            IFS='|' read -r name email date < <(git log -1 --format='%an|%ae|%aI' "${commit}")
-            commit=$(GIT_AUTHOR_NAME="${name}" GIT_AUTHOR_EMAIL="${email}" GIT_AUTHOR_DATE="${date}" \
-              GIT_COMMITTER_NAME="${name}" GIT_COMMITTER_EMAIL="${email}" \
+            IFS='|' read -r a_name a_email a_date < <(git log -1 --format='%an|%ae|%aI' "${commit}")
+            commit=$(GIT_AUTHOR_NAME="${a_name}" GIT_AUTHOR_EMAIL="${a_email}" GIT_AUTHOR_DATE="${a_date}" \
+              GIT_COMMITTER_NAME="${a_name}" GIT_COMMITTER_EMAIL="${a_email}" \
               git commit-tree "${commit}^{tree}" -p "${commit}^" \
                 -F <(git cat-file commit "${commit}" | sed '1,/^$/d'))
             refs+=("+${commit}:refs/tags/${staged}")

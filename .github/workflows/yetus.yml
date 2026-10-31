@@ -25,23 +25,29 @@ name: "Yetus"
 # Rocky Linux 8 and Debian 13 runs that jenkins.sh only carries out when a
 # change touches C/C++ code or the build platform.
 #
-# Fork-only: only runs when requested, and only for a <branch>-upstream
-# branch. Request it by pushing a yetus/<branch>-upstream branch that carries
-# this file, e.g.:
+# Fork-only: only runs when requested, for the <name> branch an
+# apache/hadoop pull request is opened from (published by
+# build_upstream.yml). Request it by pushing a yetus/<name> branch that
+# carries this file, e.g.:
 #
-#   git push origin PREPARATION:yetus/HADOOP-12345-upstream
+#   git push origin PREPARATION:yetus/HADOOP-12345
 #
 # (workflow_dispatch would need this file on trunk, the fork's default
-# branch). The request branch is deleted right away, so the same push works
-# again later. Yetus tests the current <branch>-upstream commit as a patch on
-# apache/hadoop trunk, as Jenkins tests an apache/hadoop pull request.
+# branch). yetus/<name>-upstream tests a <name>-upstream branch, for pull
+# requests opened before feat/ branches. The request branch is deleted right
+# away, so the same push works again later. Yetus tests the branch's current
+# commit as a patch on apache/hadoop trunk, as Jenkins tests an
+# apache/hadoop pull request.
 # Results stay in the run (job summary and report artifact); nothing is
 # written back to GitHub, since there is no pull request here to comment on.
 
 on:
   push:
     branches:
-      - "yetus/*-upstream"
+      - "yetus/HADOOP-*"
+      - "yetus/HDFS-*"
+      - "yetus/YARN-*"
+      - "yetus/MAPREDUCE-*"
 
 permissions:
   contents: read

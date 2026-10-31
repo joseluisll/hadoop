@@ -17,19 +17,20 @@
 # under the License.
 #
 
-# Fork-only: each push to a Hadoop JIRA branch (HADOOP-, HDFS-, YARN-,
-# MAPREDUCE-) builds the commit for its apache/hadoop pull request with
+# Fork-only: work happens on feat/<name> branches, where <name> starts with
+# a Hadoop JIRA (HADOOP-, HDFS-, YARN-, MAPREDUCE-), e.g. feat/HADOOP-12345.
+# Each push to one builds the commit for its apache/hadoop pull request with
 # .github/scripts/make-upstream-branch.sh and stages it as the tag
-# feat/<branch> (e.g. feat/HADOOP-12345). No pull request into PREPARATION
-# is needed.
-# Branches that only change .github/ get no upstream commit, and a push that
-# leaves it unchanged does not push the tag again.
+# staged/<name>. No pull request into PREPARATION is needed. Branches that
+# only change .github/ get no upstream commit, and a push that leaves it
+# unchanged does not push the tag again.
 #
 # Nothing is built automatically. Pushing a branch would start
 # apache/hadoop's build_and_test.yml on it, but every apache/hadoop workflow
 # started by a push is limited to branches, so pushing a tag starts none.
-# <branch>-upstream itself only moves, and gets its Build run, on request
-# (see build_upstream.yml); Yetus also only runs on request (see yetus.yml).
+# The <name> branch, which the apache/hadoop pull request is opened from,
+# only moves, and gets its Build run, on request (see build_upstream.yml);
+# Yetus also only runs on request (see yetus.yml).
 # Then PREPARATION is rebuilt as apache/hadoop trunk plus .github/
 # (rebuild_preparation.yml), so it keeps following trunk.
 #
@@ -43,13 +44,11 @@ name: "Upstream branch"
 
 on:
   push:
-    # Hadoop JIRA branches, but never their <branch>-upstream copies.
     branches:
-      - "HADOOP-**"
-      - "HDFS-**"
-      - "YARN-**"
-      - "MAPREDUCE-**"
-      - "!**-upstream"
+      - "feat/HADOOP-*"
+      - "feat/HDFS-*"
+      - "feat/YARN-*"
+      - "feat/MAPREDUCE-*"
 
 permissions:
   contents: write
@@ -65,6 +64,7 @@ jobs:
       group: upstream-branch-${{ github.ref_name }}
       cancel-in-progress: false
     env:
+      # feat/<name>
       FEATURE: ${{ github.ref_name }}
       # Author and committer of the upstream commit; Claude is added as co-author.
       UPSTREAM_AUTHOR: "Jose Luis López López <joseluisll@gmail.com>"
@@ -100,7 +100,8 @@ jobs:
           elif [[ ${status} -ne 0 ]]; then
             exit "${status}"
           fi
-          staged="feat/${FEATURE}"
+          name=${FEATURE#feat/}
+          staged="staged/${name}"
           # Nothing changed for apache/hadoop (e.g. a push that only touched
           # .github/): keep the staged commit as it is.
           if git fetch --quiet --no-tags origin "refs/tags/${staged}" 2>/dev/null &&
@@ -110,7 +111,7 @@ jobs:
           fi
           # A tag, so no Build starts; build_upstream.yml publishes it.
           git push --force origin "HEAD:refs/tags/${staged}"
-          echo "::notice::Staged ${staged}. To publish it as ${FEATURE}-upstream and build it: git push origin PREPARATION:build/${FEATURE}-upstream"
+          echo "::notice::Staged ${staged}. To publish it as ${name} and build it: git push origin PREPARATION:build/${name}"
 
   rebuild-preparation:
     name: Rebuild PREPARATION
