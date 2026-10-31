@@ -18,24 +18,25 @@
 #
 
 # Fork-only: each push to a Hadoop JIRA branch (HADOOP-, HDFS-, YARN-,
-# MAPREDUCE-) builds <branch>-upstream from it with
-# .github/scripts/make-upstream-branch.sh and pushes it, ready for an
-# apache/hadoop pull request. No pull request into PREPARATION is needed.
-# Branches that only change .github/ get no upstream branch, and a push that
-# leaves <branch>-upstream unchanged does not push it again.
+# MAPREDUCE-) builds the commit for its apache/hadoop pull request with
+# .github/scripts/make-upstream-branch.sh and stages it as the tag
+# staged/<branch>-upstream. No pull request into PREPARATION is needed.
+# Branches that only change .github/ get no upstream commit, and a push that
+# leaves it unchanged does not push the tag again.
 #
-# Each new <branch>-upstream gets a Build run, never the feature branch
-# itself: apache/hadoop's build_and_test.yml on that branch, started by the
-# push (the fork's own build_and_test.yml is never started by a push). Yetus
-# only runs on request (see yetus.yml). Then PREPARATION is rebuilt as
-# apache/hadoop trunk plus .github/ (rebuild_preparation.yml), so it keeps
-# following trunk.
+# Nothing is built automatically. Pushing a branch would start
+# apache/hadoop's build_and_test.yml on it, but every apache/hadoop workflow
+# started by a push is limited to branches, so pushing a tag starts none.
+# <branch>-upstream itself only moves, and gets its Build run, on request
+# (see build_upstream.yml); Yetus also only runs on request (see yetus.yml).
+# Then PREPARATION is rebuilt as apache/hadoop trunk plus .github/
+# (rebuild_preparation.yml), so it keeps following trunk.
 #
 # A push with [skip ci] in its commit message runs none of this.
 #
 # Pushes with the PREPARATION_PUSH_TOKEN secret (a token with contents and
-# workflows write access). Without it, GITHUB_TOKEN is used and the pushed
-# <branch>-upstream gets no Build run for the apache/hadoop pull request.
+# workflows write access), since GITHUB_TOKEN cannot push apache/hadoop
+# commits that change .github/workflows/.
 
 name: "Upstream branch"
 
@@ -54,11 +55,11 @@ permissions:
 
 jobs:
   upstream-branch:
-    name: Build upstream branch
+    name: Stage the upstream commit
     # Not when the branch is deleted.
     if: ${{ !github.event.deleted }}
     runs-on: ubuntu-24.04
-    # One run per feature at a time, so pushes land on <branch>-upstream in order.
+    # One run per feature at a time, so pushes are staged in order.
     concurrency:
       group: upstream-branch-${{ github.ref_name }}
       cancel-in-progress: false
@@ -71,12 +72,10 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          # The push below must start the Build workflow on <branch>-upstream:
-          # apache/hadoop's "Build" check looks for that run in this fork.
-          # A push with GITHUB_TOKEN starts no workflows, and GITHUB_TOKEN
-          # cannot push apache/hadoop commits that change .github/workflows/.
+          # GITHUB_TOKEN cannot push apache/hadoop commits that change
+          # .github/workflows/.
           token: ${{ secrets.PREPARATION_PUSH_TOKEN || github.token }}
-      - name: Build and push the upstream branch
+      - name: Build and stage the upstream commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
@@ -100,17 +99,17 @@ jobs:
           elif [[ ${status} -ne 0 ]]; then
             exit "${status}"
           fi
+          staged="staged/${FEATURE}-upstream"
           # Nothing changed for apache/hadoop (e.g. a push that only touched
-          # .github/): keep the branch and its Build run as they are.
-          if git fetch --quiet origin "${FEATURE}-upstream" 2>/dev/null &&
+          # .github/): keep the staged commit as it is.
+          if git fetch --quiet --no-tags origin "refs/tags/${staged}" 2>/dev/null &&
               [[ "$(git rev-parse 'FETCH_HEAD^{tree}')" == "$(git rev-parse 'HEAD^{tree}')" ]]; then
-            echo "::notice::${FEATURE}-upstream is already up to date."
+            echo "::notice::${staged} is already up to date."
             exit 0
           fi
-          # Pushed with PREPARATION_PUSH_TOKEN, so it starts the Build workflow
-          # from apache/hadoop's own files on that branch.
-          git push --force origin "${FEATURE}-upstream"
-          echo "::notice::Pushed ${FEATURE}-upstream for an apache/hadoop pull request."
+          # A tag, so no Build starts; build_upstream.yml publishes it.
+          git push --force origin "HEAD:refs/tags/${staged}"
+          echo "::notice::Staged ${staged}. To publish it as ${FEATURE}-upstream and build it: git push origin PREPARATION:build/${FEATURE}-upstream"
 
   rebuild-preparation:
     name: Rebuild PREPARATION

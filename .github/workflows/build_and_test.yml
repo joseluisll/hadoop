@@ -24,8 +24,8 @@ name: "Build"
 #
 # Fork-only: never started by a push. The Build run that apache/hadoop's
 # "Build" check looks for runs on <branch>-upstream, from apache/hadoop's own
-# build_and_test.yml on that branch, when "Upstream branch"
-# (upstream_branch.yml) pushes it.
+# build_and_test.yml on that branch, when "Build upstream branch"
+# (build_upstream.yml) publishes it on request.
 on:
   workflow_dispatch:
 

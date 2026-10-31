@@ -79,7 +79,7 @@ jobs:
             --jq .object.sha 2>/dev/null) || commit=
           gh api -X DELETE "repos/${GITHUB_REPOSITORY}/git/refs/heads/${GITHUB_REF_NAME}"
           if [[ -z "${commit}" ]]; then
-            echo "::error::There is no ${branch} branch to test."
+            echo "::error::There is no ${branch} branch to test; publish it first: git push origin PREPARATION:build/${branch}"
             exit 1
           fi
           echo "branch=${branch}" >> "${GITHUB_OUTPUT}"
