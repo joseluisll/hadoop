@@ -63,4 +63,6 @@ python3 -I "${HARNESS_DIR}/lib/compare_downstream.py" \
   --expected "${HARNESS_DIR}/expected-downstream-differences.txt" --out "${OUT}" \
   "${B}/downstream" "${C}/downstream" || true
 
+# Who the accepted and unexpected differences affect (no verdict of its own).
+python3 -I "${HARNESS_DIR}/lib/impact.py" "${OUT}" || true
 python3 -I "${HARNESS_DIR}/lib/report.py" "${WORKDIR}/results"

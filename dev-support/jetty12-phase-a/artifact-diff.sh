@@ -17,7 +17,8 @@
 # Usage: artifact-diff.sh [baseline-side] [candidate-side]
 #
 # Compares the two built distributions and dependency lists (see
-# lib/artifact_diff.py). Both sides must have been built with build.sh.
+# lib/artifact_diff.py), then the API of every class that changes between
+# them (lib/api_compat.py). Both sides must have been built with build.sh.
 # The sides default to baseline and candidate; passing "candidate candidate"
 # self-compares one build, which must report no differences.
 
@@ -72,6 +73,10 @@ python3 -I "${HARNESS_DIR}/lib/artifact_diff.py" \
   --expected "${HARNESS_DIR}/expected-differences.txt" --out "${OUT}" \
   "$(results_dir "${B_SIDE}")" "$(results_dir "${C_SIDE}")"
 rc=$?
+# What the changed classes mean for code built against the old ones.
+python3 -I "${HARNESS_DIR}/lib/api_compat.py" \
+  --expected "${HARNESS_DIR}/expected-api-differences.txt" --out "${OUT}" \
+  "$(results_dir "${B_SIDE}")" "$(results_dir "${C_SIDE}")" || rc=1
 set -e
-log "report: ${OUT}/artifact-diff.md"
+log "report: ${OUT}/artifact-diff.md, ${OUT}/api-compat.md"
 exit "${rc}"
