@@ -538,10 +538,12 @@ sockets.
   observations, classes loaded from an unexpected jar, log errors that are
   new on the candidate or much more frequent there (more than twice the
   baseline's count and at least 6 more), an observation id recorded twice,
-  unit tests that passed on the baseline but fail on the candidate, and a
-  unit test module with no test reports on a side fail the run.
+  unit tests that passed on the baseline but fail on the candidate, unit
+  tests that ran on the baseline but are missing or skipped on the candidate,
+  and a unit test module with no test reports on a side fail the run.
 - An architecture given to `compare.sh` (or found on either side) that a
-  side has no observations for is **NOT RUN**, and the run is not a PASS.
+  side has no observations for, or only an empty observations file, is
+  **NOT RUN**, and the run is not a PASS.
 - **Fail fast**: a daemon whose process exits, or whose main thread dies, is
   reported at once instead of after its start timeout, and when any daemon
   is not up after the start (`daemons.txt`), the scenarios are skipped; the

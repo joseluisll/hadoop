@@ -24,7 +24,7 @@ failsafe TEST-*.xml reports and a "status" file (maven exit code, seconds).
 A test is pass, flaky (failed, then passed on re-run), fail, or skipped.
 The candidate passes when no test that passed (or was flaky) on the
 baseline fails on the candidate, and no test that ran on the baseline is
-missing on the candidate.
+missing or skipped on the candidate.
 """
 
 import argparse
@@ -87,7 +87,7 @@ def main():
 
     modules = sorted({d for base in (a.baseline, a.candidate) if os.path.isdir(base)
                       for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))})
-    per_module, regressions, missing, fixed, both_fail, flaky = [], [], [], [], [], []
+    per_module, regressions, missing, skipped, fixed, both_fail, flaky = [], [], [], [], [], [], []
     for m in modules:
         bt, bs = read_module(os.path.join(a.baseline, m))
         ct, cs = read_module(os.path.join(a.candidate, m))
@@ -99,6 +99,8 @@ def main():
                 regressions.append(item)
             elif sb is not None and sb != "skipped" and sc is None:
                 missing.append(item)
+            elif sb is not None and sb != "skipped" and sc == "skipped":
+                skipped.append(item)
             elif sb == "fail" and sc in ("pass", "flaky"):
                 fixed.append(item)
             elif sb == "fail" and sc == "fail":
@@ -120,11 +122,13 @@ def main():
                and not checks_only(p)]
     # A module with no test reports on a side (a suite pattern matching
     # nothing, or a build failure) compared nothing, so it cannot pass.
-    verdict = "PASS" if not regressions and not missing and not not_run and per_module else "FAIL"
+    verdict = "PASS" if not regressions and not missing and not skipped and not not_run \
+        and per_module else "FAIL"
     if not per_module:
         verdict = "NOT RUN"
     result = {"verdict": verdict, "modules": per_module, "regressions": regressions,
-              "missing_on_candidate": missing, "fixed": fixed, "both_fail": both_fail,
+              "missing_on_candidate": missing, "skipped_on_candidate": skipped,
+              "fixed": fixed, "both_fail": both_fail,
               "flaky": flaky, "modules_without_reports": not_run}
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "unit-compare.json"), "w", encoding="utf-8") as f:
@@ -132,7 +136,8 @@ def main():
     with open(os.path.join(a.out, "unit-compare.md"), "w", encoding="utf-8") as f:
         f.write("## Unit and integration tests\n\n")
         f.write(f"Verdict: **{verdict}**. Regressions: {len(regressions)}, tests missing on "
-                f"the candidate: {len(missing)}, failing on both: {len(both_fail)}, "
+                f"the candidate: {len(missing)}, newly skipped on the candidate: "
+                f"{len(skipped)}, failing on both: {len(both_fail)}, "
                 f"fixed: {len(fixed)}, flaky: {len(flaky)}.\n\n")
         f.write("| Module | Baseline pass/flaky/fail/skip | Candidate pass/flaky/fail/skip |\n"
                 "|---|---|---|\n")
@@ -142,6 +147,7 @@ def main():
                     f"| {c['pass']}/{c['flaky']}/{c['fail']}/{c['skipped']} |\n")
         f.write("\n")
         for title, items in (("Regressions", regressions), ("Missing on the candidate", missing),
+                             ("Newly skipped on the candidate", skipped),
                              ("Failing on both sides", both_fail), ("Fixed", fixed),
                              ("Flaky", flaky)):
             if items:
@@ -153,7 +159,8 @@ def main():
         if not_run:
             f.write("Modules with no test reports on a side (build or setup failure; see "
                     "results/<side>/unit/<module>/mvn.log): " + ", ".join(not_run) + "\n")
-    print(f"unit comparison: {verdict}, {len(regressions)} regressions, {len(missing)} missing")
+    print(f"unit comparison: {verdict}, {len(regressions)} regressions, {len(missing)} missing, "
+          f"{len(skipped)} newly skipped")
     return 0 if verdict == "PASS" else 1
 
 

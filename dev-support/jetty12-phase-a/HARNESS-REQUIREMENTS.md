@@ -211,7 +211,8 @@ response"); each group names the files it comes from.
   least 6 times more.
 - **R41.** If the baseline's daemons did not all start, the architecture is
   NOT RUN; if the candidate's did not, it is FAIL (with the log errors); an
-  architecture a side has no observations for is NOT RUN.
+  architecture a side has no observations for (no file, or an empty one) is
+  NOT RUN.
 
 ### Check 4: Hadoop's own tests (`unit-tests.sh`, `lib/compare_unit.py`)
 
@@ -229,10 +230,10 @@ response"); each group names the files it comes from.
   fail or skipped, and an unparseable report counts as a failed test.
 - **R45.** The suite fails on a test that passed or was flaky on the
   baseline and fails on the candidate, on a test that ran (not skipped) on
-  the baseline and is missing on the candidate, and on a module with no test
-  reports on a side (except modules that only run checks, such as the shaded
-  client invariants, when their Maven run succeeded on both sides). With no
-  modules at all it is NOT RUN.
+  the baseline and is missing or skipped on the candidate, and on a module
+  with no test reports on a side (except modules that only run checks, such
+  as the shaded client invariants, when their Maven run succeeded on both
+  sides). With no modules at all it is NOT RUN.
 - **R46.** Tests failing on both sides, fixed tests and flaky tests are
   listed without failing.
 - **R47.** A test JVM running more than `STALL_AFTER` (600 s) gets periodic
@@ -623,7 +624,8 @@ empty `error_text` all have an empty body (`jmx-trace`, `conf-bad-name`,
 
 Proposed course of action (2026-11-01), pending the owner's decisions in
 step 0. The requirements document comes first: no harness process or allowlist rule changes until the
-step that covers it. In step 1, T5, T6 and T16 are implemented (R78 to R80);
+step that covers it. In step 1, T5, T6 and T16 are implemented (R78 to R80)
+and the verdict defects of the review of 2026-11-02 are fixed (R41, R45, R54);
 T20 and T24 remain, both needing the owner. The next work is step 2, whose
 items need no owner decision.
 
@@ -645,6 +647,17 @@ federated-run-5 to -6. Each run must still end with all five architectures
 passing.
 
 Done as AS-IS requirements: T5 as R78, T16 as R79 and T6 as R80 (below).
+
+Fixed after the review of 2026-11-02
+(`2026-11-02-Harness-Requirements-Review.md`), whose other findings stay open
+there:
+
+- R54: a passing ancestry check no longer turns the overall verdict into FAIL;
+  `lib/ancestry.py` writes `PASS` or `FAIL` like every other comparison.
+- R41: an empty `observations.jsonl` is NOT RUN, not a PASS.
+- R45: a test that ran on the baseline and is skipped on the candidate fails
+  the suite. Check 4 has no allowlist, so a skip the patch intends fails too.
+
 Still open, both needing the owner's decision:
 
 - T20: fail the run on a failing test that exists only on the candidate.

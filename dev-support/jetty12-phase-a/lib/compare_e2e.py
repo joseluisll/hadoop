@@ -177,7 +177,10 @@ def main():
     if aborted:
         return not_run(a, "the candidate's daemons did not all start: " + aborted["candidate"],
                        verdict="FAIL", errors=log_errors(allow, a.baseline, a.candidate))
-    absent = [side for side, p in paths.items() if not os.path.exists(p)]
+    # e2e/run.sh creates the file before the scenarios run, so an empty one
+    # compared nothing either.
+    absent = [side for side, p in paths.items()
+              if not os.path.exists(p) or os.path.getsize(p) == 0]
     if absent:
         return not_run(a, f"no observations from the {' and '.join(absent)} run "
                           "(the cluster did not start, or the run was not done)")
