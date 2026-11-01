@@ -360,7 +360,8 @@ response"); each group names the files it comes from.
   by hand) with the variables documented in `README.md`.
 - **R77.** What is not exercised end to end, and what fails on both sides
   because of known issues (MAPREDUCE-7548, YARN-12024, YARN-12025, YARN-12030,
-  HADOOP-20018, the SLS configuration bug, the RBF router id), is documented
+  HADOOP-20018, the SLS configuration bug, the RBF router id, the
+  `TestFederationInterceptor#testSubClusterTimeOut` race), is documented
   in `README.md`; a PASS says nothing about those observations.
 
 ## TO-BE: identified improvements

@@ -270,6 +270,21 @@ These are not caused by phase A; the harness records them, and they show as
   a private address, the harness binds `localhost`) leaves the datanode unable
   to reach it, and the read fails with 403. The harness sets
   `dfs.federation.router.rpc-bind-host=0.0.0.0`.
+- No JIRA yet: `TestFederationInterceptor#testSubClusterTimeOut` (node
+  manager, `federated` unit suite) can fail on either side with
+  `expected: <2> but was: <0>` at the assertion after its 800 ms sleep.
+  `FederationInterceptor#getTimedOutSCs` skips a sub-cluster only when its
+  last response time is strictly greater than the AM's last heartbeat time,
+  and both are `MonotonicClock` readings in milliseconds. When the sub-clusters
+  answer within the same millisecond as the heartbeat, the two are equal, both
+  sub-clusters count as timed out after the sleep, and the test sees no
+  cluster nodes. It failed on the candidate of federated-run-7, twice in one
+  job; the log shows the heartbeat and both sub-cluster allocations in the
+  same millisecond. HADOOP-20015's change in that class (Jetty's
+  `ConcurrentHashSet` replaced by `ConcurrentHashMap.newKeySet()` for the NM
+  tokens of secondary sub-clusters) is not on the timeout path, the same code
+  passed in federated-run-5 and -6, and 50 local runs on each side passed
+  (0/50 and 0/50). A failure of this test only is not a phase A regression.
 
 ## Running it
 
