@@ -95,7 +95,7 @@ def main(results):
         parts.append(("Downstream dependencies", "downstream-compare.json",
                       "downstream-compare.md"))
     verdicts = [(name, verdict(os.path.join(cmp_dir, j))) for name, j, _ in parts]
-    pre_failed = [n for n, v in verdicts[:len(pre)] if v in ("FAIL", "MISSING")]
+    pre_failed = [n for n, v in verdicts[:len(pre)] if v == "FAIL"]
     overall = "PASS" if all(v == "PASS" for _, v in verdicts) else \
         ("INCOMPLETE" if all(v in ("PASS", "NOT RUN") for _, v in verdicts) else "FAIL")
     # The two trees are what they claim: the comparison below is of the patch.

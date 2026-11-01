@@ -90,7 +90,7 @@ def main():
     ignored = IGNORED + args.ignore
 
     count, missing = missing_commits(baseline, candidate, ignored)
-    verdict = "MISSING" if missing else "CONTAINED"
+    verdict = "FAIL" if missing else "PASS"
     result = {
         "verdict": verdict,
         "baseline": {"ref": args.baseline, "commit": baseline},
@@ -111,7 +111,7 @@ def main():
         print(f"  {m['commit'][:11]} {m['subject'][:70]}")
         for p in m["files"]:
             print(f"      {p}")
-    return 0 if verdict == "CONTAINED" else 1
+    return 0 if verdict == "PASS" else 1
 
 
 def markdown(result):
@@ -123,7 +123,7 @@ def markdown(result):
            f"({result['candidate']['commit'][:11]})",
            f"- Ignored paths: {', '.join(f'`{g}`' for g in result['ignored'])}\n"]
     if result["missing"]:
-        out.append(f"Verdict: **MISSING**: the candidate lacks {len(result['missing'])} "
+        out.append(f"Verdict: **FAIL**: the candidate lacks {len(result['missing'])} "
                    "baseline commit(s). Built on an older trunk than the baseline, it "
                    "would report their changes as differences caused by the patch. "
                    "Rebase or merge the baseline into the candidate and run again.\n")
@@ -134,7 +134,7 @@ def markdown(result):
             out.append(f"| `{m['commit'][:11]}` | {m['subject']} | {files} |")
         out.append("")
     else:
-        out.append(f"Verdict: **CONTAINED**: the candidate has every change made by the "
+        out.append(f"Verdict: **PASS**: the candidate has every change made by the "
                    f"{result['baseline_commits_not_in_candidate']} baseline commit(s) it "
                    "does not contain as ancestors.\n")
     return "\n".join(out)
