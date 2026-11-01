@@ -38,8 +38,13 @@ name: "Yetus"
 # away, so the same push works again later. Yetus tests the branch's current
 # commit as a patch on apache/hadoop trunk, as Jenkins tests an
 # apache/hadoop pull request.
-# Results stay in the run (job summary and report artifact); nothing is
-# written back to GitHub, since there is no pull request here to comment on.
+# Results stay in the run (job summary and report artifact), and the run
+# reports on the <name> commit as its "Yetus" commit status, next to the checks
+# of its Build run. GitHub lists the run itself under the request branch: a push
+# run takes its file from the pushed commit, and <name> must not carry this
+# file. A status belongs to a commit, so publishing <name> again clears it.
+
+run-name: ${{ github.ref_name }}
 
 on:
   push:
@@ -71,6 +76,8 @@ jobs:
     permissions:
       # To delete the request branch.
       contents: write
+      # To report on the upstream commit.
+      statuses: write
     outputs:
       branch: ${{ steps.request.outputs.branch }}
       commit: ${{ steps.request.outputs.commit }}
@@ -90,6 +97,9 @@ jobs:
           fi
           echo "branch=${branch}" >> "${GITHUB_OUTPUT}"
           echo "commit=${commit}" >> "${GITHUB_OUTPUT}"
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${commit}" --silent \
+            -f state=pending -f context=Yetus -f description="Running" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
           echo "::notice::Testing ${branch} at ${commit}."
 
   yetus:
@@ -196,3 +206,22 @@ jobs:
           name: yetus-report-${{ matrix.platform }}
           path: out
           if-no-files-found: ignore
+
+  report:
+    name: Report on the upstream commit
+    needs: [request, yetus]
+    # A cancelled test was replaced by a newer request, which reports instead.
+    if: ${{ !cancelled() && needs.request.result == 'success' && needs.yetus.result != 'cancelled' }}
+    runs-on: ubuntu-24.04
+    permissions:
+      statuses: write
+    steps:
+      - name: Set the Yetus commit status
+        env:
+          GH_TOKEN: ${{ github.token }}
+          COMMIT: ${{ needs.request.outputs.commit }}
+          STATE: ${{ needs.yetus.result == 'success' && 'success' || 'failure' }}
+        run: |
+          gh api "repos/${GITHUB_REPOSITORY}/statuses/${COMMIT}" --silent \
+            -f state="${STATE}" -f context=Yetus -f description="Precommit: ${STATE}" \
+            -f target_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
