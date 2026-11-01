@@ -129,14 +129,9 @@ public class TestTimelineServerRequests {
     String url = String.format("http://%s:%d/ws/v1/timeline?user.name=foo",
         HOST, testTimelineServer.getPort());
     Client client = ClientBuilder.newClient();
-    try {
-      Response response = client.target(url).request(MediaType.APPLICATION_JSON)
-          .post(Entity.json(json));
-      try {
-        assertEquals(200, response.getStatus());
-      } finally {
-        response.close();
-      }
+    try (Response response = client.target(url).request(MediaType.APPLICATION_JSON)
+        .post(Entity.json(json))) {
+      assertEquals(200, response.getStatus());
     } finally {
       client.close();
     }
