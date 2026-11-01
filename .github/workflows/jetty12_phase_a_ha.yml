@@ -29,6 +29,9 @@
 #   git push origin jetty12-phase-a-ha-run-1
 
 name: "Jetty 12 phase A: ha"
+# The API reports this as the run's name, and ci/wait-turn.sh finds harness
+# runs by this prefix: keep it.
+run-name: "Jetty 12 phase A: ${{ github.ref_name }}"
 
 on:
   workflow_dispatch:

@@ -35,6 +35,7 @@
 # not make the harness runs wait for this one.
 
 name: "Stall reproduction (Jetty 12 phase A harness)"
+run-name: "Stall reproduction: ${{ github.ref_name }}"
 
 on:
   workflow_dispatch:
