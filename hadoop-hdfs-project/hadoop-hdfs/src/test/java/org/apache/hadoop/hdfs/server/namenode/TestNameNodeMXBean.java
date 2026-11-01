@@ -80,6 +80,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 import static org.apache.hadoop.util.Shell.getMemlockLimit;
@@ -427,12 +428,22 @@ public class TestNameNodeMXBean {
         }
       }, 1000, 60000);
 
-      // 2. Verify Decommission InProgress nodes
+      // 2. Verify Decommission InProgress nodes. Compare the addresses listed,
+      // not the whole serialized map: decommissionDuration is time-derived and
+      // the under-replicated counts read 0 once the node leaves the state, so
+      // neither survives a second read. The duration is checked separately.
       String decomNodesInfo = (String) (mbs.getAttribute(mxbeanName,
           "DecomNodes"));
       Map<String, Map<String, Object>> decomNodes = JsonUtils.parse(decomNodesInfo,
           new TypeReference<Map<String, Map<String, Object>>>() {});
-      assertEquals(fsn.getDecomNodes(), decomNodesInfo);
+      for (Map<String, Object> decomNode : decomNodes.values()) {
+        assertTrue(decomNode.containsKey("decommissionDuration"),
+            "decommissionDuration should be present: " + decomNode);
+        assertTrue(toLong(decomNode.get("decommissionDuration")) >= 0,
+            "decommissionDuration should not be negative: " + decomNode);
+      }
+      assertEquals(decomNodes.keySet(), decomNodeAddresses(fsn),
+          "MXBean DecomNodes should list the NameNode's decommissioning nodes");
       assertEquals(fsn.getNumDecommissioningDataNodes(), decomNodes.size());
       assertEquals(0, fsn.getNumDecomLiveDataNodes());
       assertEquals(0, fsn.getNumDecomDeadDataNodes());
@@ -454,7 +465,8 @@ public class TestNameNodeMXBean {
           JsonUtils.parse(decomNodesInfo,
               new TypeReference<Map<String, Map<String, Object>>>() {});
       assertEquals(0, decomNodes.size());
-      assertEquals(fsn.getDecomNodes(), decomNodesInfo);
+      assertEquals(decomNodes.keySet(), decomNodeAddresses(fsn),
+          "MXBean DecomNodes should be empty once the node is decommissioned");
       assertEquals(1, fsn.getNumDecomLiveDataNodes());
       assertEquals(0, fsn.getNumDecomDeadDataNodes());
     } finally {
@@ -1243,6 +1255,12 @@ public class TestNameNodeMXBean {
     assertTrue(resultMessage.contains("3 racks are required for " +
         "the erasure coding policies: RS-6-3-1024k. " +
         "The number of racks is only 1."));
+  }
+
+  /** The addresses the NameNode currently reports as decommissioning. */
+  private static Set<String> decomNodeAddresses(FSNamesystem fsn) {
+    return JsonUtils.parse(fsn.getDecomNodes(),
+        new TypeReference<Map<String, Map<String, Object>>>() {}).keySet();
   }
 
   private static long toLong(Object value) {
