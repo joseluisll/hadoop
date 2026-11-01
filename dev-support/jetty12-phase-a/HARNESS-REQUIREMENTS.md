@@ -444,10 +444,138 @@ implemented yet. Each says where it came from.
   itself is a Hadoop fix, outside the harness.
   *Source: simple runs 14 to 16, federated-run-6, secure-run-9.*
 
+The next items come from analysing the AS-IS requirements against what
+HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
+
+- **T12. Published POMs.** R10 ignores `META-INF/maven/**/pom.xml` as build
+  metadata, and the installed `.pom` files are not compared, so the declared
+  dependencies of the published artifacts are never compared. That is where
+  HADOOP-20015 (scope `provided` or `compile`), HADOOP-20016 (`optional`) and
+  HADOOP-19970 (exclusions, `dependencyManagement`) make their change; check 5
+  sees only its effects, in 4 scenarios for 14 artifacts. Compare, for every
+  published artifact, the declared dependencies with their scope, `optional`
+  flag and exclusions, the managed versions and the parent, as differences of
+  their own kind (`pom-*`) with their own rules.
+  *Source: requirements analysis; `lib/artifact_diff.py` `VOLATILE_ENTRY`.*
+- **T13. Downstream artifacts the tickets touch.** R48 has none of the
+  modules HADOOP-20015 and HADOOP-20016 change as Maven dependencies. Add
+  `hadoop-yarn-server-common`, `-resourcemanager`, `-applicationhistoryservice`,
+  `-router` and `hadoop-yarn-server-tests` (what MiniYARNCluster users depend
+  on), `hadoop-hdfs-httpfs`, `hadoop-sls` and `hadoop-mapreduce-client-app`.
+  *Source: requirements analysis; `downstream-deps.sh` `ARTIFACTS`.*
+- **T14. Class loading in container JVMs.** Only daemon JVMs log the classes
+  they load (R38, `e2e/cluster.sh`). The MapReduce application master (which
+  serves a web UI on the servlet API), its tasks and the distributed shell
+  application master load `javax.annotation` and `javax.servlet` classes from
+  the YARN application classpath, which HADOOP-20013 and HADOOP-19970 change.
+  Add `-Xlog:class+load` to their Java options, collect the logs with the
+  container logs, and compare by container type with `classjar` rules.
+  *Source: requirements analysis; `e2e/lib/conf.sh`.*
+- **T15. LICENSE and NOTICE consistency.** HADOOP-19970 and HADOOP-20013 add
+  and remove third-party jars; check 1 only reports that `LICENSE-binary`
+  changed. On each side, check that every third-party jar in the distribution
+  is listed in `LICENSE-binary` (and `NOTICE-binary` where its license needs
+  it) and that no jar is listed that the distribution no longer has; a
+  mismatch on the candidate only fails the run. This is an ASF release
+  requirement. *Source: requirements analysis.*
+- **T16. The tested candidate matches the PRs.** The harness tests
+  `feat/HADOOP-99999`, but what is merged is `HADOOP-20012-upstream` to
+  `HADOOP-20016-upstream` (PRs #8890 to #8894) and `jetty-phase-a` (PR #8699,
+  HADOOP-19970). Before comparing, check that the candidate's change against
+  the baseline, without the harness and `.github`, equals the combined change
+  of those branches against trunk, and stop with the files that differ if it
+  does not. *Source: requirements analysis; drift between feat and upstream
+  branches seen earlier in this work.*
+- **T17. Differences attributed to one ticket.** The tickets merge into trunk
+  one at a time and every intermediate trunk state ships, but the harness runs
+  only their combination: a rule's ticket is only what its text says, and an
+  interaction between tickets is invisible (HADOOP-19970's
+  `testSingleJettyRelease` fails without HADOOP-20014). Add per-ticket runs
+  (trunk plus one ticket's upstream branch) and runs for each prefix of the
+  merge order, limited to checks 1, 2 and 5 (no cluster), and require each
+  ticket's rules to match in its own run. Needs the owner's decision.
+  *Source: requirements analysis.*
+- **T18. Verify `announced:`.** `announced:` is free text (R64); a release
+  note can change after the rule is written (HADOOP-19970's was rewritten
+  twice). For `announced: <JIRA> release note`, read the JIRA's release note
+  field and report rules whose difference (artifact, coordinate, class or
+  module name) it does not mention. It reports, it does not fail. Needs the
+  owner's decision. *Source: requirements analysis.*
+- **T19. Servlet default responses over HTTP/1.0.** HADOOP-19970 swaps the
+  classes that build `HttpServlet`'s default answers (405 or 400 for an
+  unsupported method, depending on the request's protocol; `Allow` for
+  OPTIONS; TRACE; HEAD). The scenarios send them over HTTP/1.1 only. Send an
+  unsupported method, OPTIONS and HEAD over HTTP/1.0 to every servlet with
+  `probe.py raw` (part of T1). The HTTP/2 difference between servlet API
+  4.0.4 and 4.0.9 cannot be reached on Jetty 9.4 and belongs to phase B.
+  *Source: requirements analysis.*
+
 Withdrawn after review: "extract the text of XML error bodies". The probe
 already extracts it (R29); the 17 error responses of secure-run-9 with an
 empty `error_text` all have an empty body (`jmx-trace`, `conf-bad-name`,
 `nn-imagetransfer-noargs`), which their body shape records.
+
+## Next plan
+
+Proposed course of action (2026-11-01), pending the owner's decisions in
+step 0. The requirements document comes first: no harness process or allowlist rule changes until the
+step that covers it.
+
+### Step 0: requirements and decisions (document only)
+
+1. Record T12 to T19 in TO-BE (done).
+2. Owner decisions to record here before the steps that need them:
+   - T3: should a class loaded on one side only fail the run without a rule?
+   - T17: per-ticket and merge-order runs, yes or no?
+   - T18: verify `announced:` against the JIRA release notes, yes or no?
+   - T7: how to announce the 53 accepted, unannounced HADOOP-20013 and
+     HADOOP-20014 differences (no code needed).
+
+### Step 1: trustworthy verdicts
+
+Cheap, and prevents false results like ha-run-3 to -4, mixed-run-4 to -5 and
+federated-run-5 to -6.
+
+- T5: stop when the candidate is built on another trunk than the baseline.
+- T6: a script that replays a rule file against the latest report of every
+  architecture, used before committing rules.
+- T16: check that the candidate matches the PR branches.
+
+### Step 2: detection gaps for phase A and HADOOP-19970
+
+- T12: compare the published POMs.
+- T13: add the downstream artifacts the tickets touch.
+- T14: class loading in container JVMs.
+- T15: LICENSE and NOTICE consistency.
+- T1 with T19: raw-request scenarios, including HTTP/1.0.
+- T4: report the new probe fields.
+
+### Step 3: attribution (if decided in step 0)
+
+- T17: per-ticket and merge-order runs.
+- T18: verify `announced:`.
+
+### Step 4: pre-existing holes in coverage
+
+- T10, then T3: mask the timeline server's class-load noise, then report
+  classes loaded on one side only.
+- T11: flaky test history.
+- T8 and T9: MapReduce under Kerberos and the YARN federation application
+  checks. They cost more; they restore coverage that is now zero, but not
+  specific to these tickets.
+
+### Before phase B
+
+- T2: jar versions in the class-load comparison (in phase A no artifact
+  changes only its version: HADOOP-19970 changes the coordinate, HADOOP-20013
+  removes a jar).
+- End-to-end runs on JDK 21 and 25 as well as 17 (not yet a TO-BE item).
+- A mixed-version scenario: the baseline's clients against the candidate's
+  cluster and the other way round (not yet a TO-BE item).
+
+Each step ends with all five architectures run on the result; an item that is
+done moves to AS-IS as a new requirement, with its `README.md` update, in the
+same commit.
 
 ## Changing this document
 
