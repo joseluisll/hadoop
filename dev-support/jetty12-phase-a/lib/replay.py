@@ -24,8 +24,9 @@ edited rule can be tried against the latest report of every architecture
 before it is committed (R66), without a build or a run. For each rule file it
 lists the rules that matched nothing in any directory (the ones a run would
 report as unused, R59) and the rules that matched in only some directories (a
-pattern that misses an architecture's names, as T6's first classjar rule
-missed the numbered daemons). Exits 1 when a rule matched nothing anywhere.
+pattern that misses an architecture's names: the first HADOOP-19970 classjar
+rule's `[a-z]+` missed the numbered daemons, nn1 and rm1 among them). Exits 1
+when a rule matched nothing anywhere.
 """
 
 import glob

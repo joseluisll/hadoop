@@ -23,8 +23,9 @@ What is merged into trunk is the PR branches of the tickets, in the order the
 owner merges them. The tested candidate is built by merging the same branches,
 so its change against the baseline must be their combined change and no more.
 When it is not, the tested tree is not what will be merged: a commit the
-candidate lacks (an older trunk than the baseline, T5) or a change no branch
-makes. Either would be reported as a difference the patch causes.
+candidate lacks (an older trunk than the baseline, which ancestry.py checks)
+or a change no branch makes. Either would be reported as a difference the
+patch causes.
 
 Per file changed by one branch, the candidate's blob must be the baseline's
 blob with that branch's change applied. A file changed by several branches is

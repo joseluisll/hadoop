@@ -257,8 +257,10 @@ on any difference that no rule accepts. See `README.md` and
 - **Latest runs, 2026-11-01:** `simple` (17), `mixed` (6) and `secure` (9) pass.
   `federated` (7) passes end to end but fails on one unit regression, not yet
   identified. `ha` (5) was still running.
-- **Not yet proven:** that the tested candidate equals the PRs (T16 in the
-  requirements).
+- **Now proven when the run gets that far:** the candidate's ancestry against
+  the baseline and its change against the PR branches are checked before
+  anything is compared, and the run stops when either check fails (R78 to R80
+  in the requirements; formerly T5, T16 and T6).
 
 Its own "phase A" means 20012 to 20016 with 19970, and its "phase B" means the
 Jetty upgrade, HADOOP-19972. Neither is the branch `jetty-phase-b`, which is
