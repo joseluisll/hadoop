@@ -389,6 +389,25 @@ implemented yet. Each says where it came from.
   after masking the known noise (T10). Decide with the owner whether they
   should fail without a rule. *Source: requirement extraction from
   `lib/compare_e2e.py`; secure-run-8 timeline server.*
+
+  Extension (2026-11-01): every daemon of every architecture loads
+  `javax.servlet.http.HttpServletMapping` on the candidate only, and the
+  namenode, the HDFS router and the node manager also `PushBuilder`
+  (Servlet 4.0 types, from HADOOP-19970). Most likely the bytecode verifier
+  loads them while linking the 4.0 `HttpServletRequest` and
+  `HttpServletRequestWrapper`, whose default methods return these types; it
+  cannot be confirmed, because only a sorted class list per daemon is kept
+  (`<daemon>.classes.tsv`). So:
+  - keep, per daemon, the raw `-Xlog:class+load` lines (in load order) of the
+    classes loaded on one side only;
+  - also log class resolution (`-Xlog:class+resolve=debug`, format to be
+    confirmed on the runner's JDK), which names the class that caused each
+    resolution and whether the verifier did it, and keep its lines for those
+    classes, so the report can say what triggered each one;
+  - add a rule kind `classonly <daemon>:<class>` (with reason and
+    `announced:`) to accept such a class explicitly instead of letting it
+    pass unseen.
+  *Source: simple-run-17, secure-run-9, mixed-run-6, federated-run-7.*
 - **T4. Report the new probe fields.** The report should say, per
   architecture, how many observations recorded each field (reason phrase,
   header names, `location_form`, `error_text`, raw) and how many differ, so
@@ -527,6 +546,34 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   `announced:` value, decided with T7.
   *Source: simple-run-17; `expected-downstream-differences.txt`,
   `expected-differences.txt`.*
+- **T22. Servlet behaviour probe.** Loading a class is not a behaviour
+  change; what a servlet sees at run time is. Add a small probe servlet,
+  compiled and run against each side's Hadoop classpath (as
+  `e2e/lib/KerbyKinit.java` is), deployed in an `HttpServer2`, that records as
+  observations: the servlet version the context reports
+  (`getMajorVersion`/`getMinorVersion`, `getEffectiveMajorVersion`/
+  `getEffectiveMinorVersion`); what `getHttpServletMapping()` returns on a
+  request; `isPushSupported()` and `newPushBuilder()`; the default
+  `HttpServlet` answers (an unsupported method over HTTP/1.0 and HTTP/1.1,
+  OPTIONS `Allow`, TRACE, HEAD, which also covers T19 without Hadoop's own
+  servlets); and the Servlet 4.0 forward and include request attributes
+  (`javax.servlet.forward.mapping`, `javax.servlet.include.mapping`) after a
+  `RequestDispatcher` call. It answers, for HADOOP-19970, whether Jetty 9.4
+  behaves differently with the 4.0 API on the classpath, and becomes the
+  baseline for phase B, when Jetty 12's ee8 environment changes these
+  answers. *Source: the Servlet 4.0 classes of T3.*
+- **T23. API made available by a replaced jar.** R18 counts additions but
+  does not list them. The new servlet API jar adds Servlet 4.0 types
+  (`HttpServletMapping`, `MappingMatch`, `PushBuilder`, `GenericFilter`,
+  `HttpFilter`, ...) and methods (`HttpServletRequest#newPushBuilder`,
+  `getTrailerFields`, ...). Code built against Hadoop's classpath can start to
+  use them, then fail with `NoSuchMethodError` or `NoClassDefFoundError`
+  where only Servlet 3.1 is present (a downstream project that replaces
+  Hadoop's servlet API with `javax.servlet-api` 3.1, or an older Hadoop).
+  List the public types and members a replaced third-party jar adds in
+  Impact on users, as API that code built against Hadoop may start to depend
+  on; the HADOOP-19970 release note says the packages are unchanged, not that
+  4.0 types become available. *Source: the Servlet 4.0 classes of T3.*
 
 Withdrawn after review: "extract the text of XML error bodies". The probe
 already extracts it (R29); the 17 error responses of secure-run-9 with an
@@ -541,7 +588,7 @@ step that covers it.
 
 ### Step 0: requirements and decisions (document only)
 
-1. Record T12 to T21 in TO-BE (done).
+1. Record T12 to T23 in TO-BE, and the extension of T3 (done).
 2. Owner decisions to record here before the steps that need them:
    - T3: should a class loaded on one side only fail the run without a rule?
    - T17: per-ticket and merge-order runs, yes or no?
@@ -568,6 +615,10 @@ federated-run-5 to -6.
 - T14: class loading in container JVMs.
 - T15: LICENSE and NOTICE consistency.
 - T1 with T19: raw-request scenarios, including HTTP/1.0.
+- T22: the servlet behaviour probe.
+- T3, evidence part: keep the raw class-load and class-resolution lines of
+  the classes loaded on one side only (its reporting part stays in step 4).
+- T23: list the API a replaced jar makes available.
 - T4: report the new probe fields.
 
 ### Step 3: attribution (if decided in step 0)
