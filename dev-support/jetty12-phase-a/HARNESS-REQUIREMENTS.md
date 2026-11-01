@@ -509,6 +509,24 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   `probe.py raw` (part of T1). The HTTP/2 difference between servlet API
   4.0.4 and 4.0.9 cannot be reached on Jetty 9.4 and belongs to phase B.
   *Source: requirements analysis.*
+- **T20. Tests that exist only on the candidate.** R45 counts a failure as a
+  regression only when the test passed or was flaky on the baseline, so a
+  test the patch adds is never compared: if it fails on the candidate, the
+  run still passes. The tickets add such tests (`TestJettyClasspath` in six
+  modules and `TestAnnotationApiClasspath`: 13 tests in simple-run-17, all
+  passing). A test that exists only on the candidate and fails there (after
+  its re-runs) fails the run; the report lists the candidate-only tests with
+  their results. *Source: simple-run-17; `lib/compare_unit.py`.*
+- **T21. Consistent announcement of HADOOP-20013's rules.** The same
+  HADOOP-20013 change has rules that disagree: the downstream
+  `downstream-dup-removed` rule says `announced: HADOOP-20013 JIRA`, while the
+  downstream `downstream-dep-removed` rule and the artifact rule for the
+  dropped `javax.annotation-api` jar say nothing, so 9 of its differences show
+  as accepted but unannounced (61 in simple-run-17, 53 in the runs without the
+  downstream check). Give every rule of one ticket and one change the same
+  `announced:` value, decided with T7.
+  *Source: simple-run-17; `expected-downstream-differences.txt`,
+  `expected-differences.txt`.*
 
 Withdrawn after review: "extract the text of XML error bodies". The probe
 already extracts it (R29); the 17 error responses of secure-run-9 with an
@@ -523,13 +541,14 @@ step that covers it.
 
 ### Step 0: requirements and decisions (document only)
 
-1. Record T12 to T19 in TO-BE (done).
+1. Record T12 to T21 in TO-BE (done).
 2. Owner decisions to record here before the steps that need them:
    - T3: should a class loaded on one side only fail the run without a rule?
    - T17: per-ticket and merge-order runs, yes or no?
    - T18: verify `announced:` against the JIRA release notes, yes or no?
-   - T7: how to announce the 53 accepted, unannounced HADOOP-20013 and
-     HADOOP-20014 differences (no code needed).
+   - T7 with T21: how to announce the accepted, unannounced HADOOP-20013 and
+     HADOOP-20014 differences (53, or 61 with the downstream check), with one
+     `announced:` value per ticket and change (no code needed).
 
 ### Step 1: trustworthy verdicts
 
@@ -540,6 +559,7 @@ federated-run-5 to -6.
 - T6: a script that replays a rule file against the latest report of every
   architecture, used before committing rules.
 - T16: check that the candidate matches the PR branches.
+- T20: fail the run on a failing test that exists only on the candidate.
 
 ### Step 2: detection gaps for phase A and HADOOP-19970
 
