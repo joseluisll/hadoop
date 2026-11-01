@@ -97,6 +97,11 @@ env:
   MAVEN_MIRROR_URL: ${{ inputs.maven_mirror }}
   BASELINE: ${{ inputs.baseline_ref || 'PREPARATION' }}
   CANDIDATE: ${{ contains(github.ref_name, '-run-aa-') && (inputs.baseline_ref || 'PREPARATION') || inputs.candidate_ref || github.sha }}
+  # The branches merged into trunk, in merge order: compare.sh checks the
+  # candidate against their combined change (R79). Left empty for a
+  # self-comparison run (-run-aa-), which has no patch to check; compare.sh
+  # also skips both checks when the two sides resolve to one commit.
+  PR_BRANCHES: ${{ contains(github.ref_name, '-run-aa-') && '' || 'origin/HADOOP-20012-upstream,origin/HADOOP-20013-upstream,origin/HADOOP-20014-upstream,origin/HADOOP-20015-upstream,origin/HADOOP-20016-upstream,origin/jetty-phase-a' }}
   BREAK_CANDIDATE: ${{ inputs.break_candidate }}
   BREAK_REF: ${{ github.ref_name }}
 
@@ -373,7 +378,13 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
+      # The whole history and every branch: compare.sh checks the candidate's
+      # ancestry and its change against the PR branches, which needs the
+      # commits behind both refs and behind the branches' bases.
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: false
       - uses: ./.github/actions/jetty12-phase-a-setup
         with:
           baseline: ${{ env.BASELINE }}

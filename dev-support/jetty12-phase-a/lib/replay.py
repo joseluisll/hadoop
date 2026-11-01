@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Replay an allowlist against the comparisons already written.
+
+Usage: replay.py <compare dir> [<compare dir>...]
+
+Each directory is what a comparison leaves in results/compare: one JSON per
+comparison. A rule is replayed the way its comparison matches it, so a new or
+edited rule can be tried against the latest report of every architecture
+before it is committed (R66), without a build or a run. For each rule file it
+lists the rules that matched nothing in any directory (the ones a run would
+report as unused, R59) and the rules that matched in only some directories (a
+pattern that misses an architecture's names, as T6's first classjar rule
+missed the numbered daemons). Exits 1 when a rule matched nothing anywhere.
+"""
+
+import glob
+import json
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from allowlist import Allowlist  # noqa: E402
+
+
+def load(path):
+    if not os.path.exists(path):
+        return None
+    with open(path, encoding="utf-8") as f:
+        return json.load(f)
+
+
+def e2e_matches(allow, compare_dir):
+    """Match every end-to-end rule the comparison would, in its order
+    (lib/compare_e2e.py): 'obs' excuses a DIFF, a REGRESSION or a MISSING;
+    'obsdiff' a DIFF; 'obsfield' a DIFF when every differing field matches; a
+    class loaded from a different jar is 'classjar'; an error only the
+    candidate logs 'logscan'."""
+    for path in sorted(glob.glob(os.path.join(compare_dir, "e2e-compare-*.json"))):
+        d = load(path)
+        if not d or "rows" not in d:
+            continue  # NOT RUN: nothing was compared
+        for r in d["rows"]:
+            if r["class"] in ("DIFF", "REGRESSION", "MISSING"):
+                if allow.match("obs", r["key"]):
+                    continue
+            if r["class"] != "DIFF":
+                continue
+            if allow.match("obsdiff", r["key"]):
+                continue
+            # Reports written before the comparison recorded 'fields' name the
+            # first differing path in 'detail' ('<component>:<id>/headers/vary: ...').
+            fields = r.get("fields")
+            if fields is None:
+                fields = [r["detail"].split(":", 1)[0]] if r.get("detail") else []
+            for p in fields:
+                allow.match("obsfield", r["key"] + p)
+        for m in d.get("class_jar_moves", []):
+            allow.match("classjar", f"{m['daemon']}:{m['class']}")
+        for e in d.get("new_log_errors", []):
+            allow.match("logscan", f"{e['source']}:{e['message']}")
+
+
+def artifact_matches(allow, compare_dir):
+    d = load(os.path.join(compare_dir, "artifact-diff.json"))
+    for x in (d or {}).get("differences", []):
+        allow.match(x["kind"], x["subject"])
+
+
+def api_matches(allow, compare_dir):
+    """An API finding is matched when it blocks: its status is not INFO."""
+    d = load(os.path.join(compare_dir, "api-compat.json"))
+    for f in (d or {}).get("findings", []):
+        if f["status"] != "INFO":
+            allow.match(f["kind"], f["subject"])
+
+
+def downstream_matches(allow, compare_dir):
+    d = load(os.path.join(compare_dir, "downstream-compare.json"))
+    for x in (d or {}).get("differences", []):
+        allow.match(x["kind"], x["subject"])
+
+
+# Rule file, relative to the harness directory, and how its comparison matches
+# its subjects. Check 4 (unit tests) has no allowlist: a regression always fails.
+RULE_FILES = {
+    "expected-differences.txt": artifact_matches,
+    "expected-api-differences.txt": api_matches,
+    "e2e/expected-e2e-differences.txt": e2e_matches,
+    "expected-downstream-differences.txt": downstream_matches,
+}
+
+
+def replay(harness_dir, compare_dirs):
+    """{rule file: {line: [directories the rule matched in]}}."""
+    result = {}
+    for name, matches in RULE_FILES.items():
+        allow = Allowlist(os.path.join(harness_dir, name))
+        seen = {r["line"]: [] for r in allow.rules}
+        for d in compare_dirs:
+            allow.reset()
+            matches(allow, d)
+            for r in allow.rules:
+                if r["hits"]:
+                    seen[r["line"]].append(os.path.basename(os.path.normpath(d)))
+        result[name] = [{"line": r["line"], "kind": r["kind"], "pattern": r["pattern"],
+                         "dirs": seen[r["line"]]} for r in allow.rules]
+    return result
+
+
+def main(argv):
+    if len(argv) < 2:
+        print("usage: replay.py <compare dir> [<compare dir>...]", file=sys.stderr)
+        return 2
+    compare_dirs = argv[1:]
+    missing = [d for d in compare_dirs if not os.path.isdir(d)]
+    if missing:
+        print(f"no such compare directory: {', '.join(missing)}", file=sys.stderr)
+        return 2
+    harness_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    failed = False
+    for name, rules in replay(harness_dir, compare_dirs).items():
+        nowhere = [r for r in rules if not r["dirs"]]
+        partial = [r for r in rules if r["dirs"] and len(r["dirs"]) < len(compare_dirs)]
+        print(f"{name}: {len(rules)} rule(s), {len(nowhere)} matched nothing, "
+              f"{len(partial)} matched in some directories only")
+        for r in nowhere:
+            print(f"  line {r['line']}: {r['kind']} {r['pattern']}  (matched nothing)")
+        for r in partial:
+            print(f"  line {r['line']}: {r['kind']} {r['pattern']}  "
+                  f"(matched in {', '.join(r['dirs'])})")
+        failed = failed or bool(nowhere)
+    return 1 if failed else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -85,6 +85,20 @@ check_side() {
   esac
 }
 
+# checks_supported: whether the ancestry and plan checks (R78 to R80) can say
+# anything about this run. They cannot when the two sides are the same commit:
+# a self-comparison run (R68) has no patch, so the PR branches' change is not
+# in the candidate and the plan check would report every branch file as missing
+# and stop the run before it compared anything. A self-comparison's question is
+# "is the harness's own output stable?", not "is this the patch?".
+checks_supported() {
+  local b c
+  b=$(git -C "${REPO_DIR}" rev-parse --verify --quiet "${BASELINE_REF}^{commit}") || b=""
+  c=$(git -C "${REPO_DIR}" rev-parse --verify --quiet "${CANDIDATE_REF}^{commit}") || c=""
+  # Unresolvable refs are the checks' own problem to report, not this one's.
+  [[ -z "${b}" || -z "${c}" || "${b}" != "${c}" ]]
+}
+
 ref_for_side() {
   if [[ "$1" == baseline ]]; then echo "${BASELINE_REF}"; else echo "${CANDIDATE_REF}"; fi
 }

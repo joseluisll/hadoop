@@ -200,14 +200,18 @@ def main():
         else:
             cls, detail = "BOTH_FAIL", "; ".join(rc["problems"])
         rule = allow.match("obs", key) if cls in ("DIFF", "REGRESSION", "MISSING") else None
+        fields = []
         if rule is None and cls == "DIFF":
             rule = allow.match("obsdiff", key)
         if rule is None and cls == "DIFF":
-            fields = [allow.match("obsfield", key + p)
-                      for p in differing_paths(rb["obs"], rc["obs"])]
-            rule = fields[0] if fields and all(fields) else None
+            fields = differing_paths(rb["obs"], rc["obs"])
+            matched = [allow.match("obsfield", key + p) for p in fields]
+            rule = matched[0] if fields and all(matched) else None
+        # The differing fields are written down so a replay (lib/replay.py) can
+        # try an obsfield rule against this report without the runs.
         rows.append({"key": key, "component": comp, "class": cls, "detail": detail,
-                     "expected": bool(rule), "reason": rule and rule["reason"]})
+                     "fields": fields, "expected": bool(rule),
+                     "reason": rule and rule["reason"]})
 
     # Class loading of each daemon.
     cl = classload.compare(a.baseline, a.candidate)

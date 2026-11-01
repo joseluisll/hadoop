@@ -104,6 +104,33 @@ the report lists the accepted changes nobody was told about.
    suite (the `simple` workflow) and in `run-all.sh`; the report has the
    section only when it ran.
 
+Before any of that, `compare.sh` checks that the two trees are what they
+claim to be, and stops without comparing when they are not:
+
+- **The candidate contains the baseline's commits** (`lib/ancestry.py`):
+  every baseline commit's change to a file outside the harness and `.github/`
+  must be in the candidate's tree. When it is not, the candidate was built on
+  an older trunk than the baseline (ha-run-4, mixed-run-5 and federated-run-6
+  failed this way), and those commits' changes would be reported as
+  differences caused by the patch. The report names the missing commits and
+  the files they change.
+- **The candidate is the baseline plus the PR branches**
+  (`lib/compare_plan.py`): with `PR_BRANCHES` set, the candidate's change
+  against the baseline must be exactly the combined change of those branches,
+  replayed per file in merge order. A file changed by no branch, a file a
+  branch changes and the candidate does not, or a file whose replay does not
+  reproduce the candidate's content is reported with the files. A conflict
+  the candidate resolved by hand and a binary blob cannot be replayed; the
+  intended resolutions are listed in `lib/compare_plan.py` (`NOTICE-binary`),
+  and a file with no resolution there counts as a difference.
+
+Either check failing writes its own section as the report and exits 1. Set
+`ANCESTRY_CHECK=false` or `PLAN_CHECK=false` to compare anyway. Both are
+skipped when the two sides resolve to the same commit: a self-comparison run
+(`jetty12-phase-a-<arch>-run-aa-*`, R68) has no patch, so the plan check would
+report every PR branch file as missing and stop the run before it compared
+anything. The workflow also leaves `PR_BRANCHES` empty for those runs.
+
 The report starts with **Impact on users** (`lib/impact.py`), built from all
 the checks: for the daemons and applications on the Hadoop classpath, the
 users of each shaded client jar and the Maven projects in each downstream
@@ -420,10 +447,34 @@ Rough durations on 4 cores: build 35-60 minutes per side, each
 architecture 10-30 minutes per side, unit suites from minutes (`client`)
 to hours (`changed` full).
 
+A new or edited allowlist rule is replayed against the reports already
+written before it is committed (R66), without a build or a run:
+
+```
+# this machine's results, or one or more downloaded report-<arch> artifacts
+dev-support/jetty12-phase-a/replay.sh
+dev-support/jetty12-phase-a/replay.sh ~/reports/report-ha ~/reports/report-mixed
+```
+
+It matches each rule the way its comparison does and prints the rules that
+matched nothing anywhere (the ones a run would report as unused) and the
+rules that matched in only some directories, which is how a pattern limited
+to `[a-z]+` missed the numbered daemons (`nn1`, `rm1`, `router2`, ...) in
+ha-run-3, mixed-run-4 and federated-run-5. It exits 1 when a rule matched
+nothing. In CI, download the reports first:
+
+```
+gh run download <run id> -p 'report-*' -D ~/reports
+dev-support/jetty12-phase-a/replay.sh ~/reports/report-*
+```
+
 | Variable | Default | Meaning |
 |---|---|---|
 | `WORKDIR` | `~/jetty12-phase-a-work` | worktrees, Maven repository, cluster state, results |
 | `BASELINE_REF` / `CANDIDATE_REF` | `origin/PREPARATION` / `origin/HADOOP-99999` | the two trees |
+| `ANCESTRY_CHECK` | `true` | `compare.sh` stops when the candidate lacks a baseline commit's change (`lib/ancestry.py`) |
+| `PLAN_CHECK` | `true` | `compare.sh` stops when the candidate is not the baseline plus `PR_BRANCHES` (`lib/compare_plan.py`) |
+| `PR_BRANCHES` | the six PR branches in merge order | the branches merged into trunk, in merge order, comma-separated (e.g. `origin/HADOOP-20012-upstream,...,origin/jetty-phase-a`); the plan check runs only when set. The workflow sets it in CI and leaves it empty for `-run-aa-` runs; a run whose two sides are one commit skips the check anyway |
 | `MAVEN_MIRROR_URL` | none | mirror of Maven Central, e.g. `https://maven-central.storage-download.googleapis.com/maven2` when the build host is rate-limited |
 | `MVN_EXTRA_ARGS` | none | added to every Maven call |
 | `BUILD_NATIVE` | `false` | build the distribution with the native libraries (`-Pnative`, OpenSSL and Snappy required); needs the toolchain of `start-build-env.sh`, which CI uses |
@@ -446,9 +497,9 @@ with itself, which must report no differences.
 
 `$WORKDIR/results/compare/report.md` has one section per check and
 architecture and an overall verdict. Supporting data sits next to it
-(`artifact-diff.json`, `api-compat.json`, `e2e-compare-<arch>.json`,
-`classload-compare-<arch>.json`, `unit-compare.json`,
-`downstream-compare.json`, `impact.md`) and under
+(`ancestry.json`, `compare-plan.json`, `artifact-diff.json`, `api-compat.json`,
+`e2e-compare-<arch>.json`, `classload-compare-<arch>.json`,
+`unit-compare.json`, `downstream-compare.json`, `impact.md`) and under
 `results/<side>/` (raw observations, CLI output, daemon start-up, scenario
 logs, surefire reports).
 
@@ -501,7 +552,13 @@ sockets.
   by the patch, but each one hides what it was checking: look at them before
   relying on a run.
 - "Allowlist rules that matched nothing" means a change the patch should
-  have made did not show up; check why.
+  have made did not show up; check why. `replay.sh` finds the same rules
+  without a run, and also the rules whose pattern misses some architecture's
+  names.
+- "The run stopped before comparing" means the candidate is not the baseline
+  plus its PR branches: an older trunk, or a change no PR branch makes. The
+  sections above it name the commits or files; nothing below them was
+  compared.
 
 When the patch changes, update `expected-differences.txt`,
 `expected-api-differences.txt`, `expected-downstream-differences.txt` and

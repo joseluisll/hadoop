@@ -14,9 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-"""Assemble results/compare/report.md from the three comparisons.
+"""Assemble results/compare/report.md from the comparisons.
 
 Usage: report.py <results dir>
+
+A run stopped by the ancestry check or the plan check (compare.sh) writes
+only that section and no comparison; the report is then just the verdict.
 """
 
 import json
@@ -35,7 +38,12 @@ def verdict(path):
         d = json.load(f)
     if "verdict" in d:
         return d["verdict"]
-    return "PASS" if d["summary"]["unexpected"] == 0 else "FAIL"
+    summary = d.get("summary")
+    if summary is None:
+        # Written by another tool, or a stub: a file without a verdict says
+        # nothing about the comparison, so it must not stop the report.
+        return "NOT RUN"
+    return "PASS" if summary["unexpected"] == 0 else "FAIL"
 
 
 def commit(results, side):
@@ -70,8 +78,14 @@ def main(results):
     archs = sorted(f[len("e2e-compare-"):-len(".json")] for f in os.listdir(cmp_dir)
                    if f.startswith("e2e-compare-") and f.endswith(".json")) \
         if os.path.isdir(cmp_dir) else []
-    parts = [("Artifacts and dependencies", "artifact-diff.json", "artifact-diff.md"),
-             ("API compatibility", "api-compat.json", "api-compat.md")]
+    # The checks that the candidate is the baseline plus the PR branches run
+    # first; a run they stop writes only their section.
+    pre = [("The candidate contains the baseline's commits", "ancestry.json", "ancestry.md"),
+           ("The candidate is the baseline plus the PR branches", "compare-plan.json",
+            "compare-plan.md")]
+    pre = [p for p in pre if os.path.exists(os.path.join(cmp_dir, p[1]))]
+    parts = pre + [("Artifacts and dependencies", "artifact-diff.json", "artifact-diff.md"),
+                   ("API compatibility", "api-compat.json", "api-compat.md")]
     parts += [(f"End-to-end: {a}", f"e2e-compare-{a}.json", f"e2e-compare-{a}.md") for a in archs]
     if not archs:
         parts.append(("End-to-end", "e2e-compare-none.json", "e2e-compare-none.md"))
@@ -81,14 +95,22 @@ def main(results):
         parts.append(("Downstream dependencies", "downstream-compare.json",
                       "downstream-compare.md"))
     verdicts = [(name, verdict(os.path.join(cmp_dir, j))) for name, j, _ in parts]
+    pre_failed = [n for n, v in verdicts[:len(pre)] if v in ("FAIL", "MISSING")]
     overall = "PASS" if all(v == "PASS" for _, v in verdicts) else \
         ("INCOMPLETE" if all(v in ("PASS", "NOT RUN") for _, v in verdicts) else "FAIL")
+    # The two trees are what they claim: the comparison below is of the patch.
     out = ["# Jetty 12 phase A: no functional change\n",
            f"- Baseline: `{commit(results, 'baseline')}`",
            f"- Candidate: `{commit(results, 'candidate')}`\n",
            *harness_check(results),
-           f"Overall: **{overall}**\n",
-           "| Check | Verdict |", "|---|---|"]
+           f"Overall: **{overall}**\n"]
+    if pre_failed:
+        out.append("**The run stopped before comparing**: "
+                   + " and ".join(f"*{n}*" for n in pre_failed)
+                   + " did not pass, so the candidate is not the tree to test "
+                     "(see the first sections). Fix that first: a difference "
+                     "reported against it would not be the patch's.\n")
+    out += ["| Check | Verdict |", "|---|---|"]
     out += [f"| {n} | {v} |" for n, v in verdicts]
     out.append("")
     impact = read(os.path.join(cmp_dir, "impact.md"))

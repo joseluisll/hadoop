@@ -47,6 +47,9 @@ import re
 import sys
 import zipfile
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from allowlist import Allowlist  # noqa: E402
+
 # Entries that differ between any two builds of the same source.
 VOLATILE_ENTRY = re.compile(
     r"(^META-INF/MANIFEST\.MF$"
@@ -58,38 +61,6 @@ VOLATILE_ENTRY = re.compile(
 # Files in the distribution that differ between any two builds.
 VOLATILE_FILE = re.compile(r"(\.pid$|/logs/|-version-info\.properties$)")
 ARCHIVE = (".jar", ".war")
-
-
-class Allowlist:
-    """Lines of '<kind> <regex>  # reason'. Both are regexes; each matches the
-    whole kind or subject (a kind such as 'dep-(removed|added)' covers two).
-    The reason starts at a '#' with whitespace on both sides (or at the start
-    of the line), so a regex may contain '#', as API subjects do
-    ('Class#method')."""
-
-    COMMENT = re.compile(r"(^|\s)#(\s|$)")
-
-    def __init__(self, path):
-        self.rules = []
-        with open(path, encoding="utf-8") as f:
-            for n, line in enumerate(f, 1):
-                m = self.COMMENT.search(line)
-                body, reason = (line[:m.start()], line[m.end():]) if m else (line, "")
-                body = body.strip()
-                if not body:
-                    continue
-                kind, _, regex = body.partition(" ")
-                self.rules.append({"kind": kind, "kind_re": re.compile(kind),
-                                   "regex": re.compile(regex.strip()),
-                                   "pattern": regex.strip(), "reason": reason.strip(),
-                                   "line": n, "hits": 0})
-
-    def match(self, kind, subject):
-        for r in self.rules:
-            if r["kind_re"].fullmatch(kind) and r["regex"].fullmatch(subject):
-                r["hits"] += 1
-                return r
-        return None
 
 
 def file_digest(path):

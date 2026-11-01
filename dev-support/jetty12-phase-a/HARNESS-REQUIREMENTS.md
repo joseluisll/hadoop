@@ -315,7 +315,7 @@ response"); each group names the files it comes from.
   analysed against the scope of the tickets (HADOOP-19970, HADOOP-20012 to
   HADOOP-20016), proposed, and added only once the owner agrees.
 - **R66.** A proposed rule is replayed against the reports of the runs it is
-  meant for before it is committed.
+  meant for before it is committed (`replay.sh`, R80).
 - **R67.** Rules for pre-existing, non-deterministic behaviour seen on both
   sides (YARN-12030 timeline JSON writer, `Vary` on static files, job counters
   read mid-run) name the issue and say it is pre-existing.
@@ -363,6 +363,44 @@ response"); each group names the files it comes from.
   HADOOP-20018, the SLS configuration bug, the RBF router id, the
   `TestFederationInterceptor#testSubClusterTimeOut` race), is documented
   in `README.md`; a PASS says nothing about those observations.
+- **R78.** `compare.sh` first checks that the candidate contains the
+  baseline's commits (`lib/ancestry.py`): every baseline commit's change to a
+  file outside the harness and `.github/` must be in the candidate's tree.
+  When one is not, the candidate was built on an older trunk than the
+  baseline (ha-run-4, mixed-run-5 and federated-run-6 failed on 5 `AppsBlock`
+  entries this way, YARN-12051), and the comparison stops before running:
+  its report names the missing commits and the files they change. A change
+  the candidate already has from a merge or cherry-pick counts as contained.
+  A merge commit counts against its first parent, as a rebase would replay
+  it. Set `ANCESTRY_CHECK=false` to compare anyway. *Formerly T5.*
+- **R79.** When `PR_BRANCHES` names the branches merged into trunk, in merge
+  order, `compare.sh` also checks that the candidate's change against the
+  baseline, without the harness and `.github/`, is exactly their combined
+  change (`lib/compare_plan.py`): per file, one branch's change is its tip
+  blob applied whole, and several branches' changes are replayed in order as
+  three-way merges (`git merge-file`). A file changed on the candidate by no
+  branch, a file a branch changes and the candidate does not, or a file whose
+  replay does not reproduce the candidate's blob stops the comparison and is
+  reported with its kind and the branches that change it. A binary blob
+  cannot be merged as text (a branch's change is applied whole) and a
+  conflict the candidate resolved by hand does not replay; the intended
+  resolutions are listed in the module (`NOTICE_REPLAY`: NOTICE-binary drops
+  both tickets' removed lines and keeps the added `jakarta.annotation-api`
+  entry) and a file with no entry there counts as a difference. Set
+  `PLAN_CHECK=false` to compare anyway. The workflow sets `PR_BRANCHES` to the
+  six branches in merge order, so CI runs the check; both checks are skipped
+  when the two sides resolve to one commit (a self-comparison run, R68), which
+  has no patch for them to check. *Formerly T16.*
+- **R80.** `replay.sh` (and `lib/replay.py`) replays every rule file against
+  one or more saved compare directories, each matching its rules the way its
+  comparison does, without a build or a run, so a new or edited rule is tried
+  against the latest report of every architecture before it is committed
+  (R66). It lists the rules that matched nothing in any directory (the ones a
+  run would report as unused, R59) and the rules that matched in only some
+  directories (a pattern that misses an architecture's names: the first
+  HADOOP-19970 `classjar` rule's `[a-z]+` missed `nn1`, `jn2`, `rm1`,
+  `router2`, `nmsc1`, ... and failed ha-run-3, mixed-run-4 and
+  federated-run-5), and exits 1 when a rule matched nothing. *Formerly T6.*
 
 ## TO-BE: identified improvements
 
@@ -414,21 +452,6 @@ implemented yet. Each says where it came from.
   header names, `location_form`, `error_text`, raw) and how many differ, so
   a run where they all match still shows they were compared.
   *Source: question "do you use the new info provided by the harness?".*
-- **T5. Candidate built on a different trunk than the baseline.** ha-run-4,
-  mixed-run-5 and federated-run-6 failed on 5 `AppsBlock` entries because the
-  candidate branch lacked a trunk commit (YARN-12051) that the baseline
-  (`PREPARATION` at run time) had. Before comparing, check that the
-  candidate contains the baseline's trunk commits; if not, stop with a clear
-  verdict that names the missing commits, instead of reporting them as
-  differences caused by the patch.
-  *Source: ha-run-4, mixed-run-5, federated-run-6.*
-- **T6. Validate rules against every architecture's daemon names.** The
-  first HADOOP-19970 `classjar` rule matched daemon names with `[a-z]+` and
-  missed the numbered instances (`nn1`, `jn2`, `rm1`, `router2`, `nmsc1`, ...),
-  which failed ha-run-3, mixed-run-4 and federated-run-5. Make the replay of
-  R66 a script in the harness that checks a rule file against the latest
-  report of every architecture, and use it before committing rules.
-  *Source: ha-run-3, mixed-run-4, federated-run-5.*
 - **T7. Announce the older accepted differences.** 53 accepted user-visible
   differences have no `announced:` (R58): the shaded test container classes
   in `hadoop-client-minicluster` (HADOOP-20014, 41 + 9 + 2) and the dropped
@@ -498,14 +521,6 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   it) and that no jar is listed that the distribution no longer has; a
   mismatch on the candidate only fails the run. This is an ASF release
   requirement. *Source: requirements analysis.*
-- **T16. The tested candidate matches the PRs.** The harness tests
-  `feat/HADOOP-99999`, but what is merged is `HADOOP-20012-upstream` to
-  `HADOOP-20016-upstream` (PRs #8890 to #8894) and `jetty-phase-a` (PR #8699,
-  HADOOP-19970). Before comparing, check that the candidate's change against
-  the baseline, without the harness and `.github`, equals the combined change
-  of those branches against trunk, and stop with the files that differ if it
-  does not. *Source: requirements analysis; drift between feat and upstream
-  branches seen earlier in this work.*
 - **T17. Differences attributed to one ticket.** The tickets merge into trunk
   one at a time and every intermediate trunk state ships, but the harness runs
   only their combination: a rule's ticket is only what its text says, and an
@@ -583,7 +598,7 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   reason to the actual cause ("job counters read mid-run depend on timing,
   pre-existing") without MAPREDUCE-7548, so the rule does not claim a cause it
   does not have (R67). A change to an allowlist rule: needs the owner's
-  agreement, and a replay (T6) before it is committed.
+  agreement, and a replay (R80) before it is committed.
   *Source: ha-run-5; `e2e/expected-e2e-differences.txt`.*
 - **T25. Deterministic client failover order.** In this tree
   `dfs.client.failover.random.order` defaults to `true`, so each HDFS client
@@ -607,7 +622,9 @@ empty `error_text` all have an empty body (`jmx-trace`, `conf-bad-name`,
 
 Proposed course of action (2026-11-01), pending the owner's decisions in
 step 0. The requirements document comes first: no harness process or allowlist rule changes until the
-step that covers it.
+step that covers it. In step 1, T5, T6 and T16 are implemented (R78 to R80);
+T20 and T24 remain, both needing the owner. The next work is step 2, whose
+items need no owner decision.
 
 ### Step 0: requirements and decisions (document only)
 
@@ -620,18 +637,18 @@ step that covers it.
      HADOOP-20014 differences (53, or 61 with the downstream check), with one
      `announced:` value per ticket and change (no code needed).
 
-### Step 1: trustworthy verdicts
+### Step 1: trustworthy verdicts (partly done)
 
 Cheap, and prevents false results like ha-run-3 to -4, mixed-run-4 to -5 and
-federated-run-5 to -6.
+federated-run-5 to -6. Each run must still end with all five architectures
+passing.
 
-- T5: stop when the candidate is built on another trunk than the baseline.
-- T6: a script that replays a rule file against the latest report of every
-  architecture, used before committing rules.
-- T16: check that the candidate matches the PR branches.
+Done as AS-IS requirements: T5 as R78, T16 as R79 and T6 as R80 (below).
+Still open, both needing the owner's decision:
+
 - T20: fail the run on a failing test that exists only on the candidate.
 - T24: reword the job-counter rule's reason (with the owner's agreement,
-  replayed with T6).
+  replayed with R80).
 
 ### Step 2: detection gaps for phase A and HADOOP-19970
 
