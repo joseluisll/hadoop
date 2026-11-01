@@ -54,6 +54,12 @@ on:
       - "feat/HDFS-*"
       - "feat/YARN-*"
       - "feat/MAPREDUCE-*"
+    # A push that only changes the fork's own .github/ (workflows, scripts)
+    # starts nothing: such changes get no upstream commit, and PREPARATION
+    # takes its .github/ from itself, not from a feature branch. A push that
+    # changes anything else (a merge of PREPARATION brings trunk too) runs.
+    paths-ignore:
+      - ".github/**"
 
 permissions:
   contents: write
