@@ -43,6 +43,10 @@
 
 name: "Upstream branch"
 
+# The run is named after the feature branch; without it GitHub uses the
+# message of the pushed commit, often a merge of PREPARATION.
+run-name: "Stage upstream commit: ${{ github.ref_name }}"
+
 on:
   push:
     branches:
