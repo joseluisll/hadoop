@@ -17,10 +17,15 @@
 """Record one end-to-end observation as a JSON line.
 
   probe.py http   --obs F --id ID --component C --url U [options]
+  probe.py raw    --obs F --id ID --component C --url U --request R [options]
   probe.py cli    --obs F --id ID --component C --rc N [--expect-rc N]
                   [--stdout-file F] [--shape sha256|text|lines|none]
                   [--expect-regex R]
   probe.py assert --obs F --id ID --component C --ok true|false [--detail D]
+
+raw sends the request bytes as given, for what a client library would refuse
+or rewrite: an encoded or malformed path, a missing Host header. R takes the
+Python escapes (\\r\\n, \\x00), and {host} stands for the URL's host and port.
 
 Every observation has "ok" (did this side meet the expectation) and "obs"
 (a normalized view that must be identical on baseline and candidate). The
@@ -37,17 +42,23 @@ failed prerequisite if they want to.
 """
 
 import argparse
+import codecs
 import hashlib
+import html
+import http.client
 import json
 import os
 import re
+import socket
 import ssl
 import subprocess
 import sys
 import tempfile
 import urllib.error
 import urllib.request
+import xml.etree.ElementTree as ET
 from html.parser import HTMLParser
+from urllib.parse import urlparse
 
 # Response headers whose values must match between the two sides. Every other
 # header is compared by name only.
@@ -74,9 +85,8 @@ def header_value(v):
     return v
 
 
-# Headers whose very presence depends on timing or body size.
-IGNORED_HEADERS = {"date", "content-length", "expires", "last-modified", "etag",
-                   "connection", "keep-alive"}
+# Follows the body's size; transfer-encoding says how a body is framed.
+IGNORED_HEADERS = {"content-length"}
 
 MASKS = [
     (re.compile(r"application_\d+_\d+"), "application_ID"),
@@ -101,6 +111,13 @@ MASKS = [
     # Each side runs its cluster under WORKDIR/<side>/, which shows in
     # configuration resource names and file paths.
     (re.compile(r"(?<=/)(baseline|candidate)(?=/)"), "SIDE"),
+    # The two sides may run on different hosts.
+    (re.compile(r"\b\d{1,3}(\.\d{1,3}){3}\b"), "IP"),
+    (re.compile(r"\b" + re.escape(socket.gethostname()) + r"\b"), "HOST"),
+    # A stack frame's line number changes with any recompiled jar, and its
+    # length moves where a long text is cut. compare_e2e.py drops them as well,
+    # for results recorded before this mask.
+    (re.compile(r"\(([\w$]+\.(?:java|kt|scala|groovy)):\d+\)"), r"(\1)"),
 ]
 
 
@@ -148,7 +165,6 @@ def merge_shapes(a, b):
 
 
 def xml_shape(text):
-    import xml.etree.ElementTree as ET
     try:
         root = ET.fromstring(text)
     except ET.ParseError as e:
@@ -190,6 +206,56 @@ class HtmlSummary(HTMLParser):
     def handle_data(self, data):
         if self._in_title:
             self.title += data
+
+
+# The row Jetty's sendError page keeps the reason in, as ResponseDetail reads it.
+ERROR_PAGE_MESSAGE = re.compile(r"<th>\s*MESSAGE:\s*</th>\s*<td>(.*?)</td>", re.I | re.S)
+MAX_ERROR_TEXT = 300
+
+
+def string_leaves(value, path=""):
+    if isinstance(value, dict):
+        return [x for k in sorted(value) for x in string_leaves(value[k], f"{path}/{k}")]
+    if isinstance(value, list):
+        return [x for i, v in enumerate(value) for x in string_leaves(v, f"{path}[{i}]")]
+    return [f"{path}={value}"] if isinstance(value, str) else []
+
+
+def plain_text(text):
+    """One line of text, from a page's message row or else without its markup."""
+    message = ERROR_PAGE_MESSAGE.search(text)
+    if message and message.group(1).strip():
+        text = message.group(1)
+    text = re.sub(r"(?s)<(script|style)\b.*?</\1>", " ", text)
+    return " ".join(html.unescape(re.sub(r"(?s)<[^>]*>", " ", text)).split())
+
+
+def error_text(body, content_type):
+    """What a client can tell the user about a refusal. The body's shape does
+    not show this: a message that goes missing or changes leaves the shape as
+    it was."""
+    text = body.decode("utf-8", errors="replace")
+    try:
+        if "json" in content_type:
+            found = string_leaves(json.loads(text))
+        elif "xml" in content_type:
+            found = [f"{e.tag.split('}')[-1]}={e.text.strip()}"
+                     for e in ET.fromstring(text).iter() if (e.text or "").strip()]
+        else:
+            found = [plain_text(text)] if text.strip() else []
+    except (ValueError, ET.ParseError):  # not the type it says
+        found = [plain_text(text)] if text.strip() else []
+    return [mask(x)[:MAX_ERROR_TEXT] for x in found]
+
+
+def location_form(location):
+    """How the Location is written, which the path recorded next to it hides:
+    java.net.URL, as WebHdfsFileSystem uses it, cannot parse a relative one."""
+    scheme = re.match(r"([a-zA-Z][a-zA-Z0-9+.-]*)://", location)
+    if scheme:
+        return scheme.group(1).lower() + " absolute"
+    return "network-path" if location.startswith("//") else \
+        "absolute-path" if location.startswith("/") else "relative"
 
 
 def body_shape(kind, body, content_type):
@@ -254,19 +320,20 @@ def fetch_urllib(a, data):
     if not a.follow:
         handlers.append(NoRedirect())
     opener = urllib.request.build_opener(*handlers)
-    status, headers, body, error = None, {}, b"", None
+    status, reason, headers, body, error = None, None, {}, b"", None
     try:
         with opener.open(req, timeout=a.timeout) as resp:
-            status, headers, body = resp.status, header_lists(resp.headers.items()), resp.read()
+            status, reason = resp.status, resp.reason
+            headers, body = header_lists(resp.headers.items()), resp.read()
     except urllib.error.HTTPError as e:
-        status, headers = e.code, header_lists(e.headers.items())
+        status, reason, headers = e.code, e.reason, header_lists(e.headers.items())
         try:
             body = e.read()
         except Exception:
             body = b""
     except Exception as e:  # connection refused, timeout, ...
         error = type(e).__name__ + ": " + str(e)[:200]
-    return status, headers, body, error
+    return status, reason, headers, body, error
 
 
 def fetch_curl(a, data):
@@ -294,18 +361,104 @@ def fetch_curl(a, data):
         p = subprocess.run(cmd, capture_output=True, timeout=a.timeout + 10)
         code = p.stdout.decode().strip()
         if not code.isdigit() or code == "000":
-            return None, {}, b"", "curl: " + p.stderr.decode(errors="replace").strip()[:200]
-        headers = {}
+            return None, None, {}, b"", "curl: " + p.stderr.decode(errors="replace").strip()[:200]
+        reason, headers = None, {}
         if os.path.exists(hdr):
             # The last block is the final response (after 401 challenges,
             # 100-continue and followed redirects). newline="" keeps the
             # CRLFs that text mode would turn into plain newlines.
             with open(hdr, encoding="latin-1", newline="") as f:
                 blocks = [b for b in f.read().split("\r\n\r\n") if b.strip()]
-            headers = header_lists(line.partition(":")[::2] for line in
-                                   (blocks[-1].split("\r\n")[1:] if blocks else []))
+            lines = blocks[-1].split("\r\n") if blocks else [""]
+            reason = lines[0].partition(" ")[2].partition(" ")[2]
+            headers = header_lists(line.partition(":")[::2] for line in lines[1:])
         body = open(out, "rb").read() if os.path.exists(out) else b""
-        return int(code), headers, body, None
+        return int(code), reason, headers, body, None
+
+
+def http_obs(a, method, status, reason, headers, body, error):
+    """The normalized view of one response, for http and raw."""
+    content_type = " ".join(headers.get("content-type", [""])[0].lower().split())
+    obs = {
+        "method": method,
+        "status": status,
+        "reason": reason and mask(reason),
+        "error": error and re.sub(r"\[Errno \d+\] ", "", error.split(":")[0]),
+        "headers": {k: (", ".join(sorted(header_value(v) for v in vs))
+                        if k in VALUE_HEADERS else True)
+                    for k, vs in sorted(headers.items()) if k not in IGNORED_HEADERS
+                    and k not in (a.ignore_header or [])},
+    }
+    if "set-cookie" in headers:
+        # The cookie's name and attributes (HttpOnly, Secure, Path, ...)
+        # matter; its value is random. One entry per cookie.
+        cookies = []
+        for c in headers["set-cookie"]:
+            name, _, rest = c.partition("=")
+            attrs = sorted(p.strip().split("=")[0].lower() for p in rest.split(";")[1:] if p.strip())
+            cookies.append("; ".join([name.strip()] + attrs))
+        obs["headers"]["set-cookie"] = " | ".join(sorted(cookies))
+    if "location" in headers:
+        loc = re.sub(r"^https?://[^/]+", "", headers["location"][0])
+        obs["headers"]["location"] = mask(re.sub(r"[?&](delegation|offset|"
+                                                 r"namenoderpcaddress)=[^&]*", "", loc))
+        obs["location_form"] = location_form(headers["location"][0])
+    if status is not None and not a.head_only:
+        obs["body"] = body_shape(a.shape, body, content_type)
+        if status >= 400:
+            obs["error_text"] = error_text(body, content_type)
+    return obs
+
+
+def status_problems(a, status):
+    # "any": record whatever the server answers; the baseline/candidate
+    # comparison is the check.
+    expected = None if a.expect_status in ("", "any") else \
+        [int(s) for s in a.expect_status.split(",")]
+    return [f"status {status}, expected {a.expect_status}"] \
+        if expected and status not in expected else []
+
+
+def do_raw(a):
+    """Send the request as given and read what comes back, which may be
+    nothing, or not HTTP: a server may refuse a request by closing the
+    connection."""
+    u = urlparse(a.url)
+    host, port = u.hostname, u.port or (443 if u.scheme == "https" else 80)
+    request = codecs.decode(a.request.replace("{host}", f"{host}:{port}"),
+                            "unicode_escape").encode("latin-1")
+    method = request.split(b" ", 1)[0].decode("latin-1")
+    version, status, reason, headers, body, error, reply = None, None, None, {}, b"", None, None
+    try:
+        sock = socket.create_connection((host, port), timeout=a.timeout)
+        if u.scheme == "https":
+            ctx = ssl.create_default_context(cafile=os.environ.get("PROBE_CA"))
+            sock = ctx.wrap_socket(sock, server_hostname=host)
+        with sock:
+            sock.sendall(request)
+            resp = http.client.HTTPResponse(sock, method=method)
+            resp.begin()
+            version = f"HTTP/{resp.version // 10}.{resp.version % 10}"
+            status, reason, headers = resp.status, resp.reason, header_lists(resp.getheaders())
+            try:
+                body = resp.read()
+            except http.client.IncompleteRead as e:
+                body, error = e.partial, "IncompleteRead"
+            except ConnectionError:
+                # A body that ends with the connection: whether a closing
+                # server's last packet is a FIN or a reset depends on timing.
+                pass
+    except ConnectionResetError:  # http.client.RemoteDisconnected is one too
+        error = "connection closed without a response"
+    except http.client.BadStatusLine as e:
+        error, reply = "not an HTTP response", mask(e.line.strip())[:200]
+    except (OSError, http.client.HTTPException) as e:
+        error = type(e).__name__
+    obs = http_obs(a, method, status, reason, headers, body, error)
+    obs["version"] = version
+    if reply is not None:
+        obs["reply"] = reply
+    return obs, status_problems(a, status), {"url": a.url, "expect_status": a.expect_status}
 
 
 def do_http(a):
@@ -316,50 +469,20 @@ def do_http(a):
         with open(a.data_file, "rb") as f:
             data = f.read()
     if os.environ.get("PROBE_SPNEGO") == "true" and not a.no_auth:
-        status, headers, body, error = fetch_curl(a, data)
+        status, reason, headers, body, error = fetch_curl(a, data)
     else:
-        status, headers, body, error = fetch_urllib(a, data)
+        status, reason, headers, body, error = fetch_urllib(a, data)
 
     if a.out and body:
         with open(a.out, "wb") as f:
             f.write(body)
 
-    lower = headers
-    content_type = " ".join(lower.get("content-type", [""])[0].lower().split())
-    obs = {
-        "method": a.method,
-        "status": status,
-        "error": error and re.sub(r"\[Errno \d+\] ", "", error.split(":")[0]),
-        "headers": {k: (", ".join(sorted(header_value(v) for v in vs))
-                        if k in VALUE_HEADERS else True)
-                    for k, vs in sorted(lower.items()) if k not in IGNORED_HEADERS
-                    and k not in (a.ignore_header or [])},
-    }
-    if "set-cookie" in lower:
-        # The cookie's name and attributes (HttpOnly, Secure, Path, ...)
-        # matter; its value is random. One entry per cookie.
-        cookies = []
-        for c in lower["set-cookie"]:
-            name, _, rest = c.partition("=")
-            attrs = sorted(p.strip().split("=")[0].lower() for p in rest.split(";")[1:] if p.strip())
-            cookies.append("; ".join([name.strip()] + attrs))
-        obs["headers"]["set-cookie"] = " | ".join(sorted(cookies))
-    if "location" in lower:
-        loc = re.sub(r"^https?://[^/]+", "", lower["location"][0])
-        obs["headers"]["location"] = mask(re.sub(r"[?&](delegation|offset|"
-                                                 r"namenoderpcaddress)=[^&]*", "", loc))
-    if status is not None and not a.head_only:
-        obs["body"] = body_shape(a.shape, body, content_type)
+    obs = http_obs(a, a.method, status, reason, headers, body, error)
 
     problems = []
     if error and not a.allow_error:
         problems.append(error)
-    # "any": record whatever the server answers; the baseline/candidate
-    # comparison is the check.
-    expected = None if a.expect_status in ("", "any") else \
-        [int(s) for s in a.expect_status.split(",")]
-    if expected and status not in expected:
-        problems.append(f"status {status}, expected {a.expect_status}")
+    problems += status_problems(a, status)
     text = body.decode("utf-8", errors="replace")
     for r in a.expect_regex or []:
         if not re.search(r, text):
@@ -390,13 +513,11 @@ def json_get(text, path):
 def do_tls(a):
     """TLS as negotiated by a web server: protocol, cipher, certificate
     names, and whether protocols older than TLS 1.2 are refused."""
-    from urllib.parse import urlparse
     u = urlparse(a.url)
     host, port = u.hostname, u.port or 443
     problems, obs = [], {}
     ctx = ssl.create_default_context(cafile=os.environ.get("PROBE_CA"))
     try:
-        import socket
         with socket.create_connection((host, port), timeout=a.timeout) as raw:
             with ctx.wrap_socket(raw, server_hostname=host) as s:
                 cert = s.getpeercert()
@@ -412,7 +533,6 @@ def do_tls(a):
         old.minimum_version = ssl.TLSVersion.TLSv1
         old.maximum_version = ssl.TLSVersion.TLSv1_1
         old.set_ciphers("ALL:@SECLEVEL=0")
-        import socket
         with socket.create_connection((host, port), timeout=a.timeout) as raw:
             with old.wrap_socket(raw, server_hostname=host):
                 obs["tls1.1_accepted"] = True
@@ -449,7 +569,7 @@ def do_cli(a):
 def main():
     ap = argparse.ArgumentParser()
     sub = ap.add_subparsers(dest="cmd", required=True)
-    for name in ("http", "cli", "assert", "tls"):
+    for name in ("http", "raw", "cli", "assert", "tls"):
         p = sub.add_parser(name)
         p.add_argument("--obs", required=True)
         p.add_argument("--id", required=True)
@@ -477,6 +597,15 @@ def main():
     h.add_argument("--out")
     h.add_argument("--print-body", action="store_true")
     h.add_argument("--timeout", type=float, default=60)
+    r = sub.choices["raw"]
+    r.add_argument("--url", required=True)
+    r.add_argument("--request", required=True)
+    r.add_argument("--expect-status", default="any")
+    r.add_argument("--shape", default="auto",
+                   choices=["auto", "json", "xml", "html", "text", "sha256", "lines", "none"])
+    r.add_argument("--ignore-header", action="append")
+    r.add_argument("--head-only", action="store_true")
+    r.add_argument("--timeout", type=float, default=30)
     c = sub.choices["cli"]
     c.add_argument("--rc", type=int, required=True)
     c.add_argument("--expect-rc", default="0")
@@ -493,6 +622,8 @@ def main():
 
     if a.cmd == "http":
         obs, problems, expect = do_http(a)
+    elif a.cmd == "raw":
+        obs, problems, expect = do_raw(a)
     elif a.cmd == "cli":
         obs, problems, expect = do_cli(a)
     elif a.cmd == "tls":

@@ -66,10 +66,15 @@ the report lists the accepted changes nobody was told about.
 3. **End to end, in five architectures** (`e2e/run.sh`): real daemons
    started from each side's distribution tarball on one host, the same
    scenarios run against both sides. Each observation records whether the
-   expectation held and a normalized view (HTTP status, content type,
-   security headers, cookie attributes, JSON/XML shape, HTML title and
-   assets, TLS protocol and cipher, CLI exit code, checksums of
-   deterministic job output) that must be identical on both sides. Every
+   expectation held and a normalized view (HTTP status and reason phrase,
+   content type, security headers, the names of the other headers, cookie
+   attributes, whether a `Location` is absolute, JSON/XML shape, the text of
+   an error response, HTML title and assets, TLS protocol and cipher, CLI exit
+   code, checksums of deterministic job output) that must be identical on
+   both sides. `probe.py raw` sends a request byte for byte, for what a client
+   library refuses or rewrites. `e2e/run.sh` first runs
+   `e2e/lib/test_probe.py`, which checks the probe against a local server,
+   without a cluster. Every
    daemon JVM logs the classes it loads, and all daemon and container logs
    are scanned for class loading, linkage and JAX-RS provider errors. Line
    numbers in Java stack frames are dropped before comparing, so an error

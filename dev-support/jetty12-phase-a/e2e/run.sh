@@ -34,6 +34,8 @@ PATTERN="${3:-}"
 require_cmd java python3 curl
 ALL_ARCHS=(simple secure ha federated mixed)
 [[ "${ARCHS}" == all ]] && ARCHS=$(IFS=,; echo "${ALL_ARCHS[*]}")
+# A broken probe would cost a whole cluster run to find out.
+python3 -I "${HARNESS_DIR}/e2e/lib/test_probe.py" || die "the probe's self-check failed"
 
 rc_all=0
 for ARCH in ${ARCHS//,/ }; do
