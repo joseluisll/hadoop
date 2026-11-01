@@ -574,6 +574,28 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   Impact on users, as API that code built against Hadoop may start to depend
   on; the HADOOP-19970 release note says the packages are unchanged, not that
   4.0 types become available. *Source: the Servlet 4.0 classes of T3.*
+- **T24. Reason of the job-counter rule.** The `obsfield` rule
+  `mapreduce-am:am-job-counters/body/json/jobCounters/counterGroup` gives
+  "(MAPREDUCE-7548 under Kerberos)" as its reason, but it also accepts the
+  difference in `ha` (ha-run-5), which has no Kerberos: the counters of a
+  running job depend on when they are read, in every architecture. Reword the
+  reason to the actual cause ("job counters read mid-run depend on timing,
+  pre-existing") without MAPREDUCE-7548, so the rule does not claim a cause it
+  does not have (R67). A change to an allowlist rule: needs the owner's
+  agreement, and a replay (T6) before it is committed.
+  *Source: ha-run-5; `e2e/expected-e2e-differences.txt`.*
+- **T25. Deterministic client failover order.** In this tree
+  `dfs.client.failover.random.order` defaults to `true`, so each HDFS client
+  tries a random namenode first, and whichever requests reach the standby are
+  deserialized there before they are rejected. In ha-run-5, `nn2` loaded
+  different client RPC classes on each side (cache directives and snapshots
+  on the baseline; cache pools, snapshot diffs, storage policies and edit
+  rolls on the candidate). Nothing fails, but it adds noise to the
+  one-side-only class view of T3. Set `dfs.client.failover.random.order=false`
+  in the configurations of `ha`, `mixed` and `federated`, so both sides send
+  client requests to the active namenode first. It does not change what the
+  scenarios check: failover itself is driven by the scenarios.
+  *Source: ha-run-5; `hdfs-default.xml`.*
 
 Withdrawn after review: "extract the text of XML error bodies". The probe
 already extracts it (R29); the 17 error responses of secure-run-9 with an
@@ -588,7 +610,7 @@ step that covers it.
 
 ### Step 0: requirements and decisions (document only)
 
-1. Record T12 to T23 in TO-BE, and the extension of T3 (done).
+1. Record T12 to T25 in TO-BE, and the extension of T3 (done).
 2. Owner decisions to record here before the steps that need them:
    - T3: should a class loaded on one side only fail the run without a rule?
    - T17: per-ticket and merge-order runs, yes or no?
@@ -607,6 +629,8 @@ federated-run-5 to -6.
   architecture, used before committing rules.
 - T16: check that the candidate matches the PR branches.
 - T20: fail the run on a failing test that exists only on the candidate.
+- T24: reword the job-counter rule's reason (with the owner's agreement,
+  replayed with T6).
 
 ### Step 2: detection gaps for phase A and HADOOP-19970
 
@@ -628,8 +652,9 @@ federated-run-5 to -6.
 
 ### Step 4: pre-existing holes in coverage
 
-- T10, then T3: mask the timeline server's class-load noise, then report
-  classes loaded on one side only.
+- T10 and T25, then T3: mask the timeline server's class-load noise and make
+  the client failover order deterministic, then report classes loaded on one
+  side only.
 - T11: flaky test history.
 - T8 and T9: MapReduce under Kerberos and the YARN federation application
   checks. They cost more; they restore coverage that is now zero, but not
