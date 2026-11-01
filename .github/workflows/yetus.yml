@@ -44,7 +44,7 @@ name: "Yetus"
 # run takes its file from the pushed commit, and <name> must not carry this
 # file. A status belongs to a commit, so publishing <name> again clears it.
 
-run-name: ${{ github.ref_name }}
+run-name: "Yetus: ${{ github.ref_name }}"
 
 on:
   push:
