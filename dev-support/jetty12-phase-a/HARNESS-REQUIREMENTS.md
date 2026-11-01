@@ -21,7 +21,8 @@ read its report; this document states each behaviour as a numbered
 requirement, so that a change to the harness can say which requirement it
 adds, changes or removes.
 
-The AS-IS list was extracted from the code on `feat/HADOOP-99999` as of
+The AS-IS list was extracted from the code on `feat/HADOOP-99999` (renamed
+`feat/HARNESS` on 2026-11-01) as of
 2026-11-01 (after `a82be803`, "record what clients see of an HTTP
 response"); each group names the files it comes from.
 

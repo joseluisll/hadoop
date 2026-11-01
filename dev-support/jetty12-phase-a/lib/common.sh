@@ -27,7 +27,7 @@ WORKDIR="${WORKDIR:-${HOME}/jetty12-phase-a-work}"
 # The two trees being compared. BASELINE is the PR base without the patch,
 # CANDIDATE is the phase A patch.
 BASELINE_REF="${BASELINE_REF:-origin/PREPARATION}"
-CANDIDATE_REF="${CANDIDATE_REF:-origin/HADOOP-99999}"
+CANDIDATE_REF="${CANDIDATE_REF:-origin/feat/HARNESS}"
 
 # Extra arguments for every Maven invocation, e.g. "-o" or "-Dmaven.repo.local=...".
 MVN_EXTRA_ARGS="${MVN_EXTRA_ARGS:-}"

@@ -28,7 +28,7 @@ dependencies:
 
 This harness builds the tree without the patch (**baseline**, default
 `origin/PREPARATION`) and with it (**candidate**, default
-`origin/HADOOP-99999`), runs the same checks on both, and reports every
+`origin/feat/HARNESS`), runs the same checks on both, and reports every
 difference. Differences the patch is meant to cause are listed, with the
 JIRA that causes them, in allowlists; anything else fails the run. The
 point is to find what the patch changes for Hadoop's users that its JIRA,
@@ -342,14 +342,14 @@ A workflow starts by hand:
   as the candidate against `PREPARATION`:
 
   ```
-  git tag jetty12-phase-a-secure-run-1 origin/HADOOP-99999
+  git tag jetty12-phase-a-secure-run-1 origin/feat/HARNESS
   git push origin jetty12-phase-a-secure-run-1
   ```
 
 - or a branch with the same name pattern, where tags cannot be pushed:
 
   ```
-  git push origin origin/HADOOP-99999:refs/heads/jetty12-phase-a-secure-run-1
+  git push origin origin/feat/HARNESS:refs/heads/jetty12-phase-a-secure-run-1
   ```
 
 Two runs check the harness itself instead of the patch, chosen by the
@@ -471,7 +471,7 @@ dev-support/jetty12-phase-a/replay.sh ~/reports/report-*
 | Variable | Default | Meaning |
 |---|---|---|
 | `WORKDIR` | `~/jetty12-phase-a-work` | worktrees, Maven repository, cluster state, results |
-| `BASELINE_REF` / `CANDIDATE_REF` | `origin/PREPARATION` / `origin/HADOOP-99999` | the two trees |
+| `BASELINE_REF` / `CANDIDATE_REF` | `origin/PREPARATION` / `origin/feat/HARNESS` | the two trees |
 | `ANCESTRY_CHECK` | `true` | `compare.sh` stops when the candidate lacks a baseline commit's change (`lib/ancestry.py`) |
 | `PLAN_CHECK` | `true` | `compare.sh` stops when the candidate is not the baseline plus `PR_BRANCHES` (`lib/compare_plan.py`) |
 | `PR_BRANCHES` | the six PR branches in merge order | the branches merged into trunk, in merge order, comma-separated (e.g. `origin/HADOOP-20012-upstream,...,origin/jetty-phase-a`); the plan check runs only when set. The workflow sets it in CI and leaves it empty for `-run-aa-` runs; a run whose two sides are one commit skips the check anyway |

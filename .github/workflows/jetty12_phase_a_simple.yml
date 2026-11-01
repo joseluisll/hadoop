@@ -26,7 +26,7 @@
 # Started by hand: "Run workflow" in the Actions tab once this file is on the
 # default branch, or pushing a tag or a branch named jetty12-phase-a-simple-run-*,
 # which runs that commit as the candidate against PREPARATION:
-#   git tag jetty12-phase-a-simple-run-1 origin/HADOOP-99999
+#   git tag jetty12-phase-a-simple-run-1 origin/feat/HARNESS
 #   git push origin jetty12-phase-a-simple-run-1
 # A branch named jetty12-phase-a-simple-run-full-<n> (or unit_tier "full")
 # runs the "changed" suite in tier full, in four shards that each fit a
@@ -42,7 +42,7 @@ on:
         default: "PREPARATION"
       candidate_ref:
         description: "Candidate branch, tag or commit (with the patch)"
-        default: "HADOOP-99999"
+        default: "feat/HARNESS"
       unit_tier:
         description: "Tier of the 'changed' suite"
         type: choice
