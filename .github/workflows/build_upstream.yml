@@ -46,6 +46,10 @@
 
 name: "Build upstream branch"
 
+# The run is named after the request; without it GitHub uses the message of
+# the pushed commit, which for a request is PREPARATION's latest commit.
+run-name: "Publish and build: ${{ github.ref_name }}"
+
 on:
   push:
     branches:
