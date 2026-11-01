@@ -18,10 +18,13 @@
 #
 
 # Fork-only: rebuild PREPARATION as apache/hadoop trunk plus this fork's
-# .github/ with .github/scripts/rebuild-preparation.sh, and force-push it.
-# Merged JIRA pull requests are dropped from PREPARATION; their upstream
-# branches have already been built by "Upstream branch", which calls this
-# workflow once it is done (workflow_dispatch would need the file on trunk).
+# .github/ with .github/scripts/rebuild-preparation.sh, and force-push it, so
+# it keeps following trunk. Anything else merged into PREPARATION is dropped.
+# "Upstream branch" calls this workflow after each push to a feature branch
+# (workflow_dispatch and schedule would need the file on trunk, the fork's
+# default branch). Several can run at once: the first to push wins, and the
+# others find PREPARATION moved and leave it, so none waits in a queue
+# (GitHub cancels all but one waiting job of a concurrency group).
 #
 # Pushes with the PREPARATION_PUSH_TOKEN secret when it is set (a token with
 # contents and workflows write access), otherwise with GITHUB_TOKEN.
@@ -38,10 +41,6 @@ jobs:
   rebuild-preparation:
     name: Rebuild PREPARATION
     runs-on: ubuntu-24.04
-    # One rebuild at a time; a newer one always sees the latest PREPARATION.
-    concurrency:
-      group: rebuild-preparation
-      cancel-in-progress: false
     steps:
       - name: Checkout PREPARATION
         uses: actions/checkout@v4
@@ -51,6 +50,8 @@ jobs:
           token: ${{ secrets.PREPARATION_PUSH_TOKEN || github.token }}
       - name: Rebuild and push PREPARATION
         run: |
+          # The script's exit status, not tee's.
+          set -o pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           old_commit=$(git rev-parse HEAD)
@@ -66,8 +67,16 @@ jobs:
           elif [[ ${status} -ne 0 ]]; then
             exit "${status}"
           fi
-          # Fails instead of overwriting if PREPARATION moved in the meantime.
-          git push --force-with-lease="PREPARATION:${old_commit}" origin PREPARATION
+          # Never overwrites a PREPARATION that moved in the meantime: another
+          # rebuild got there first (or someone pushed), so leave it.
+          if ! git push --force-with-lease="PREPARATION:${old_commit}" origin PREPARATION; then
+            now=$(git ls-remote origin refs/heads/PREPARATION | cut -f1)
+            if [[ -n "${now}" && "${now}" != "${old_commit}" ]]; then
+              echo "::notice::PREPARATION moved to ${now} meanwhile; left as it is."
+              exit 0
+            fi
+            exit 1
+          fi
           {
             echo "### PREPARATION rebuilt"
             echo

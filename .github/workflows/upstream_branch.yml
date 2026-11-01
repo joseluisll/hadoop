@@ -17,65 +17,78 @@
 # under the License.
 #
 
-# Fork-only: when a pull request is merged into PREPARATION, build
-# <branch>-upstream with .github/scripts/make-upstream-branch.sh and push it,
-# ready for an apache/hadoop pull request. PRs that only change .github/ are
-# skipped. Then rebuild PREPARATION as apache/hadoop trunk plus .github/
-# (rebuild_preparation.yml), so the merged PR does not stay in it.
+# Fork-only: work happens on feat/<name> branches, where <name> starts with
+# a Hadoop JIRA (HADOOP-, HDFS-, YARN-, MAPREDUCE-), e.g. feat/HADOOP-12345.
+# Each push to one builds the commit for its apache/hadoop pull request with
+# .github/scripts/make-upstream-branch.sh and stages it as the tag
+# staged/<name>. No pull request into PREPARATION is needed. Branches that
+# only change the fork's own files (its workflows and scripts) get no
+# upstream commit, and a push that leaves it unchanged does not push the tag
+# again.
+#
+# Nothing is built automatically. Pushing a branch would start
+# apache/hadoop's build_and_test.yml on it, but every apache/hadoop workflow
+# started by a push is limited to branches, so pushing a tag starts none.
+# The <name> branch, which the apache/hadoop pull request is opened from,
+# only moves, and gets its Build run, on request (see build_upstream.yml);
+# Yetus also only runs on request (see yetus.yml).
+# Then PREPARATION is rebuilt as apache/hadoop trunk plus .github/
+# (rebuild_preparation.yml), so it keeps following trunk.
+#
+# A push with [skip ci] in its commit message runs none of this.
 #
 # Pushes with the PREPARATION_PUSH_TOKEN secret (a token with contents and
-# workflows write access). Without it, GITHUB_TOKEN is used and the pushed
-# <branch>-upstream gets no Build run for the apache/hadoop pull request.
+# workflows write access), since GITHUB_TOKEN cannot push apache/hadoop
+# commits that change .github/workflows/.
 
 name: "Upstream branch"
 
 on:
-  pull_request:
-    types: [closed]
-    branches: [PREPARATION]
+  push:
+    branches:
+      - "feat/HADOOP-*"
+      - "feat/HDFS-*"
+      - "feat/YARN-*"
+      - "feat/MAPREDUCE-*"
 
 permissions:
   contents: write
 
 jobs:
   upstream-branch:
-    name: Build upstream branch
-    # Only merged PRs from Hadoop JIRA branches (HADOOP-, HDFS-, YARN-,
-    # MAPREDUCE-) that live in this repository, and never from a
-    # <branch>-upstream branch itself.
-    if: >-
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (startsWith(github.head_ref, 'HADOOP-') || startsWith(github.head_ref, 'HDFS-') ||
-      startsWith(github.head_ref, 'YARN-') || startsWith(github.head_ref, 'MAPREDUCE-')) &&
-      !endsWith(github.head_ref, '-upstream')
+    name: Stage the upstream commit
+    # Not when the branch is deleted.
+    if: ${{ !github.event.deleted }}
     runs-on: ubuntu-24.04
+    # One run per feature at a time, so pushes are staged in order.
+    concurrency:
+      group: upstream-branch-${{ github.ref_name }}
+      cancel-in-progress: false
     env:
-      FEATURE: ${{ github.event.pull_request.head.ref }}
-      PR_NUMBER: ${{ github.event.pull_request.number }}
-      MERGE_COMMIT: ${{ github.event.pull_request.merge_commit_sha }}
+      # feat/<name>
+      FEATURE: ${{ github.ref_name }}
       # Author and committer of the upstream commit; Claude is added as co-author.
       UPSTREAM_AUTHOR: "Jose Luis López López <joseluisll@gmail.com>"
     steps:
-      - name: Checkout the merged PREPARATION
+      - name: Checkout the pushed feature branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
           fetch-depth: 0
-          # The push below must start the Build workflow on <branch>-upstream:
-          # apache/hadoop's "Build" check looks for that run in this fork.
-          # A push with GITHUB_TOKEN starts no workflows, and GITHUB_TOKEN
-          # cannot push apache/hadoop commits that change .github/workflows/.
+          # GITHUB_TOKEN cannot push apache/hadoop commits that change
+          # .github/workflows/.
           token: ${{ secrets.PREPARATION_PUSH_TOKEN || github.token }}
-      - name: Build and push the upstream branch
+      - name: Build and stage the upstream commit
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          # The PR's head, even if its branch was deleted on merge.
-          git fetch --quiet origin "refs/pull/${PR_NUMBER}/head"
-          feature_commit=$(git rev-parse FETCH_HEAD)
-          # PREPARATION as it was just before this PR was merged.
-          base_commit=$(git rev-parse "${MERGE_COMMIT}^1")
+          feature_commit=${GITHUB_SHA}
+          # The apache/hadoop trunk commit the feature is based on, not the
+          # current PREPARATION, which may have been rebuilt on a newer trunk
+          # since. PREPARATION only adds .github/ to trunk, which the script
+          # leaves out anyway.
+          git remote add apache https://github.com/apache/hadoop.git
+          git fetch --quiet --no-tags apache trunk
+          base_commit=$(git merge-base FETCH_HEAD "${feature_commit}")
           # Keep a copy of the script: it checks out apache/hadoop trunk.
           script="${RUNNER_TEMP}/make-upstream-branch.sh"
           cp .github/scripts/make-upstream-branch.sh "${script}"
@@ -83,25 +96,26 @@ jobs:
           BASE_COMMIT="${base_commit}" FEATURE_COMMIT="${feature_commit}" \
             bash "${script}" "${FEATURE}" || status=$?
           if [[ ${status} -eq 3 ]]; then
-            echo "::notice::${FEATURE} only changes .github/; no upstream branch needed."
+            echo "::notice::${FEATURE} only changes the fork's own files; no upstream commit needed."
             exit 0
           elif [[ ${status} -ne 0 ]]; then
             exit "${status}"
           fi
-          # Pushed with PREPARATION_PUSH_TOKEN, so it starts the Build workflow
-          # from apache/hadoop's own files on that branch.
-          git push --force origin "${FEATURE}-upstream"
-          echo "::notice::Pushed ${FEATURE}-upstream for an apache/hadoop pull request."
+          name=${FEATURE#feat/}
+          staged="staged/${name}"
+          # Nothing changed for apache/hadoop (e.g. a push that only touched
+          # .github/): keep the staged commit as it is.
+          if git fetch --quiet --no-tags origin "refs/tags/${staged}" 2>/dev/null &&
+              [[ "$(git rev-parse 'FETCH_HEAD^{tree}')" == "$(git rev-parse 'HEAD^{tree}')" ]]; then
+            echo "::notice::${staged} is already up to date."
+            exit 0
+          fi
+          # A tag, so no Build starts; build_upstream.yml publishes it.
+          git push --force origin "HEAD:refs/tags/${staged}"
+          echo "::notice::Staged ${staged}. To publish it as ${name} and build it: git push origin PREPARATION:build/${name}"
 
   rebuild-preparation:
     name: Rebuild PREPARATION
     needs: upstream-branch
-    # After any merged PR from this repository, unless its upstream branch
-    # failed: then PREPARATION keeps the merge so the job can be re-run.
-    if: >-
-      always() &&
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      (needs.upstream-branch.result == 'success' || needs.upstream-branch.result == 'skipped')
     uses: ./.github/workflows/rebuild_preparation.yml
     secrets: inherit
