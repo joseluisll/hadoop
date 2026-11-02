@@ -70,6 +70,12 @@ for ARCH in ${ARCHS//,/ }; do
       start=${SECONDS}
       # Each scenario in its own shell so a failing command cannot stop the
       # others; a hung scenario is cut off.
+      # The marker file is written only when the scenario reaches its last
+      # line: one that dies early (an unset variable under set -u, a fatal
+      # error) loses the observations after that point, so its end is an
+      # observation of its own on both sides.
+      done_file="${RES}/scenarios/${name}.done"
+      rm -f "${done_file}"
       set +e
       timeout "${E2E_SCENARIO_TIMEOUT:-3600}" bash -c '
         set -u
@@ -77,12 +83,20 @@ for ARCH in ${ARCHS//,/ }; do
         SIDE=$2 ARCH=$3
         source "$1/e2e/lib/env.sh"
         source "$4"
-      ' _ "${HARNESS_DIR}" "${SIDE}" "${ARCH}" "${scenario}" > "${RES}/scenarios/${name}.log" 2>&1
+        : > "$5"
+      ' _ "${HARNESS_DIR}" "${SIDE}" "${ARCH}" "${scenario}" "${done_file}" \
+        > "${RES}/scenarios/${name}.log" 2>&1
       rc=$?
       set -e
       if [[ ${rc} -eq 124 ]]; then
         log "scenario ${name} timed out"
         COMPONENT=scenario check "${name}.timeout" false "timed out" 2>/dev/null || true
+      elif [[ -f "${done_file}" ]]; then
+        COMPONENT=scenario check "${name}.completed" true 2>/dev/null || true
+      else
+        log "scenario ${name} ended early (exit ${rc}); see ${RES}/scenarios/${name}.log"
+        COMPONENT=scenario check "${name}.completed" false \
+          "ended before its last line (exit ${rc})" 2>/dev/null || true
       fi
       log "scenario ${name} done in $((SECONDS - start))s: $(grep -c '\[PASS\]' "${RES}/scenarios/${name}.log") pass, $(grep -c '\[FAIL\]' "${RES}/scenarios/${name}.log") fail"
     done

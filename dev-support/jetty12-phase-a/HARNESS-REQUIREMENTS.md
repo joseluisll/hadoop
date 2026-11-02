@@ -139,6 +139,14 @@ response"); each group names the files it comes from.
   (`aborted.txt`) while logs and class loading are still collected.
 - **R27.** `e2e/run.sh` first runs `e2e/lib/test_probe.py`, which checks the
   probe against a local server, and stops if it fails.
+- **R82.** Each scenario runs in its own shell, cut off after
+  `E2E_SCENARIO_TIMEOUT` (3600 s), which records `scenario:<name>.timeout` as
+  failed. Otherwise its end is an observation, `scenario:<name>.completed`:
+  passed when the script reached its last line, failed ("ended before its
+  last line") when it died early, e.g. on an unset variable under `set -u`.
+  A scenario that dies early on the candidate only is a regression; one that
+  dies on both sides is BOTH_FAIL and listed, instead of losing its later
+  observations unseen.
 
 #### Observations (`e2e/lib/probe.py`)
 

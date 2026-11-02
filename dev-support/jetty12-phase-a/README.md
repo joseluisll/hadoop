@@ -572,6 +572,10 @@ sockets.
   logs and class loading are still collected. The comparison then says which
   daemons did not start: **FAIL** for the candidate, **NOT RUN** for the
   baseline.
+- **A scenario that ends early** is an observation: every scenario records
+  `scenario:<name>.completed`, failed when the script did not reach its last
+  line, and `scenario:<name>.timeout` when it was cut off. Its observations
+  after that point are lost, so the end is compared instead (R82).
 - **BOTH_FAIL** observations, tests failing on both sides and unit modules
   whose Maven run failed on both sides are not caused by the patch, but each
   one hides what it was checking: look at them before relying on a run.
