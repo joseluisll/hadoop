@@ -97,11 +97,11 @@ env:
   MAVEN_MIRROR_URL: ${{ inputs.maven_mirror }}
   BASELINE: ${{ inputs.baseline_ref || 'PREPARATION' }}
   CANDIDATE: ${{ contains(github.ref_name, '-run-aa-') && (inputs.baseline_ref || 'PREPARATION') || inputs.candidate_ref || github.sha }}
-  # The branches merged into trunk, in merge order: compare.sh checks the
-  # candidate against their combined change (R79). Left empty for a
-  # self-comparison run (-run-aa-), which has no patch to check; compare.sh
-  # also skips both checks when the two sides resolve to one commit.
-  PR_BRANCHES: ${{ contains(github.ref_name, '-run-aa-') && '' || 'origin/HADOOP-20012-upstream,origin/HADOOP-20014-upstream,origin/HADOOP-20013-upstream,origin/HADOOP-20015-upstream,origin/HADOOP-20016-upstream,origin/jetty-phase-a' }}
+  # The branches merged into trunk, in merge order: the queue job and
+  # compare.sh check the candidate against their combined change (R79). A
+  # self-comparison run (-run-aa-) skips the check: its two sides resolve to
+  # one commit.
+  PR_BRANCHES: origin/HADOOP-20012-upstream,origin/HADOOP-20014-upstream,origin/HADOOP-20013-upstream,origin/HADOOP-20015-upstream,origin/HADOOP-20016-upstream,origin/jetty-phase-a
   BREAK_CANDIDATE: ${{ inputs.break_candidate }}
   BREAK_REF: ${{ github.ref_name }}
 
@@ -116,14 +116,37 @@ jobs:
     outputs:
       turn: ${{ steps.wait.outputs.turn }}
     steps:
+      # Every branch's history, without file contents (fetched on demand):
+      # the tree checks below read commits and trees, and only the blobs of
+      # the files the PR branches change.
       - uses: actions/checkout@v6
         with:
           sparse-checkout: dev-support/jetty12-phase-a
+          fetch-depth: 0
+          fetch-tags: false
+          filter: blob:none
       # A broken comparator would cost a whole run, and up to 11 hours of
       # waiting, to find out; fail here instead (R81).
       - name: Check the comparison scripts
         shell: bash
         run: python3 -I "${HARNESS}/lib/test_comparators.py"
+      # The same for a candidate that is not the tree to test (R78, R79):
+      # stop before the wait and the builds. compare.sh checks again, on the
+      # refs as they are when it runs.
+      - name: Check the candidate's tree
+        shell: bash
+        run: |
+          resolve() {
+            git rev-parse --verify -q "origin/$1^{commit}" || git rev-parse --verify -q "$1^{commit}" || echo "$1"
+          }
+          export BASELINE_REF CANDIDATE_REF
+          BASELINE_REF=$(resolve "${BASELINE}")
+          CANDIDATE_REF=$(resolve "${CANDIDATE}")
+          out="${RUNNER_TEMP}/tree-checks"
+          rc=0
+          (source "${HARNESS}/lib/common.sh"; tree_checks "${out}") || rc=$?
+          cat "${out}"/*.md >> "${GITHUB_STEP_SUMMARY}" 2>/dev/null || true
+          exit "${rc}"
       - name: Wait for the runs started before this one
         id: wait
         shell: bash
