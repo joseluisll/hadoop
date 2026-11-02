@@ -20,6 +20,12 @@ Usage: report.py <results dir>
 
 A run stopped by the ancestry check or the plan check (compare.sh) writes
 only that section and no comparison; the report is then just the verdict.
+
+A run whose candidate was broken on purpose (candidate/build/broken.txt,
+R69) checks the harness: it exits 0 only when the breakage was caught where
+every case is caught, the artifacts and every end-to-end architecture FAIL,
+and the tree checks did not fail, which would stop the comparison before it
+could catch anything.
 """
 
 import json
@@ -73,6 +79,17 @@ def harness_check(results):
     return notes
 
 
+def caught(verdicts):
+    """Whether a deliberately broken candidate was caught: the artifact
+    diff and every end-to-end architecture FAIL, and no tree check FAILs."""
+    v = dict(verdicts)
+    e2e = [x for n, x in verdicts if n.startswith("End-to-end")]
+    return (v.get("Artifacts and dependencies") == "FAIL" and bool(e2e)
+            and all(x == "FAIL" for x in e2e)
+            and v.get("The candidate contains the baseline's commits") != "FAIL"
+            and v.get("The candidate is the baseline plus the PR branches") != "FAIL")
+
+
 def main(results):
     cmp_dir = os.path.join(results, "compare")
     archs = sorted(f[len("e2e-compare-"):-len(".json")] for f in os.listdir(cmp_dir)
@@ -98,12 +115,20 @@ def main(results):
     pre_failed = [n for n, v in verdicts[:len(pre)] if v == "FAIL"]
     overall = "PASS" if all(v == "PASS" for _, v in verdicts) else \
         ("INCOMPLETE" if all(v in ("PASS", "NOT RUN") for _, v in verdicts) else "FAIL")
+    broken = os.path.exists(os.path.join(results, "candidate", "build", "broken.txt"))
+    check = None
+    if broken:
+        check = "PASS" if caught(verdicts) else "FAIL"
     # The two trees are what they claim: the comparison below is of the patch.
     out = ["# Jetty 12 phase A: no functional change\n",
            f"- Baseline: `{commit(results, 'baseline')}`",
            f"- Candidate: `{commit(results, 'candidate')}`\n",
            *harness_check(results),
            f"Overall: **{overall}**\n"]
+    if check:
+        out.append(f"Harness check: **{check}**: the artifacts and every end-to-end "
+                   "architecture must FAIL on the broken candidate, and the tree checks "
+                   "must not.\n")
     if pre_failed:
         out.append("**The run stopped before comparing**: "
                    + " and ".join(f"*{n}*" for n in pre_failed)
@@ -123,6 +148,9 @@ def main(results):
     with open(os.path.join(cmp_dir, "report.md"), "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
     print(f"overall: {overall} ({', '.join(f'{n}: {v}' for n, v in verdicts)})")
+    if check:
+        print(f"harness check (broken candidate): {check}")
+        return 0 if check == "PASS" else 1
     return 0 if overall == "PASS" else 1
 
 

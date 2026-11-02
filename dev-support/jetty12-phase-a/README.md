@@ -373,8 +373,11 @@ branch (or tag) name:
   harness must mask or allow.
 - `jetty12-phase-a-<arch>-run-broken-<case>-<n>`: the candidate's
   distribution is broken on purpose before it is compared or run
-  (`ci/break_candidate.py`). The verdict must be FAIL; if it is not, the
-  harness misses that kind of breakage.
+  (`ci/break_candidate.py`). The overall verdict is FAIL, and the report adds
+  a harness check: it PASSes, and the run is green, only when the artifacts
+  and every end-to-end architecture FAIL and the tree checks do not. A red
+  broken run means the harness missed that kind of breakage, or stopped
+  before it could see it.
 
 A third name runs longer, not differently: `jetty12-phase-a-simple-run-full-<n>`
 runs the `changed` suite in tier `full`, every test of the modules phase A

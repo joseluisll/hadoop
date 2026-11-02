@@ -334,7 +334,11 @@ response"); each group names the files it comes from.
   `annotation`, the default, removes `jakarta.annotation-api`; `jetty`
   removes `jetty-http`; `static` removes the namenode's `hadoop.css`;
   `webhdfs-user` changes a default in `hdfs-default.xml`); its verdict must be
-  FAIL. These runs skip the unit jobs, which build from source and cannot see
+  FAIL. `lib/report.py` then reports a harness check, and exits 0 only when
+  the breakage was caught where every case is caught: the artifacts and every
+  end-to-end architecture FAIL, and neither tree check (R78, R79) FAILs. So a
+  broken run is green when the harness works and red when it misses the
+  breakage, or stops before it can see it. These runs skip the unit jobs, which build from source and cannot see
   the broken distribution.
 - **R81.** `compare.sh` first runs `lib/test_comparators.py`, as `e2e/run.sh`
   runs `e2e/lib/test_probe.py`, and stops if it fails, before the ancestry

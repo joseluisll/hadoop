@@ -206,10 +206,12 @@ def plan(repo, case, baseline, candidate, branches, verdict, rc):
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
 
 
-def report(tmp, case, checks, overall, rc):
+def report(tmp, case, checks, overall, rc, broken=False):
     results = os.path.join(tmp, "report", case)
     cmp_dir = os.path.join(results, "compare")
     os.makedirs(cmp_dir)
+    if broken:
+        write_text(os.path.join(results, "candidate", "build", "broken.txt"), "case test\n")
     for name, verdict in checks.items():
         write_json(os.path.join(cmp_dir, name), {"verdict": verdict})
     r = run(REPORT, results)
@@ -431,6 +433,18 @@ def main():
                {**all_pass, "artifact-diff.json": "FAIL"}, "FAIL", 1)
         report(tmp, "report one NOT RUN and the rest PASS is INCOMPLETE",
                {**all_pass, "e2e-compare-simple.json": "NOT RUN"}, "INCOMPLETE", 1)
+        caught = {**all_pass, "artifact-diff.json": "FAIL", "e2e-compare-simple.json": "FAIL",
+                  "e2e-compare-ha.json": "FAIL"}
+        report(tmp, "report a broken candidate caught by artifacts and e2e exits 0",
+               caught, "FAIL", 0, broken=True)
+        report(tmp, "report a broken candidate one architecture misses exits 1",
+               {**caught, "e2e-compare-ha.json": "PASS"}, "FAIL", 1, broken=True)
+        report(tmp, "report a broken candidate whose e2e did not run exits 1",
+               {**caught, "e2e-compare-simple.json": "NOT RUN"}, "FAIL", 1, broken=True)
+        report(tmp, "report a broken candidate stopped by the ancestry check exits 1",
+               {**caught, "ancestry.json": "FAIL"}, "FAIL", 1, broken=True)
+        report(tmp, "report a broken candidate nothing catches exits 1",
+               all_pass, "PASS", 1, broken=True)
     print("test_comparators: ok")
 
 
