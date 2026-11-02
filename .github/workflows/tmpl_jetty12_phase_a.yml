@@ -33,7 +33,8 @@
 #                                        on purpose (cases in
 #                                        ci/break_candidate.py: annotation, the
 #                                        default, jetty, static, webhdfs-user);
-#                                        the result must be FAIL
+#                                        the result must be FAIL, and the run
+#                                        is green when it is (R69)
 #
 # Runs go one at a time across all five architectures, oldest first: the
 # first jobs (queue, then queue-2) wait until no earlier harness run is active
