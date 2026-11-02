@@ -679,7 +679,7 @@ passing.
 Done as AS-IS requirements: T5 as R78, T16 as R79 and T6 as R80 (below).
 
 Fixed after the review of 2026-11-02
-(`2026-11-02-Harness-Requirements-Review.md`), whose other findings stay open
+(`2026-11-02-0012-Harness-Requirements-Review.md`), whose other findings stay open
 there:
 
 - R54: a passing ancestry check no longer turns the overall verdict into FAIL;
