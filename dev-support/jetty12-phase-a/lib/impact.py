@@ -115,9 +115,12 @@ def main(cmp_dir):
             continue
         c = collections.Counter(x["class"] for x in r["rows"])
         moves = r.get("class_jar_moves", [])
+        one = collections.Counter(x["side"] for x in r.get("one_side_classes", []))
         rows.append(f"- End to end ({arch}): {c.get('MATCH', 0)} observations match, "
                     f"{c.get('DIFF', 0)} differ, {c.get('REGRESSION', 0)} regressions; "
-                    f"{len(moves)} classes loaded by the daemons from another jar")
+                    f"{len(moves)} classes loaded by the daemons from another jar; "
+                    f"{one['baseline']} loaded on the baseline only and {one['candidate']} on "
+                    "the candidate only, per daemon in the end-to-end section")
     out += (rows or ["- No difference."]) + [""]
 
     # 2. Shaded client jars.

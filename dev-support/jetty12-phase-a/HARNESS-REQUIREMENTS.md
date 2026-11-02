@@ -203,7 +203,9 @@ response"); each group names the files it comes from.
   on both sides from a jar with another artifact name or in another directory
   is a difference (`classjar`) and fails the run unless a rule accepts it; a
   jar's version is not part of the comparison. Classes loaded on one side
-  only are counted per daemon without failing.
+  only are counted per daemon and listed, with the daemon and the side, in
+  the end-to-end section (`one_side_classes` in `e2e-compare-<arch>.json`);
+  Impact on users gives their count per side. They do not fail the run (T3).
 - **R39.** All daemon logs, `.out` files, container logs and scenario logs
   are scanned for class-loading, linkage and JAX-RS provider errors
   (`NoClassDefFoundError`, `ClassNotFoundException`, `NoSuchMethodError`,
@@ -491,7 +493,9 @@ implemented yet. Each says where it came from.
   no longer initializes) or starts loading another library goes unreported.
   Report them per daemon in the end-to-end section and Impact on users,
   after masking the known noise (T10). Owner's decision (2026-11-02): report
-  them now; they fail without a rule only once T10 and T25 are done.
+  them now; they fail without a rule only once T10 and T25 are done. The
+  report part is done (R38, 2026-11-02); what remains is the evidence part
+  (step 2), and failing without a `classonly` rule (step 4).
   *Source: requirement extraction from
   `lib/compare_e2e.py`; secure-run-8 timeline server.*
 
@@ -759,8 +763,9 @@ replayed with R80).
 ### Step 4: pre-existing holes in coverage
 
 - T10 and T25, then T3: mask the timeline server's class-load noise and make
-  the client failover order deterministic, then report classes loaded on one
-  side only.
+  the client failover order deterministic, then fail on a class loaded on
+  one side only that no `classonly` rule accepts (they are already listed,
+  R38).
 - T11: flaky test history.
 - T8 and T9: MapReduce under Kerberos and the YARN federation application
   checks. They cost more; they restore coverage that is now zero, but not

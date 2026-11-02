@@ -260,6 +260,11 @@ def main():
                           "only_candidate": len(r["only_candidate"]),
                           "different_jar": len(r["different_jar"])}
                       for d, r in cl.items()},
+        # T3, reported without failing until T10 and T25 mask the known noise.
+        "one_side_classes": [{"daemon": d, "side": side, "class": c}
+                             for d, r in sorted(cl.items())
+                             for side in ("baseline", "candidate")
+                             for c in r[f"only_{side}"]],
         "unused_rules": [f"line {r['line']}: {r['kind']} {r['pattern']}"
                          for r in allow.rules if r["hits"] == 0],
     }
@@ -341,9 +346,18 @@ def write_markdown(path, result, blocking):
         for d, r in sorted(result["classload"].items()):
             f.write(f"| {d} | {r['baseline_classes']} | {r['candidate_classes']} | "
                     f"{r['only_baseline']} | {r['only_candidate']} | {r['different_jar']} |\n")
-        f.write("\nClasses loaded on one side only depend on timing and are listed in "
-                "classload-compare-<arch>.json; a class loaded from a different jar must be in the "
-                "allowlist.\n\n")
+        f.write("\nA class loaded from a different jar must be in the allowlist. A class "
+                "loaded on one side only is listed below without failing (T3): some depend on "
+                "timing, such as the timeline server's JSON writer (T10) and the client's "
+                "random failover order (T25); the rest is a feature that no longer, or newly, "
+                "initializes.\n\n")
+        one = result["one_side_classes"]
+        if one:
+            f.write(f"<details><summary>Classes loaded on one side only ({len(one)})"
+                    "</summary>\n\n| Daemon | Loaded on | Class |\n|---|---|---|\n")
+            for x in one:
+                f.write(f"| {x['daemon']} | {x['side']} only | `{x['class']}` |\n")
+            f.write("\n</details>\n\n")
         moves = result["class_jar_moves"]
         if moves:
             f.write(f"<details><summary>Classes loaded from a different jar ({len(moves)})"
