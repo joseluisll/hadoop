@@ -246,6 +246,12 @@ response"); each group names the files it comes from.
   without failing. With no modules at all it is NOT RUN.
 - **R46.** Tests failing on both sides, fixed tests and flaky tests are
   listed without failing.
+- **R83.** A test that exists only on the candidate (one the patch adds) is
+  listed with its result. One that fails there, after its re-runs, fails the
+  suite unless a `candidate-only-fail <module>|<class>#<method>` rule in
+  `expected-unit-differences.txt` accepts it; only known flakes get such a
+  rule, one per test. A regression (R45) cannot be accepted by any rule.
+  *Formerly T20.*
 - **R47.** A test JVM running more than `STALL_AFTER` (600 s) gets periodic
   snapshots of its sockets, TCP counters and threads (`lib/stall-watch.sh`).
 
@@ -304,10 +310,11 @@ response"); each group names the files it comes from.
 
 ### Allowlist rules
 
-- **R60.** There are four allowlists: `expected-differences.txt` (check 1),
+- **R60.** There are five allowlists: `expected-differences.txt` (check 1),
   `expected-api-differences.txt` (check 2), `e2e/expected-e2e-differences.txt`
-  (check 3) and `expected-downstream-differences.txt` (check 5). Check 4 has
-  none: a regression always fails.
+  (check 3), `expected-unit-differences.txt` (check 4, failing candidate-only
+  tests only, R83) and `expected-downstream-differences.txt` (check 5). In
+  check 4 a regression always fails.
 - **R61.** A rule is `<kind> <regex>  # reason`; the regex must match the
   whole subject, and a `#` starts the reason only when it is preceded by
   whitespace and followed by whitespace or the end of the line, so a regex
@@ -612,11 +619,9 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   test the patch adds is never compared: if it fails on the candidate, the
   run still passes. The tickets add such tests (`TestJettyClasspath` in six
   modules and `TestAnnotationApiClasspath`: 13 tests in simple-run-17, all
-  passing). A test that exists only on the candidate and fails there (after
-  its re-runs) fails the run; the report lists the candidate-only tests with
-  their results. Owner's decision (2026-11-02): yes; a known flake is
-  accepted only by an allowlist entry of its own, one per test, with its
-  reason. *Source: simple-run-17; `lib/compare_unit.py`.*
+  passing). Owner's decision (2026-11-02): fail on them, with an allowlist
+  entry for each known flake. Done as R83.
+  *Source: simple-run-17; `lib/compare_unit.py`.*
 - **T21. Consistent announcement of HADOOP-20013's rules.** The same
   HADOOP-20013 change has rules that disagree: the downstream
   `downstream-dup-removed` rule says `announced: HADOOP-20013 JIRA`, while the
@@ -721,19 +726,16 @@ there:
   `lib/ancestry.py` writes `PASS` or `FAIL` like every other comparison.
 - R41: an empty `observations.jsonl` is NOT RUN, not a PASS.
 - R45: a test that ran on the baseline and is skipped on the candidate fails
-  the suite. Check 4 has no allowlist, so a skip the patch intends fails too.
+  the suite. Check 4's rules accept only failing candidate-only tests (R83),
+  so a skip the patch intends fails too.
 - R81: `lib/test_comparators.py` checks the verdicts and exit codes of
   `compare_e2e.py`, `compare_unit.py`, `compare_downstream.py`, `ancestry.py`
   and `report.py`; `compare.sh` runs it first, `run-all.sh` runs it before
   its builds, and the workflow's queue job runs it before waiting; this
   closes the review's "Tests for the comparators" gap.
 
-Decided, still to implement:
-
-- T20: fail the run on a failing test that exists only on the candidate,
-  with an allowlist entry for each known flake.
-
-Done: T24, the job-counter rule's reason (with the owner's agreement,
+Done: T20 as R83 (a failing candidate-only test fails the run unless a
+rule accepts it as a known flake), and T24, the job-counter rule's reason (with the owner's agreement,
 replayed with R80).
 
 ### Step 2: detection gaps for phase A and HADOOP-19970

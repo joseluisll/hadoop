@@ -89,7 +89,8 @@ done
 [[ -n "${archs// /}" ]] || log "no architecture ran end to end"
 
 if [[ -d "${B}/unit" && -d "${C}/unit" ]]; then
-  python3 -I "${HARNESS_DIR}/lib/compare_unit.py" --out "${OUT}" "${B}/unit" "${C}/unit" || true
+  python3 -I "${HARNESS_DIR}/lib/compare_unit.py" --out "${OUT}" \
+    --expected "${HARNESS_DIR}/expected-unit-differences.txt" "${B}/unit" "${C}/unit" || true
 else
   log "skipping unit test comparison: both sides must have run unit-tests.sh"
 fi

@@ -125,7 +125,7 @@ def surefire(tests):
 
 
 def unit(tmp, case, baseline, candidate, verdict, rc, baseline_exit=0, candidate_exit=0,
-         keys=None):
+         keys=None, rules=""):
     base = os.path.join(tmp, "unit", case)
     for side, tests, exit_code in (("baseline", baseline, baseline_exit),
                                    ("candidate", candidate, candidate_exit)):
@@ -133,8 +133,9 @@ def unit(tmp, case, baseline, candidate, verdict, rc, baseline_exit=0, candidate
         write_text(os.path.join(module, "TEST-moduleA.xml"), surefire(tests))
         write_text(os.path.join(module, "status"), f"{exit_code} 1\n")
     out = os.path.join(base, "out")
-    r = run(UNIT, "--out", out, os.path.join(base, "baseline"),
-            os.path.join(base, "candidate"))
+    write_text(os.path.join(base, "rules.txt"), rules)
+    r = run(UNIT, "--out", out, "--expected", os.path.join(base, "rules.txt"),
+            os.path.join(base, "baseline"), os.path.join(base, "candidate"))
     result = read_result(case, os.path.join(out, "unit-compare.json"), r)
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
     for key, want in (keys or {}).items():
@@ -307,6 +308,18 @@ def main():
              [("C", "one", "pass")], [("C", "one", "pass")], "PASS", 0,
              baseline_exit=1, candidate_exit=1,
              keys={"maven_failed_on_candidate": [], "maven_failed_on_both": ["moduleA"]})
+        unit(tmp, "unit a candidate-only test passing PASSes",
+             [("C", "one", "pass")], [("C", "one", "pass"), ("C", "new", "pass")], "PASS", 0)
+        unit(tmp, "unit a candidate-only test failing FAILs",
+             [("C", "one", "pass")], [("C", "one", "pass"), ("C", "new", "fail")], "FAIL", 1)
+        unit(tmp, "unit a candidate-only failing test with a rule PASSes",
+             [("C", "one", "pass")], [("C", "one", "pass"), ("C", "new", "fail")], "PASS", 0,
+             rules="candidate-only-fail moduleA\\|C#new  # known flake\n",
+             keys={"unused_rules": []})
+        unit(tmp, "unit a rule does not accept a regression",
+             [("C", "one", "pass")], [("C", "one", "fail")], "FAIL", 1,
+             rules="candidate-only-fail moduleA\\|C#one  # known flake\n",
+             keys={"unused_rules": ["line 1: candidate-only-fail moduleA\\|C#one"]})
 
         downstream(tmp, "downstream identical results PASS",
                    "simple/hadoop-common\tg:a:jar:1.0:compile\n",

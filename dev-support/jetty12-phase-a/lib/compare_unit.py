@@ -16,7 +16,7 @@
 
 """Line up the unit test results of the two sides, test by test.
 
-Usage: compare_unit.py --out DIR BASELINE_UNIT CANDIDATE_UNIT
+Usage: compare_unit.py --out DIR [--expected RULES] BASELINE_UNIT CANDIDATE_UNIT
 
 Each *_UNIT directory holds one sub-directory per module with the surefire /
 failsafe TEST-*.xml reports and a "status" file (maven exit code, seconds).
@@ -27,6 +27,10 @@ baseline fails on the candidate, no test that ran on the baseline is
 missing or skipped on the candidate, and no module's Maven run failed on
 the candidate when the baseline's succeeded. A module whose Maven run
 failed on both sides is listed without failing.
+
+A test that exists only on the candidate (one the patch adds) is listed with
+its result; one that fails there fails the run unless a 'candidate-only-fail
+<module>|<test>' rule in RULES accepts it (a known flake, T20).
 """
 
 import argparse
@@ -35,6 +39,9 @@ import json
 import os
 import sys
 import xml.etree.ElementTree as ET
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from allowlist import Allowlist  # noqa: E402
 
 
 def read_module(path):
@@ -83,14 +90,17 @@ def checks_only(p):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
+    ap.add_argument("--expected", help="rules for failing candidate-only tests")
     ap.add_argument("baseline")
     ap.add_argument("candidate")
     a = ap.parse_args()
+    allow = Allowlist(a.expected) if a.expected else None
 
     modules = sorted({d for base in (a.baseline, a.candidate) if os.path.isdir(base)
                       for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))})
     per_module, regressions, missing, skipped, fixed, both_fail, flaky = [], [], [], [], [], [], []
     maven_failed_candidate, maven_failed_both = [], []
+    candidate_only = []
     for m in modules:
         bt, bs = read_module(os.path.join(a.baseline, m))
         ct, cs = read_module(os.path.join(a.candidate, m))
@@ -114,6 +124,12 @@ def main():
                 fixed.append(item)
             elif sb == "fail" and sc == "fail":
                 both_fail.append(item)
+            elif sb is None and sc is not None:
+                if sc == "fail":
+                    rule = allow and allow.match("candidate-only-fail", f"{name}|{key}")
+                    item["status"] = "EXPECTED" if rule else "UNEXPECTED"
+                    item["reason"] = rule["reason"] if rule else ""
+                candidate_only.append(item)
             if "flaky" in (sb, sc):
                 flaky.append(item)
         count = lambda t, s: sum(v == s for v in t.values())  # noqa: E731
@@ -131,8 +147,9 @@ def main():
                and not checks_only(p)]
     # A module with no test reports on a side (a suite pattern matching
     # nothing, or a build failure) compared nothing, so it cannot pass.
+    candidate_only_failed = [i for i in candidate_only if i.get("status") == "UNEXPECTED"]
     verdict = "PASS" if not regressions and not missing and not skipped and not not_run \
-        and not maven_failed_candidate and per_module else "FAIL"
+        and not maven_failed_candidate and not candidate_only_failed and per_module else "FAIL"
     if not per_module:
         verdict = "NOT RUN"
     result = {"verdict": verdict, "modules": per_module, "regressions": regressions,
@@ -140,7 +157,10 @@ def main():
               "fixed": fixed, "both_fail": both_fail,
               "flaky": flaky, "modules_without_reports": not_run,
               "maven_failed_on_candidate": maven_failed_candidate,
-              "maven_failed_on_both": maven_failed_both}
+              "maven_failed_on_both": maven_failed_both,
+              "candidate_only": candidate_only,
+              "candidate_only_failed": candidate_only_failed,
+              "unused_rules": allow.unused() if allow else []}
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "unit-compare.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
@@ -150,7 +170,9 @@ def main():
                 f"the candidate: {len(missing)}, newly skipped on the candidate: "
                 f"{len(skipped)}, failing on both: {len(both_fail)}, "
                 f"fixed: {len(fixed)}, flaky: {len(flaky)}, Maven failed on the candidate: "
-                f"{len(maven_failed_candidate)}, on both sides: {len(maven_failed_both)}.\n\n")
+                f"{len(maven_failed_candidate)}, on both sides: {len(maven_failed_both)}, "
+                f"only on the candidate: {len(candidate_only)} "
+                f"({len(candidate_only_failed)} failing without a rule).\n\n")
         f.write("| Module | Baseline pass/flaky/fail/skip | Candidate pass/flaky/fail/skip |\n"
                 "|---|---|---|\n")
         for p in per_module:
@@ -168,6 +190,17 @@ def main():
                 for i in items[:500]:
                     f.write(f"| {i['module']} | `{i['test']}` | {i['baseline']} | {i['candidate']} |\n")
                 f.write("\n")
+        if candidate_only:
+            f.write(f"### Only on the candidate ({len(candidate_only)})\n\n"
+                    "| Module | Test | Candidate | Rule |\n|---|---|---|---|\n")
+            for i in candidate_only[:500]:
+                rule = {"EXPECTED": f"accepted: {i.get('reason', '')}",
+                        "UNEXPECTED": "**none: fails the run**"}.get(i.get("status"), "")
+                f.write(f"| {i['module']} | `{i['test']}` | {i['candidate']} | {rule} |\n")
+            f.write("\n")
+        if allow and allow.unused():
+            f.write("Rules that matched nothing: "
+                    + "; ".join(f"`{u}`" for u in allow.unused()) + "\n\n")
         for title, names in (("Maven run failed on the candidate", maven_failed_candidate),
                              ("Maven run failed on both sides", maven_failed_both)):
             if names:
@@ -176,7 +209,8 @@ def main():
             f.write("Modules with no test reports on a side (build or setup failure; see "
                     "results/<side>/unit/<module>/mvn.log): " + ", ".join(not_run) + "\n")
     print(f"unit comparison: {verdict}, {len(regressions)} regressions, {len(missing)} missing, "
-          f"{len(skipped)} newly skipped")
+          f"{len(skipped)} newly skipped, {len(candidate_only_failed)} failing only on the "
+          f"candidate without a rule")
     return 0 if verdict == "PASS" else 1
 
 

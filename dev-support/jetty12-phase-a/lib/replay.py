@@ -96,13 +96,23 @@ def downstream_matches(allow, compare_dir):
         allow.match(x["kind"], x["subject"])
 
 
+def unit_matches(allow, compare_dir):
+    """Only a failing test that exists only on the candidate can be accepted."""
+    d = load(os.path.join(compare_dir, "unit-compare.json"))
+    for x in (d or {}).get("candidate_only", []):
+        if x["candidate"] == "fail":
+            allow.match("candidate-only-fail", f"{x['module']}|{x['test']}")
+
+
 # Rule file, relative to the harness directory, and how its comparison matches
-# its subjects. Check 4 (unit tests) has no allowlist: a regression always fails.
+# its subjects. Check 4 (unit tests) accepts only failing candidate-only tests:
+# a regression always fails.
 RULE_FILES = {
     "expected-differences.txt": artifact_matches,
     "expected-api-differences.txt": api_matches,
     "e2e/expected-e2e-differences.txt": e2e_matches,
     "expected-downstream-differences.txt": downstream_matches,
+    "expected-unit-differences.txt": unit_matches,
 }
 
 

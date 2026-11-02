@@ -561,8 +561,11 @@ sockets.
   unit tests that passed on the baseline but fail on the candidate, unit
   tests that ran on the baseline but are missing or skipped on the candidate,
   a unit test module whose Maven run failed on the candidate and succeeded on
-  the baseline, and a unit test module with no test reports on a side fail the
-  run.
+  the baseline, a unit test module with no test reports on a side, and a unit
+  test that exists only on the candidate and fails there with no
+  `candidate-only-fail` rule in `expected-unit-differences.txt` (a known
+  flake, one rule per test) fail the run. The report lists every
+  candidate-only test with its result.
 - An architecture given to `compare.sh` (or found on either side) that a
   side has no observations for, or only an observations file with no non-blank
   line, is **NOT RUN**, and the run is not a PASS.
@@ -589,8 +592,8 @@ sockets.
   compared.
 
 When the patch changes, update `expected-differences.txt`,
-`expected-api-differences.txt`, `expected-downstream-differences.txt` and
-`e2e/expected-e2e-differences.txt`, naming the JIRA for each rule, and keep
+`expected-api-differences.txt`, `expected-downstream-differences.txt`,
+`expected-unit-differences.txt` and `e2e/expected-e2e-differences.txt`, naming the JIRA for each rule, and keep
 the patterns narrow. Before adding a rule for a user-visible difference
 (an API finding, a downstream dependency or duplicate, a change in a shaded
 client or a lib jar), make sure the JIRA, the PR or the release note says
