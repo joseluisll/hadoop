@@ -101,7 +101,7 @@ env:
   # candidate against their combined change (R79). Left empty for a
   # self-comparison run (-run-aa-), which has no patch to check; compare.sh
   # also skips both checks when the two sides resolve to one commit.
-  PR_BRANCHES: ${{ contains(github.ref_name, '-run-aa-') && '' || 'origin/HADOOP-20012-upstream,origin/HADOOP-20013-upstream,origin/HADOOP-20014-upstream,origin/HADOOP-20015-upstream,origin/HADOOP-20016-upstream,origin/jetty-phase-a' }}
+  PR_BRANCHES: ${{ contains(github.ref_name, '-run-aa-') && '' || 'origin/HADOOP-20012-upstream,origin/HADOOP-20014-upstream,origin/HADOOP-20013-upstream,origin/HADOOP-20015-upstream,origin/HADOOP-20016-upstream,origin/jetty-phase-a' }}
   BREAK_CANDIDATE: ${{ inputs.break_candidate }}
   BREAK_REF: ${{ github.ref_name }}
 
