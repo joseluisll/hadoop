@@ -276,9 +276,7 @@ Owner's actions:
 2. Find out why the Build check failed on #8892.
 3. Send the `[DISCUSS]` mail on retiring the catalog, which decides between 20008
    and 19998.
-4. Decide the harness questions in step 0 of `HARNESS-REQUIREMENTS.md` (T3, T7,
-   T17, T18).
-5. Identify the unit regression in `federated` run 7.
+4. Identify the unit regression in `federated` run 7.
 
 JIRA changes not yet made:
 

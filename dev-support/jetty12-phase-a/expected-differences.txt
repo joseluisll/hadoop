@@ -33,8 +33,8 @@
 # classes, was already in the distribution and every module that loses the
 # javax copy already resolved it: no jar is added, no dependency is added and
 # no class changes the jar it is loaded from (none of these show up in CI).
-dist-file-removed share/hadoop/[a-z]+/lib/javax\.annotation-api-1\.3\.2\.jar  # HADOOP-20013: duplicate javax.annotation jar dropped
-dep-removed [^|]+\|javax\.annotation:javax\.annotation-api:jar:1\.3\.2:(compile|runtime|provided|test)  # HADOOP-20013
+dist-file-removed share/hadoop/[a-z]+/lib/javax\.annotation-api-1\.3\.2\.jar  # HADOOP-20013: duplicate javax.annotation jar dropped; announced: HADOOP-20013 JIRA
+dep-removed [^|]+\|javax\.annotation:javax\.annotation-api:jar:1\.3\.2:(compile|runtime|provided|test)  # HADOOP-20013; announced: HADOOP-20013 JIRA
 
 # --- License files list the changed third-party artifacts.
 dist-file-changed (LICENSE-binary|NOTICE-binary)  # HADOOP-20013/20014: license entries for the swapped artifacts
@@ -62,15 +62,15 @@ dep-removed hadoop-yarn-project/hadoop-yarn/hadoop-yarn-applications/hadoop-yarn
 # container instead of the Jetty one. Two of its changes show no difference
 # in CI: jetty-util, now declared directly, resolves as before, and the new
 # com/sun/net/httpserver shade exclude leaves the jar's entries unchanged.
-dep-(removed|added) hadoop-client-modules/hadoop-client-minicluster\|org\.glassfish\.jersey\.(test-framework\.providers|containers):jersey-(test-framework-provider|container)-(jetty|jetty-http|jdk-http):jar:[^:]+:compile  # HADOOP-20014
-jar-entry-(removed|added|changed) share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!org/apache/hadoop/shaded/org/glassfish/jersey/(test/(jetty|jdkhttp)|jetty|jdkhttp)/.*  # HADOOP-20014: shaded test container classes
-jar-entry-(removed|added|changed) share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!META-INF/(services/.*|versions/.*/org/apache/hadoop/shaded/org/glassfish/jersey/.*|maven/org\.glassfish\.jersey\..*)  # HADOOP-20014: service files and metadata of the swapped container
-class-(removed|added) client-minicluster:org\.apache\.hadoop\.shaded\.org\.glassfish\.jersey\.(test\.(jetty|jdkhttp)|jetty|jdkhttp)\..*  # HADOOP-20014
+dep-(removed|added) hadoop-client-modules/hadoop-client-minicluster\|org\.glassfish\.jersey\.(test-framework\.providers|containers):jersey-(test-framework-provider|container)-(jetty|jetty-http|jdk-http):jar:[^:]+:compile  # HADOOP-20014; announced: HADOOP-20014 JIRA
+jar-entry-(removed|added|changed) share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!org/apache/hadoop/shaded/org/glassfish/jersey/(test/(jetty|jdkhttp)|jetty|jdkhttp)/.*  # HADOOP-20014: shaded test container classes; announced: HADOOP-20014 JIRA
+jar-entry-(removed|added|changed) share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!META-INF/(services/.*|versions/.*/org/apache/hadoop/shaded/org/glassfish/jersey/.*|maven/org\.glassfish\.jersey\..*)  # HADOOP-20014: service files and metadata of the swapped container; announced: HADOOP-20014 JIRA
+class-(removed|added) client-minicluster:org\.apache\.hadoop\.shaded\.org\.glassfish\.jersey\.(test\.(jetty|jdkhttp)|jetty|jdkhttp)\..*  # HADOOP-20014; announced: HADOOP-20014 JIRA
 # jersey-container-jetty-http depended on jetty-continuation; nothing else in the
 # minicluster jar uses it, so its shaded copy goes with the Jetty test container.
-dep-removed hadoop-client-modules/hadoop-client-minicluster\|org\.eclipse\.jetty:jetty-continuation:jar:[^:]+:compile  # HADOOP-20014: came with jersey-container-jetty-http
-jar-entry-removed share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!org/apache/hadoop/shaded/org/eclipse/jetty/continuation/.*  # HADOOP-20014: came with jersey-container-jetty-http
-class-removed client-minicluster:org\.apache\.hadoop\.shaded\.org\.eclipse\.jetty\.continuation\..*  # HADOOP-20014: came with jersey-container-jetty-http
+dep-removed hadoop-client-modules/hadoop-client-minicluster\|org\.eclipse\.jetty:jetty-continuation:jar:[^:]+:compile  # HADOOP-20014: came with jersey-container-jetty-http; announced: HADOOP-20014 JIRA
+jar-entry-removed share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!org/apache/hadoop/shaded/org/eclipse/jetty/continuation/.*  # HADOOP-20014: came with jersey-container-jetty-http; announced: HADOOP-20014 JIRA
+class-removed client-minicluster:org\.apache\.hadoop\.shaded\.org\.eclipse\.jetty\.continuation\..*  # HADOOP-20014: came with jersey-container-jetty-http; announced: HADOOP-20014 JIRA
 
 # --- HADOOP-20015: TestRollingLevelDBTimelineStore logs through SLF4J instead
 # of Jetty's Log. Test sources only.

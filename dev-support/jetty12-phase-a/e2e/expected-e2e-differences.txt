@@ -46,11 +46,11 @@ obsfield [a-z0-9:-]+/headers/vary  # Vary on static files varies between runs of
 
 # Not caused by phase A: the counters of the sleep job, read from its
 # application master while it runs, have groups only once a task has been
-# counted. Under Kerberos every task is rejected (MAPREDUCE-7548), so whether
-# a group exists yet is timing: secure runs 2 and 3 had none on either side,
-# run 4 had one on the baseline only. Only the presence of the groups may
-# differ; the response itself is still compared.
-obsfield mapreduce-am:am-job-counters/body/json/jobCounters/counterGroup  # job counters read mid-run depend on timing (MAPREDUCE-7548 under Kerberos)
+# counted, so whether a group exists yet is timing, in every architecture:
+# secure runs 2 and 3 had none on either side, run 4 had one on the baseline
+# only, and ha-run-5 differed too, without Kerberos. Only the presence of the
+# groups may differ; the response itself is still compared.
+obsfield mapreduce-am:am-job-counters/body/json/jobCounters/counterGroup  # job counters read mid-run depend on timing (pre-existing)
 
 # HADOOP-19970: the launchers load the servlet API from jetty-servlet-api 4.0.9.
 obsdiff common-cli:load\.(hadoop|hdfs|mapred|yarn)\.javax\.servlet\.(Filter|http\.HttpServlet)  # HADOOP-19970; announced: HADOOP-19970 release note

@@ -24,7 +24,7 @@
 
 # HADOOP-20013: the duplicate javax.annotation-api goes; jakarta.annotation-api,
 # which provides the same javax.annotation classes, was already resolved.
-downstream-dep-removed [^|]+\|javax\.annotation:javax\.annotation-api:jar:1\.3\.2:(compile|runtime|test)  # HADOOP-20013: duplicate javax.annotation jar dropped
+downstream-dep-removed [^|]+\|javax\.annotation:javax\.annotation-api:jar:1\.3\.2:(compile|runtime|test)  # HADOOP-20013: duplicate javax.annotation jar dropped; announced: HADOOP-20013 JIRA
 
 # HADOOP-20016 declares jetty-http in hadoop-common, the shuffle handler and
 # HttpFS as optional, so it is not passed on: projects that depend on them get

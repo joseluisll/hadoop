@@ -463,8 +463,9 @@ implemented yet. Each says where it came from.
   and without rules, so a daemon that stops loading a class (a feature that
   no longer initializes) or starts loading another library goes unreported.
   Report them per daemon in the end-to-end section and Impact on users,
-  after masking the known noise (T10). Decide with the owner whether they
-  should fail without a rule. *Source: requirement extraction from
+  after masking the known noise (T10). Owner's decision (2026-11-02): report
+  them now; they fail without a rule only once T10 and T25 are done.
+  *Source: requirement extraction from
   `lib/compare_e2e.py`; secure-run-8 timeline server.*
 
   Extension (2026-11-01): every daemon of every architecture loads
@@ -495,8 +496,11 @@ implemented yet. Each says where it came from.
   in `hadoop-client-minicluster` (HADOOP-20014, 41 + 9 + 2) and the dropped
   duplicate `javax.annotation-api` jar (HADOOP-20013, 1). Either add
   `announced:` with where users are told, or have the JIRAs and release notes
-  say it. Needs the owner's decision per ticket.
-  *Source: secure-run-8 and later reports.*
+  say it. Done (2026-11-02, the owner's decision): every rule of these
+  changes says `announced: HADOOP-20013 JIRA` or `announced: HADOOP-20014
+  JIRA`, whose descriptions list them under *Downstream*; replayed (R80)
+  against the five latest reports with the same matches, and simple-run-19's
+  Impact on users then lists none. *Source: secure-run-8 and later reports.*
 - **T8. MapReduce under Kerberos.** In `secure`, 11 MapReduce observations
   fail on both sides (MAPREDUCE-7548), so jobs, job history and the AM's REST
   API under SPNEGO are compared nowhere. Find a harness-side configuration
@@ -566,14 +570,15 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   `testSingleJettyRelease` fails without HADOOP-20014). Add per-ticket runs
   (trunk plus one ticket's upstream branch) and runs for each prefix of the
   merge order, limited to checks 1, 2 and 5 (no cluster), and require each
-  ticket's rules to match in its own run. Needs the owner's decision.
-  *Source: requirements analysis.*
+  ticket's rules to match in its own run. Owner's decision (2026-11-02): yes,
+  for checks 1, 2 and 5 only. *Source: requirements analysis.*
 - **T18. Verify `announced:`.** `announced:` is free text (R64); a release
   note can change after the rule is written (HADOOP-19970's was rewritten
   twice). For `announced: <JIRA> release note`, read the JIRA's release note
   field and report rules whose difference (artifact, coordinate, class or
-  module name) it does not mention. It reports, it does not fail. Needs the
-  owner's decision. *Source: requirements analysis.*
+  module name) it does not mention. It reports, it does not fail. Owner's
+  decision (2026-11-02): no automation; `announced:` is checked by hand when
+  each release note is written. *Source: requirements analysis.*
 - **T19. Servlet default responses over HTTP/1.0.** HADOOP-19970 swaps the
   classes that build `HttpServlet`'s default answers (405 or 400 for an
   unsupported method, depending on the request's protocol; `Allow` for
@@ -589,7 +594,9 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   modules and `TestAnnotationApiClasspath`: 13 tests in simple-run-17, all
   passing). A test that exists only on the candidate and fails there (after
   its re-runs) fails the run; the report lists the candidate-only tests with
-  their results. *Source: simple-run-17; `lib/compare_unit.py`.*
+  their results. Owner's decision (2026-11-02): yes; a known flake is
+  accepted only by an allowlist entry of its own, one per test, with its
+  reason. *Source: simple-run-17; `lib/compare_unit.py`.*
 - **T21. Consistent announcement of HADOOP-20013's rules.** The same
   HADOOP-20013 change has rules that disagree: the downstream
   `downstream-dup-removed` rule says `announced: HADOOP-20013 JIRA`, while the
@@ -597,7 +604,7 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   dropped `javax.annotation-api` jar say nothing, so 9 of its differences show
   as accepted but unannounced (61 in simple-run-17, 53 in the runs without the
   downstream check). Give every rule of one ticket and one change the same
-  `announced:` value, decided with T7.
+  `announced:` value, decided with T7. Done with T7 (2026-11-02).
   *Source: simple-run-17; `expected-downstream-differences.txt`,
   `expected-differences.txt`.*
 - **T22. Servlet behaviour probe.** Loading a class is not a behaviour
@@ -635,8 +642,9 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   running job depend on when they are read, in every architecture. Reword the
   reason to the actual cause ("job counters read mid-run depend on timing,
   pre-existing") without MAPREDUCE-7548, so the rule does not claim a cause it
-  does not have (R67). A change to an allowlist rule: needs the owner's
-  agreement, and a replay (R80) before it is committed.
+  does not have (R67). Done (2026-11-02, with the owner's agreement): the
+  reason is "job counters read mid-run depend on timing (pre-existing)";
+  replayed (R80) with the same matches.
   *Source: ha-run-5; `e2e/expected-e2e-differences.txt`.*
 - **T25. Deterministic client failover order.** In this tree
   `dfs.client.failover.random.order` defaults to `true`, so each HDFS client
@@ -658,23 +666,24 @@ empty `error_text` all have an empty body (`jmx-trace`, `conf-bad-name`,
 
 ## Next plan
 
-Proposed course of action (2026-11-01), pending the owner's decisions in
-step 0. The requirements document comes first: no harness process or allowlist rule changes until the
+Proposed course of action (2026-11-01); the owner took the step 0
+decisions on 2026-11-02. The requirements document comes first: no harness process or allowlist rule changes until the
 step that covers it. In step 1, T5, T6 and T16 are implemented (R78 to R80)
 and the verdict defects of the review of 2026-11-02 are fixed (R41, R45, R54);
-T20 and T24 remain, both needing the owner. The next work is step 2, whose
-items need no owner decision.
+T24 is done and T20 is decided. The next work is step 2.
 
 ### Step 0: requirements and decisions (document only)
 
 1. Record T12 to T25 in TO-BE, and the extension of T3 (done).
-2. Owner decisions to record here before the steps that need them:
-   - T3: should a class loaded on one side only fail the run without a rule?
-   - T17: per-ticket and merge-order runs, yes or no?
-   - T18: verify `announced:` against the JIRA release notes, yes or no?
-   - T7 with T21: how to announce the accepted, unannounced HADOOP-20013 and
-     HADOOP-20014 differences (53, or 61 with the downstream check), with one
-     `announced:` value per ticket and change (no code needed).
+2. Owner decisions (2026-11-02):
+   - T3: report classes loaded on one side only now; they fail without a
+     rule only once T10 and T25 are done.
+   - T17: yes, per-ticket and merge-order runs, for checks 1, 2 and 5 only.
+   - T18: no automation; `announced:` is checked by hand when each release
+     note is written.
+   - T7 with T21: one `announced:` value per ticket and change (done).
+   - T20: yes, with an allowlist entry for each known flake.
+   - T24: yes, a text-only fix (done).
 
 ### Step 1: trustworthy verdicts (partly done)
 
@@ -699,11 +708,13 @@ there:
   its builds, and the workflow's queue job runs it before waiting; this
   closes the review's "Tests for the comparators" gap.
 
-Still open, both needing the owner's decision:
+Decided, still to implement:
 
-- T20: fail the run on a failing test that exists only on the candidate.
-- T24: reword the job-counter rule's reason (with the owner's agreement,
-  replayed with R80).
+- T20: fail the run on a failing test that exists only on the candidate,
+  with an allowlist entry for each known flake.
+
+Done: T24, the job-counter rule's reason (with the owner's agreement,
+replayed with R80).
 
 ### Step 2: detection gaps for phase A and HADOOP-19970
 
@@ -718,10 +729,10 @@ Still open, both needing the owner's decision:
 - T23: list the API a replaced jar makes available.
 - T4: report the new probe fields.
 
-### Step 3: attribution (if decided in step 0)
+### Step 3: attribution
 
-- T17: per-ticket and merge-order runs.
-- T18: verify `announced:`.
+- T17: per-ticket and merge-order runs, checks 1, 2 and 5 only.
+- T18 is not automated (owner's decision).
 
 ### Step 4: pre-existing holes in coverage
 
