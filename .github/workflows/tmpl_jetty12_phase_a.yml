@@ -118,7 +118,12 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          sparse-checkout: dev-support/jetty12-phase-a/ci
+          sparse-checkout: dev-support/jetty12-phase-a
+      # A broken comparator would cost a whole run, and up to 11 hours of
+      # waiting, to find out; fail here instead (R81).
+      - name: Check the comparison scripts
+        shell: bash
+        run: python3 -I "${HARNESS}/lib/test_comparators.py"
       - name: Wait for the runs started before this one
         id: wait
         shell: bash
