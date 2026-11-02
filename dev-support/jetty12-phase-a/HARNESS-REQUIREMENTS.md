@@ -738,6 +738,19 @@ there:
   its builds, and the workflow's queue job runs it before waiting; this
   closes the review's "Tests for the comparators" gap.
 
+Fixed after the review of 2026-11-02 15:36
+(`2026-11-02-1536-Harness-Requirements-Review.md`):
+
+- R45: a module whose Maven run failed on the candidate only fails check 4.
+- R79: a branch already merged into the baseline (as commits or squashed)
+  is listed as landed and not replayed, so a merged PR does not stop the
+  runs; the deleted-file case and the branch order are fixed.
+- R78 and R79 also run in the workflow's queue job, before the wait.
+- R69: a broken-candidate run is green only when the artifacts and every
+  end-to-end architecture caught the breakage.
+- R82: a scenario that ends early is an observation.
+- R40's text and R41's whitespace case.
+
 Done: T20 as R83 (a failing candidate-only test fails the run unless a
 rule accepts it as a known flake), and T24, the job-counter rule's reason (with the owner's agreement,
 replayed with R80).
