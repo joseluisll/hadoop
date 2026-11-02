@@ -254,9 +254,11 @@ on any difference that no rule accepts. See `README.md` and
 
 - **Covers:** stages 1 and 2 only. It does not cover 20049, 20048, the rest of
   stage 3, stage 4 or 19972.
-- **Latest runs, 2026-11-01:** `simple` (17), `mixed` (6) and `secure` (9) pass.
-  `federated` (7) passes end to end but fails on one unit regression, not yet
-  identified. `ha` (5) was still running.
+- **Latest runs, launched 2026-11-01 23:27:** on baseline `4f4422ad` and
+  candidate `bc5d054a`, all five architectures have `Overall: PASS`:
+  `simple` (19), `secure` (11), `ha` (7), `federated` (9) and `mixed` (8).
+  The federated-run-7 regression was the race README lists under "No JIRA
+  yet" (`TestFederationInterceptor#testSubClusterTimeOut`).
 - **Now proven when the run gets that far:** the candidate's ancestry against
   the baseline and its change against the PR branches are checked before
   anything is compared, and the run stops when either check fails (R78 to R80

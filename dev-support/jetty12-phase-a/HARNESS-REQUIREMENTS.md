@@ -208,11 +208,11 @@ response"); each group names the files it comes from.
   instantiate"), with ids and numbers masked.
 - **R40.** A log error fails the run when the candidate has it and the
   baseline does not, or the candidate has it more than twice as often and at
-  least 6 times more.
+  least 6 more.
 - **R41.** If the baseline's daemons did not all start, the architecture is
   NOT RUN; if the candidate's did not, it is FAIL (with the log errors); an
-  architecture a side has no observations for (no file, or an empty one) is
-  NOT RUN.
+  architecture a side has no observations for (no file, or a file with no
+  non-blank line) is NOT RUN.
 
 ### Check 4: Hadoop's own tests (`unit-tests.sh`, `lib/compare_unit.py`)
 
@@ -230,10 +230,12 @@ response"); each group names the files it comes from.
   fail or skipped, and an unparseable report counts as a failed test.
 - **R45.** The suite fails on a test that passed or was flaky on the
   baseline and fails on the candidate, on a test that ran (not skipped) on
-  the baseline and is missing or skipped on the candidate, and on a module
-  with no test reports on a side (except modules that only run checks, such
-  as the shaded client invariants, when their Maven run succeeded on both
-  sides). With no modules at all it is NOT RUN.
+  the baseline and is missing or skipped on the candidate, on a module whose
+  Maven run failed on the candidate when the baseline's succeeded, and on a
+  module with no test reports on a side (except modules that only run checks,
+  such as the shaded client invariants, when their Maven run succeeded on
+  both sides). A module whose Maven run failed on both sides is listed
+  without failing. With no modules at all it is NOT RUN.
 - **R46.** Tests failing on both sides, fixed tests and flaky tests are
   listed without failing.
 - **R47.** A test JVM running more than `STALL_AFTER` (600 s) gets periodic
@@ -408,21 +410,25 @@ response"); each group names the files it comes from.
 - **R79.** When `PR_BRANCHES` names the branches merged into trunk, in merge
   order, `compare.sh` also checks that the candidate's change against the
   baseline, without the harness and `.github/`, is exactly their combined
-  change (`lib/compare_plan.py`): per file, one branch's change is its tip
-  blob applied whole, and several branches' changes are replayed in order as
-  three-way merges (`git merge-file`). A file changed on the candidate by no
-  branch, a file a branch changes and the candidate does not, or a file whose
-  replay does not reproduce the candidate's blob stops the comparison and is
-  reported with its kind and the branches that change it. A binary blob
-  cannot be merged as text (a branch's change is applied whole) and a
-  conflict the candidate resolved by hand does not replay; the intended
-  resolutions are listed in the module (`NOTICE_REPLAY`: NOTICE-binary drops
-  both tickets' removed lines and keeps the added `jakarta.annotation-api`
-  entry) and a file with no entry there counts as a difference. Set
-  `PLAN_CHECK=false` to compare anyway. The workflow sets `PR_BRANCHES` to the
-  six branches in merge order, so CI runs the check; both checks are skipped
-  when the two sides resolve to one commit (a self-comparison run, R68), which
-  has no patch for them to check. *Formerly T16.*
+  change (`lib/compare_plan.py`): per file, a branch's change (its base blob
+  to its tip blob) is applied to the baseline blob with `git merge-file`, in
+  branch order; that is the tip blob when the branch is based on the baseline
+  and keeps the baseline's later changes when it is not. A file changed on the
+  candidate by no branch, a file a branch changes or deletes and the
+  candidate does not match, or a file whose replay does not reproduce the
+  candidate's blob stops the comparison and is reported with its kind and
+  the branches that change it. A file a branch deletes and the candidate does
+  not have is a match; a replay that keeps the file while the candidate lacks
+  it, or the other way round, is a difference. A binary blob cannot be merged
+  as text (a branch's change is applied whole) and a conflict the candidate
+  resolved by hand does not replay; the intended resolutions are listed in the
+  module (`NOTICE_REPLAY`: NOTICE-binary drops both tickets' removed lines and
+  keeps the added `jakarta.annotation-api` entry) and a file with no entry
+  there counts as a difference. Set `PLAN_CHECK=false` to compare anyway. The
+  workflow sets `PR_BRANCHES` to the six branches in merge order, so CI runs
+  the check; both checks are skipped when the two sides resolve to one commit
+  (a self-comparison run, R68), which has no patch for them to check.
+  *Formerly T16.*
 - **R80.** `replay.sh` (and `lib/replay.py`) replays every rule file against
   one or more saved compare directories, each matching its rules the way its
   comparison does, without a build or a run, so a new or edited rule is tried

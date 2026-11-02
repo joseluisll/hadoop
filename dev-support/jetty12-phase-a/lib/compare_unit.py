@@ -23,8 +23,10 @@ failsafe TEST-*.xml reports and a "status" file (maven exit code, seconds).
 
 A test is pass, flaky (failed, then passed on re-run), fail, or skipped.
 The candidate passes when no test that passed (or was flaky) on the
-baseline fails on the candidate, and no test that ran on the baseline is
-missing or skipped on the candidate.
+baseline fails on the candidate, no test that ran on the baseline is
+missing or skipped on the candidate, and no module's Maven run failed on
+the candidate when the baseline's succeeded. A module whose Maven run
+failed on both sides is listed without failing.
 """
 
 import argparse
@@ -88,10 +90,17 @@ def main():
     modules = sorted({d for base in (a.baseline, a.candidate) if os.path.isdir(base)
                       for d in os.listdir(base) if os.path.isdir(os.path.join(base, d))})
     per_module, regressions, missing, skipped, fixed, both_fail, flaky = [], [], [], [], [], [], []
+    maven_failed_candidate, maven_failed_both = [], []
     for m in modules:
         bt, bs = read_module(os.path.join(a.baseline, m))
         ct, cs = read_module(os.path.join(a.candidate, m))
         name = m.replace("__", "/")
+        b_exit = (bs or {}).get("maven_exit")
+        c_exit = (cs or {}).get("maven_exit")
+        if c_exit not in (None, 0) and b_exit == 0:
+            maven_failed_candidate.append(name)
+        elif c_exit not in (None, 0) and b_exit not in (None, 0):
+            maven_failed_both.append(name)
         for key in sorted(set(bt) | set(ct)):
             sb, sc = bt.get(key), ct.get(key)
             item = {"module": name, "test": key, "baseline": sb, "candidate": sc}
@@ -123,13 +132,15 @@ def main():
     # A module with no test reports on a side (a suite pattern matching
     # nothing, or a build failure) compared nothing, so it cannot pass.
     verdict = "PASS" if not regressions and not missing and not skipped and not not_run \
-        and per_module else "FAIL"
+        and not maven_failed_candidate and per_module else "FAIL"
     if not per_module:
         verdict = "NOT RUN"
     result = {"verdict": verdict, "modules": per_module, "regressions": regressions,
               "missing_on_candidate": missing, "skipped_on_candidate": skipped,
               "fixed": fixed, "both_fail": both_fail,
-              "flaky": flaky, "modules_without_reports": not_run}
+              "flaky": flaky, "modules_without_reports": not_run,
+              "maven_failed_on_candidate": maven_failed_candidate,
+              "maven_failed_on_both": maven_failed_both}
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "unit-compare.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
@@ -138,7 +149,8 @@ def main():
         f.write(f"Verdict: **{verdict}**. Regressions: {len(regressions)}, tests missing on "
                 f"the candidate: {len(missing)}, newly skipped on the candidate: "
                 f"{len(skipped)}, failing on both: {len(both_fail)}, "
-                f"fixed: {len(fixed)}, flaky: {len(flaky)}.\n\n")
+                f"fixed: {len(fixed)}, flaky: {len(flaky)}, Maven failed on the candidate: "
+                f"{len(maven_failed_candidate)}, on both sides: {len(maven_failed_both)}.\n\n")
         f.write("| Module | Baseline pass/flaky/fail/skip | Candidate pass/flaky/fail/skip |\n"
                 "|---|---|---|\n")
         for p in per_module:
@@ -156,6 +168,10 @@ def main():
                 for i in items[:500]:
                     f.write(f"| {i['module']} | `{i['test']}` | {i['baseline']} | {i['candidate']} |\n")
                 f.write("\n")
+        for title, names in (("Maven run failed on the candidate", maven_failed_candidate),
+                             ("Maven run failed on both sides", maven_failed_both)):
+            if names:
+                f.write(f"### {title} ({len(names)})\n\n" + ", ".join(names) + "\n\n")
         if not_run:
             f.write("Modules with no test reports on a side (build or setup failure; see "
                     "results/<side>/unit/<module>/mvn.log): " + ", ".join(not_run) + "\n")

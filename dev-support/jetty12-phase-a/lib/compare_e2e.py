@@ -76,6 +76,14 @@ def load_obs(path):
     return out, dups
 
 
+def has_observations(path):
+    """Whether an observations file holds at least one non-blank line."""
+    if not os.path.exists(path):
+        return False
+    with open(path, encoding="utf-8") as f:
+        return any(line.strip() for line in f)
+
+
 def load_json(path):
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
@@ -177,10 +185,9 @@ def main():
     if aborted:
         return not_run(a, "the candidate's daemons did not all start: " + aborted["candidate"],
                        verdict="FAIL", errors=log_errors(allow, a.baseline, a.candidate))
-    # e2e/run.sh creates the file before the scenarios run, so an empty one
-    # compared nothing either.
-    absent = [side for side, p in paths.items()
-              if not os.path.exists(p) or os.path.getsize(p) == 0]
+    # e2e/run.sh creates the file before the scenarios run, so a file with no
+    # non-blank line compared nothing either.
+    absent = [side for side, p in paths.items() if not has_observations(p)]
     if absent:
         return not_run(a, f"no observations from the {' and '.join(absent)} run "
                           "(the cluster did not start, or the run was not done)")

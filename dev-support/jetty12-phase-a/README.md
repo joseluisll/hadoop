@@ -14,9 +14,9 @@
 
 # Jetty 12 migration, phase A: no-functional-change harness
 
-Phase A (HADOOP-20012 to HADOOP-20016, combined as HADOOP-99999) prepares the
-move to Jetty 12 / EE8 without changing what Hadoop does. It only changes
-dependencies:
+Phase A (HADOOP-20012 to HADOOP-20016 and HADOOP-19970, combined as
+HADOOP-99999) prepares the move to Jetty 12 / EE8 without changing what Hadoop
+does. It only changes dependencies:
 
 | JIRA | Change | Where it can show |
 |---|---|---|
@@ -25,6 +25,7 @@ dependencies:
 | HADOOP-20014 | Jersey test container moves from Jetty to the JDK HTTP server; `hadoop-client-minicluster` shades it, declares `jetty-util` and excludes `com.sun.net.httpserver` (neither changes the jar) | test classpath, shaded minicluster jar |
 | HADOOP-20015 | `jetty-webapp`/`jetty-servlet` declared in YARN common, RM, AHS, router | runtime classpath of YARN daemons |
 | HADOOP-20016 | `jetty-http` declared in hadoop-common, HttpFS, shuffle (optional, so not passed on to dependents), SLS (provided) | runtime classpath |
+| HADOOP-19970 | moves to `jetty-servlet-api` 4.0.9 | test classpath, runtime classpath of web servers, LICENSE/NOTICE |
 
 This harness builds the tree without the patch (**baseline**, default
 `origin/PREPARATION`) and with it (**candidate**, default
@@ -120,11 +121,14 @@ claim to be, and stops without comparing when they are not:
   (`lib/compare_plan.py`): with `PR_BRANCHES` set, the candidate's change
   against the baseline must be exactly the combined change of those branches,
   replayed per file in merge order. A file changed by no branch, a file a
-  branch changes and the candidate does not, or a file whose replay does not
-  reproduce the candidate's content is reported with the files. A conflict
-  the candidate resolved by hand and a binary blob cannot be replayed; the
-  intended resolutions are listed in `lib/compare_plan.py` (`NOTICE-binary`),
-  and a file with no resolution there counts as a difference.
+  branch changes or deletes and the candidate does not match, or a file whose
+  replay does not reproduce the candidate's content is reported with the
+  files. A file a branch deletes and the candidate does not have is a match;
+  a replay that keeps the file while the candidate lacks it, or the other way
+  round, is a difference. A conflict the candidate resolved by hand and a
+  binary blob cannot be replayed; the intended resolutions are listed in
+  `lib/compare_plan.py` (`NOTICE-binary`), and a file with no resolution there
+  counts as a difference.
 
 Either check failing writes its own section as the report and exits 1. Set
 `ANCESTRY_CHECK=false` or `PLAN_CHECK=false` to compare anyway. Both are
@@ -546,19 +550,21 @@ sockets.
   baseline's count and at least 6 more), an observation id recorded twice,
   unit tests that passed on the baseline but fail on the candidate, unit
   tests that ran on the baseline but are missing or skipped on the candidate,
-  and a unit test module with no test reports on a side fail the run.
+  a unit test module whose Maven run failed on the candidate and succeeded on
+  the baseline, and a unit test module with no test reports on a side fail the
+  run.
 - An architecture given to `compare.sh` (or found on either side) that a
-  side has no observations for, or only an empty observations file, is
-  **NOT RUN**, and the run is not a PASS.
+  side has no observations for, or only an observations file with no non-blank
+  line, is **NOT RUN**, and the run is not a PASS.
 - **Fail fast**: a daemon whose process exits, or whose main thread dies, is
   reported at once instead of after its start timeout, and when any daemon
   is not up after the start (`daemons.txt`), the scenarios are skipped; the
   logs and class loading are still collected. The comparison then says which
   daemons did not start: **FAIL** for the candidate, **NOT RUN** for the
   baseline.
-- **BOTH_FAIL** observations and tests failing on both sides are not caused
-  by the patch, but each one hides what it was checking: look at them before
-  relying on a run.
+- **BOTH_FAIL** observations, tests failing on both sides and unit modules
+  whose Maven run failed on both sides are not caused by the patch, but each
+  one hides what it was checking: look at them before relying on a run.
 - "Allowlist rules that matched nothing" means a change the patch should
   have made did not show up; check why. `replay.sh` finds the same rules
   without a run, and also the rules whose pattern misses some architecture's

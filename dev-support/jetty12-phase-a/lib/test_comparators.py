@@ -34,6 +34,7 @@ import tempfile
 HERE = os.path.dirname(os.path.abspath(__file__))
 E2E = os.path.join(HERE, "compare_e2e.py")
 UNIT = os.path.join(HERE, "compare_unit.py")
+PLAN = os.path.join(HERE, "compare_plan.py")
 DOWNSTREAM = os.path.join(HERE, "compare_downstream.py")
 ANCESTRY = os.path.join(HERE, "ancestry.py")
 REPORT = os.path.join(HERE, "report.py")
@@ -123,17 +124,21 @@ def surefire(tests):
     return "\n".join(out) + "\n"
 
 
-def unit(tmp, case, baseline, candidate, verdict, rc):
+def unit(tmp, case, baseline, candidate, verdict, rc, baseline_exit=0, candidate_exit=0,
+         keys=None):
     base = os.path.join(tmp, "unit", case)
-    for side, tests in (("baseline", baseline), ("candidate", candidate)):
+    for side, tests, exit_code in (("baseline", baseline, baseline_exit),
+                                   ("candidate", candidate, candidate_exit)):
         module = os.path.join(base, side, "moduleA")
         write_text(os.path.join(module, "TEST-moduleA.xml"), surefire(tests))
-        write_text(os.path.join(module, "status"), "0 1\n")
+        write_text(os.path.join(module, "status"), f"{exit_code} 1\n")
     out = os.path.join(base, "out")
     r = run(UNIT, "--out", out, os.path.join(base, "baseline"),
             os.path.join(base, "candidate"))
     result = read_result(case, os.path.join(out, "unit-compare.json"), r)
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
+    for key, want in (keys or {}).items():
+        expect(f"{case}: {key}", result.get(key), want)
 
 
 def downstream(tmp, case, baseline, candidate, verdict, rc):
@@ -191,6 +196,16 @@ def ancestry(repo, case, baseline, candidate, verdict, rc):
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
 
 
+def plan(repo, case, baseline, candidate, branches, verdict, rc):
+    out = os.path.join(repo, "out", case)
+    args = ["--baseline", baseline, "--candidate", candidate, "--out", out]
+    for branch in branches:
+        args += ["--branch", branch]
+    r = run(PLAN, *args, cwd=repo)
+    result = read_result(case, os.path.join(out, "compare-plan.json"), r)
+    expect(case, (result["verdict"], r.returncode), (verdict, rc))
+
+
 def report(tmp, case, checks, overall, rc):
     results = os.path.join(tmp, "report", case)
     cmp_dir = os.path.join(results, "compare")
@@ -217,6 +232,10 @@ def main():
             [], [], "NOT RUN", 1)
         e2e(tmp, "e2e an empty observations file on one side is NOT RUN",
             [], [observation("comp", "one")], "NOT RUN", 1)
+        e2e(tmp, "e2e a baseline observations file with only a blank line is NOT RUN",
+            [""], [observation("comp", "one")], "NOT RUN", 1)
+        e2e(tmp, "e2e observations files with only a blank line are NOT RUN",
+            [""], [""], "NOT RUN", 1)
 
         # Allowlist: a DIFF the rules excuse PASSes, a REGRESSION never does,
         # an obsfield rule must match every differing field and a rule's regex
@@ -278,6 +297,14 @@ def main():
              [("C", "one", "pass")], [("C", "one", "skipped")], "FAIL", 1)
         unit(tmp, "unit flaky on baseline and fail on candidate FAILs",
              [("C", "one", "flaky")], [("C", "one", "fail")], "FAIL", 1)
+        unit(tmp, "unit Maven failing on the candidate FAILs",
+             [("C", "one", "pass")], [("C", "one", "pass")], "FAIL", 1,
+             candidate_exit=1, keys={"maven_failed_on_candidate": ["moduleA"],
+                                     "maven_failed_on_both": []})
+        unit(tmp, "unit Maven failing on both sides PASSes",
+             [("C", "one", "pass")], [("C", "one", "pass")], "PASS", 0,
+             baseline_exit=1, candidate_exit=1,
+             keys={"maven_failed_on_candidate": [], "maven_failed_on_both": ["moduleA"]})
 
         downstream(tmp, "downstream identical results PASS",
                    "simple/hadoop-common\tg:a:jar:1.0:compile\n",
@@ -330,6 +357,32 @@ def main():
         commit(repo, "cand.txt", "cand\n", "candidate change")
         ancestry(repo, "ancestry a baseline commit changing only ignored paths PASSes",
                  baseline, rev(repo), "PASS", 0)
+
+        repo = new_repo(tmp, "plan-delete")
+        commit(repo, "file.txt", "one\n", "one")
+        root = rev(repo)
+        git(repo, "checkout", "-q", "-b", "baseline", root)
+        git(repo, "checkout", "-q", "-b", "branch", "baseline")
+        git(repo, "rm", "-q", "file.txt")
+        git(repo, "commit", "-q", "-m", "delete the file")
+        git(repo, "checkout", "-q", "-b", "candidate", "baseline")
+        git(repo, "merge", "-q", "--no-ff", "-m", "merge the branch", "branch")
+        plan(repo, "plan a branch that deletes a file and a candidate that lacks it PASSes",
+             "baseline", rev(repo), ["branch"], "PASS", 0)
+        commit(repo, "file.txt", "candidate\n", "keep the file")
+        plan(repo, "plan a branch that deletes a file and a candidate that keeps it FAILs",
+             "baseline", rev(repo), ["branch"], "FAIL", 1)
+
+        repo = new_repo(tmp, "plan-change")
+        commit(repo, "file.txt", "one\n", "one")
+        root = rev(repo)
+        git(repo, "checkout", "-q", "-b", "baseline", root)
+        git(repo, "checkout", "-q", "-b", "branch", "baseline")
+        commit(repo, "file.txt", "two\n", "change the file")
+        git(repo, "checkout", "-q", "-b", "candidate", "baseline")
+        git(repo, "merge", "-q", "--no-ff", "-m", "merge the branch", "branch")
+        plan(repo, "plan a branch that changes a file and a candidate with that change PASSes",
+             "baseline", rev(repo), ["branch"], "PASS", 0)
 
         all_pass = {"ancestry.json": "PASS", "artifact-diff.json": "PASS",
                     "api-compat.json": "PASS", "e2e-compare-simple.json": "PASS",

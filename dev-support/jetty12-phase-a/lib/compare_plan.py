@@ -27,17 +27,17 @@ candidate lacks (an older trunk than the baseline, which ancestry.py checks)
 or a change no branch makes. Either would be reported as a difference the
 patch causes.
 
-Per file changed by one branch, the candidate's blob must be the baseline's
-blob with that branch's change applied. A file changed by several branches is
-replayed in branch order as a three-way merge: the baseline blob as ancestor,
-each branch's change for the file (its base blob to its tip blob) merged on top
-with git merge-file. Paths ignored for every branch: the harness and .github/
-(only the baseline's fork commits change them).
+Per file changed by a branch, the candidate's blob must be the baseline's
+blob with that branch's change applied. A file changed by one or several
+branches is replayed in branch order as a three-way merge: the baseline blob
+as ancestor, each branch's change for the file (its base blob to its tip blob)
+merged on top with git merge-file. Paths ignored for every branch: the harness
+and .github/ (only the baseline's fork commits change them).
 
 Reported as differences:
   candidate-only   changed on the candidate, by no branch
-  replay-differs   changed by several branches and the replay does not give
-                   the candidate's blob
+  replay-differs   changed by one or several branches and the replay does not
+                   give the candidate's blob
   missing          changed by a branch, not changed on the candidate
 
 Two replay cases cannot be reproduced and are reported, never hidden:
@@ -48,10 +48,10 @@ Two replay cases cannot be reproduced and are reported, never hidden:
     HADOOP-20013 removes 'javax.annotation:javax.annotation-api' and
     jetty-phase-a removes 'javax.servlet:javax.servlet-api'; replaying either
     order keeps one line and drops the other, while the candidate drops both.
-    That resolution is what both tickets intend. List it in NOTICE_REPLAY (or
-    in the config, 'replay PATH ...') and the file stops being a difference;
-    the replay's own result must still differ, or the entry is reported as
-    unused.
+    That resolution is what both tickets intend. List it in NOTICE_REPLAY and
+    the file stops being a difference; an entry for a path a branch changes
+    counts as used even when the replay matches, and an entry for a path no
+    branch changes is reported as unused.
 
 The branches and their order come from PR_ORDER below; --branch arguments
 replace them. IGNORED and NOTICE_REPLAY below are edited in place when a branch
@@ -76,8 +76,8 @@ from gitrefs import changed_paths, git, rev_parse, tree_blobs  # noqa: E402
 # only for a file several branches change.
 PR_ORDER = [
     "origin/HADOOP-20012-upstream",
-    "origin/HADOOP-20013-upstream",
     "origin/HADOOP-20014-upstream",
+    "origin/HADOOP-20013-upstream",
     "origin/HADOOP-20015-upstream",
     "origin/HADOOP-20016-upstream",
     "origin/jetty-phase-a",
@@ -125,7 +125,8 @@ class Branch:
 
 def replay(baseline_blob, branches, path):
     """The baseline blob with each branch's change merged in order, and the
-    branch names whose change conflicted or hit a binary blob."""
+    branch names whose change conflicted or hit a binary blob. None when the
+    replay deletes the file."""
     current = blob(baseline_blob)
     unresolved = []
     with tempfile.TemporaryDirectory() as tmp:
@@ -138,6 +139,11 @@ def replay(baseline_blob, branches, path):
             anc, tip = change
             if not anc or not tip:
                 # The branch adds or deletes the file: nothing to merge.
+                current = blob(tip) if tip else None
+                continue
+            if current is None:
+                # An earlier branch deleted the file; this change cannot be
+                # merged onto nothing, so its tip is the replay.
                 current = blob(tip)
                 continue
             if b"\0" in current or b"\0" in blob(anc) or b"\0" in blob(tip):
@@ -211,6 +217,8 @@ def main():
         detail = "changed by " + ", ".join(x.ref for x in owners[path])
         replay_used.add(path)
         got, unresolved = replay(base_blobs.get(path), owners[path], path)
+        if got is None and want is None:
+            continue
         if want and got == blob(want):
             continue
         spec = replays.get(path)
@@ -279,8 +287,8 @@ def markdown(result):
         out.append("")
         out.append("`candidate-only` is a change no PR branch makes; `missing` is a change "
                    "a branch makes that the candidate lacks; `replay-differs` is a file "
-                   "several branches change whose replay does not give the candidate's "
-                   "content (a hand-resolved conflict or a binary blob).\n")
+                   "one or several branches change whose replay does not give the "
+                   "candidate's content (a hand-resolved conflict or a binary blob).\n")
     if result["unused_replay_resolutions"]:
         out.append("Replay resolutions listed but not needed: "
                    + ", ".join(f"`{r}`" for r in result["unused_replay_resolutions"]) + ".\n")
