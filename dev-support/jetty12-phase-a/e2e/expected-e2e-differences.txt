@@ -22,6 +22,7 @@
 #   obsfield  <component>:<observation id><json path>   excuses a DIFF when every
 #             field that differs (e.g. /headers/vary) matches such a rule
 #   classjar  <daemon>:<class>       class loaded from a different jar
+#   classonly <daemon>:<class>       class loaded on one side only
 #   logscan   <source>:<message>     error message only the candidate logs
 
 # HADOOP-20013 drops the duplicate javax.annotation-api jar, but the
@@ -58,3 +59,24 @@ obsdiff common-cli:load\.(hadoop|hdfs|mapred|yarn)\.javax\.servlet\.(Filter|http
 # the javax.servlet classes from jetty-servlet-api 4.0.9
 # instead of javax.servlet-api 3.1.0.
 classjar [A-Za-z0-9_.-]+:javax\.servlet\..*  # HADOOP-19970; announced: HADOOP-19970 release note
+
+# T10: the timeline server's JSON writer is chosen afresh at each start, so the
+# classes it loads on one side only flip between runs (YARN-12030, pre-existing).
+# The packages are named here; the org.apache.hadoop.yarn classes are named one
+# by one because a package-wide pattern would hide a real change there.
+classonly timelineserver:com\.fasterxml\.jackson\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+classonly timelineserver:com\.sun\.xml\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+classonly timelineserver:com\.sun\.istack\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+classonly timelineserver:javax\.xml\.bind\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+classonly timelineserver:org\.codehaus\.jettison\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+classonly timelineserver:org\.glassfish\.jersey\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+classonly timelineserver:org\.apache\.hadoop\.yarn\.api\.records\.timeline\.TimelineEvents\$EventsOfOneEntity  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+classonly timelineserver:org\.apache\.hadoop\.yarn\.server\.applicationhistoryservice\.webapp\.ContextFactory  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+classonly timelineserver:org\.apache\.hadoop\.yarn\.webapp\.RemoteExceptionData  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+classonly timelineserver:org\.apache\.hadoop\.yarn\.webapp\.package-info  # timeline server JSON writer chosen at start (YARN-12030, pre-existing)
+
+# HADOOP-19970: the servlet 4.0 types the bytecode verifier loads while linking
+# the 4.0 HttpServletRequest and HttpServletRequestWrapper appear on the
+# candidate only.
+classonly [A-Za-z0-9_.-]+:javax\.servlet\.http\.HttpServletMapping  # HADOOP-19970; announced: HADOOP-19970 release note
+classonly [A-Za-z0-9_.-]+:javax\.servlet\.http\.PushBuilder  # HADOOP-19970; announced: HADOOP-19970 release note

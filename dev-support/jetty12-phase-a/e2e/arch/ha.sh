@@ -109,6 +109,7 @@ arch_conf() {
   # shellcheck disable=SC2046
   base_hdfs "dfs.nameservices=${HA_NS}" \
     $(ha_hdfs_props "${HA_NS}" "${HA_NN[*]}" "${HA_NN_RPC[*]}" "${HA_NN_HTTP[*]}" "$(ha_journal "${HA_NS}")" "${HA_ZKFC_PORT[*]}") \
+    "dfs.client.failover.random.order=false" \
     "dfs.ha.fencing.methods=shell(/bin/true)"
   # shellcheck disable=SC2046
   base_yarn $(ha_yarn_props)

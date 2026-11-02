@@ -32,17 +32,29 @@ done > "${LOCAL}/words.txt"
 hadoop fs -mkdir -p "${D}/in"
 hadoop fs -put -f "${LOCAL}/words.txt" "${D}/in/"
 
+# MAPREDUCE-7548: the AM's MRAMPolicyProvider registers the ACL under
+# TaskUmbilicalProtocolPB, but TaskUmbilicalProtocolPB declares protocol name
+# org.apache.hadoop.mapred.TaskUmbilicalProtocol, so the AM's ACL check rejects
+# the task's umbilical calls. Turning authorization off in the job's own
+# configuration skips the AM's ACL check only (TaskAttemptListenerImpl.java:180
+# and MRClientService.java:136 read hadoop.security.authorization from the
+# job's configuration); the daemons keep authorization=true from core-site.xml.
+MR_SEC_OPTS=()
+if [[ "${SECURE}" == "true" ]]; then
+  MR_SEC_OPTS=(-D hadoop.security.authorization=false)
+fi
+
 COMPONENT=mapreduce-jobs
 cli pi --merge-stderr --expect-regex 'Estimated value of Pi is (\S+)' -- \
-  yarn jar "${EXAMPLES}" pi 2 1000
+  yarn jar "${EXAMPLES}" pi "${MR_SEC_OPTS[@]}" 2 1000
 PI_JOB=$(mapred job -list all 2>/dev/null | awk '/^ *job_/ {print $1}' | sort | tail -1)
-cli wordcount -- yarn jar "${EXAMPLES}" wordcount "${D}/in" "${D}/wc-out"
+cli wordcount -- yarn jar "${EXAMPLES}" wordcount "${MR_SEC_OPTS[@]}" "${D}/in" "${D}/wc-out"
 cli wordcount-output --shape sha256 -- hadoop fs -cat "${D}/wc-out/part-r-00000"
-cli grep -- yarn jar "${EXAMPLES}" grep "${D}/in" "${D}/grep-out" 'jump[a-z]*'
+cli grep -- yarn jar "${EXAMPLES}" grep "${MR_SEC_OPTS[@]}" "${D}/in" "${D}/grep-out" 'jump[a-z]*'
 cli grep-output --shape lines -- hadoop fs -cat "${D}/grep-out/part-r-00000"
-cli teragen -- yarn jar "${EXAMPLES}" teragen -Dmapreduce.job.maps=2 20000 "${D}/teragen"
-cli terasort -- yarn jar "${EXAMPLES}" terasort -Dmapreduce.job.reduces=2 "${D}/teragen" "${D}/terasort"
-cli teravalidate -- yarn jar "${EXAMPLES}" teravalidate "${D}/terasort" "${D}/teravalidate"
+cli teragen -- yarn jar "${EXAMPLES}" teragen "${MR_SEC_OPTS[@]}" -Dmapreduce.job.maps=2 20000 "${D}/teragen"
+cli terasort -- yarn jar "${EXAMPLES}" terasort "${MR_SEC_OPTS[@]}" -Dmapreduce.job.reduces=2 "${D}/teragen" "${D}/terasort"
+cli teravalidate -- yarn jar "${EXAMPLES}" teravalidate "${MR_SEC_OPTS[@]}" "${D}/terasort" "${D}/teravalidate"
 cli teravalidate-checksum --expect-regex 'checksum\s+(\S+)' -- \
   hadoop fs -cat "${D}/teravalidate/part-r-00000"
 cli job-list --shape none -- mapred job -list all
@@ -53,9 +65,16 @@ cli queue-list --shape none -- mapred queue -list
 cli hsadmin-refresh -- mapred hsadmin -refreshLoadedJobCache
 cli classpath -- mapred classpath
 
+# A control job without the override: MAPREDUCE-7548 makes it fail. When the
+# fix lands, it succeeds and this observation fails (--expect-rc 1 flips to 0),
+# so the harness notices.
+if [[ "${SECURE}" == "true" ]]; then
+  cli control-job --expect-rc 1 -- yarn jar "${EXAMPLES}" pi 2 1000
+fi
+
 # A job that stays running long enough to look at its application master.
 COMPONENT=mapreduce-am
-yarn jar "${JOBCLIENT_TESTS}" sleep -m 1 -r 1 -mt 120000 -rt 1000 \
+yarn jar "${JOBCLIENT_TESTS}" sleep "${MR_SEC_OPTS[@]}" -m 1 -r 1 -mt 120000 -rt 1000 \
   > "${RES}/sleep-job.log" 2>&1 &
 SLEEP_PID=$!
 SLEEP_APP=""

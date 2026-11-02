@@ -78,7 +78,11 @@ the report lists the accepted changes nobody was told about.
    without a cluster; `compare.sh` first runs `lib/test_comparators.py`,
    which checks the comparison scripts the same way, and `run-all.sh` and the
    workflow's queue job run it before their builds and their wait. Every
-   daemon JVM logs the classes it loads, and all daemon and container logs
+   daemon JVM logs the classes it loads; a class loaded on one side only is
+   listed per daemon and accepted only by a `classonly <daemon>:<class>` rule
+   (R87), and an unexpected one fails the end-to-end check only when
+   `CLASSONLY_FAIL=true` (the default, `false`, lists it as "would fail"
+   without changing the verdict). All daemon and container logs
    are scanned for class loading, linkage and JAX-RS provider errors. Line
    numbers in Java stack frames are dropped before comparing, so an error
    page that prints a stack trace does not differ just because a jar in it
@@ -166,6 +170,10 @@ namenodes, three journalnodes, two resource managers or two routers.
 | `federated` | HDFS federation (two namespaces, one datanode with two block pools, RBF router with the ZooKeeper state store, ViewFS) and YARN federation (two sub-clusters, YARN router with the federation interceptors, global policy generator, ZooKeeper federation state store) | 00 10 85 |
 | `mixed` | an HA namespace and a non-HA one federated behind two RBF routers that clients use as one HA nameservice (the default file system, so YARN and MapReduce go through RBF), RM HA | 00 10 80 85 90 |
 
+In `ha`, `mixed` and `federated`, the clients set
+`dfs.client.failover.random.order=false` so each tries the active namenode
+first; the standby does not load request classes on one side only (R86).
+
 | Scenario | What it does |
 |---|---|
 | `00-cli-common` | `hadoop` CLI, credential provider, local file system; loads the javax.annotation, servlet, JAX-RS, Jersey and Jetty classes through all four launchers and records the jar each comes from |
@@ -227,10 +235,16 @@ namenodes, three journalnodes, two resource managers or two routers.
 Run, but compared on neither side, because they fail on both (see known
 issues below). A PASS says nothing about them:
 
-- **MapReduce under Kerberos** (MAPREDUCE-7548): every job of `secure`
-  fails, so the jobs, their output, the job history server's job and task
-  pages and the AM's REST API and UI through the proxy with SPNEGO are not
-  compared there. The other architectures run MapReduce without Kerberos.
+- **MapReduce under Kerberos** (MAPREDUCE-7548): every job of `secure` used
+  to fail, so the jobs, their output, the job history server's job and task
+  pages and the AM's REST API and UI through the proxy with SPNEGO were not
+  compared there. The harness now submits the jobs with
+  `-D hadoop.security.authorization=false` in the job's own configuration
+  (`MR_SEC_OPTS` in `e2e/scenarios/50-mapreduce.sh`), so the AM skips its
+  ACL check and the jobs run and are compared. A control job without the
+  override is expected to fail (`--expect-rc 1`), so the harness notices
+  when the bug is fixed. The other architectures run MapReduce without
+  Kerberos.
 - **Distributed shell and REST submissions through the YARN router**
   (YARN-12024, YARN-12025): `federated` records them failing on both sides;
   only the router's read-only REST calls and client RPC are compared.
@@ -257,8 +271,11 @@ These are not caused by phase A; the harness records them, and they show as
   authorizes calls against that interface, but `MRAMPolicyProvider`
   registers the ACL under `TaskUmbilicalProtocolPB`. (HDFS does it the other
   way: `HDFSPolicyProvider` lists `ClientProtocol` for
-  `ClientNamenodeProtocolPB`.) The MapReduce observations of `secure` fail
-  on both sides until it is fixed.
+  `ClientNamenodeProtocolPB`.) The harness works around it by submitting the
+  `secure` jobs with `-D hadoop.security.authorization=false` in the job's
+  own configuration, which skips the AM's ACL check only (the daemons keep
+  authorization on from `core-site.xml`). A control job without the override
+  is expected to fail, so the harness notices when the bug is fixed.
 - YARN-12024: distributed shell cannot be submitted through the YARN router: its client
   tolerates `YARNFeatureNotEnabledException` from `getResourceProfiles`
   (resource profiles are off by default), but
@@ -268,7 +285,14 @@ These are not caused by phase A; the harness records them, and they show as
   (YARN-12025). Without the application, the checks that read it back
   (`router-app`, `router-app-state`, `router-app-status`,
   `app-on-one-subcluster`) are recorded as failed rather than run against
-  an empty id.
+  an empty id. The harness also submits a distributed shell application to
+  sub-cluster sc1's resource manager directly. The router's REST and RPC
+  listings must show it (`router-apps-direct`, `router-app-list-direct`) and
+  it must be on exactly one sub-cluster (`app-on-one-subcluster-direct`). The
+  router finds an application by id only through the home sub-cluster that
+  a submission through the router records in the state store, so the reads
+  by id (`router-app-direct`, `router-app-state-direct`) are recorded
+  without an expectation and compared between the sides (R88).
 - YARN-12025: the YARN router's REST API cannot forward requests whose answer has a
   body to read, e.g. `POST /ws/v1/cluster/apps/new-application` answers 503
   "No active SubCluster available" after "MessageBodyReader not found for
@@ -441,6 +465,27 @@ A workflow is 5 to 7 jobs (two builds, two end-to-end runs, two or four
 unit suite runs, the comparison); each fits a standard GitHub-hosted runner
 (4 vCPUs, 16 GB, 6-hour job limit for public repositories).
 
+### Attribution runs
+
+A fork-only workflow, `.github/workflows/jetty12_phase_a_attribution.yml`,
+starts on a push to a branch named `jetty12-phase-a-attribution-run-*`. It
+runs checks 1, 2 and 5 (artifacts and dependencies, API compatibility and what
+downstream projects resolve) on each tree of the merge order: each PR branch
+alone (`ticket-<n>`) and each prefix of the merge order of length 2 to 5
+(`prefix-<n>`), with the branches and order from `PR_ORDER` in
+`lib/compare_plan.py`. `attribution.sh list` prints the tree names and
+`attribution.sh <tree>` creates the tree as a detached merge commit in a
+worktree under `WORKDIR`, without creating a branch, and runs those checks
+against the baseline into `results/attribution/<tree>/`. In CI,
+`attribution.sh merge <tree>` and `attribution.sh compare <tree>` run those two
+halves apart: one job builds the baseline for every tree, each tree job
+builds only its candidate, and both reuse a saved build of the same code
+(`.github/actions/jetty12-phase-a-build-side`, with the build job's keys), so
+a baseline that a normal run saved is not built again. A final job downloads
+every tree's results and runs `lib/attribution.py`, which writes
+`attribution.json` and `attribution.md` and fails when a ticket's rule matched
+nothing in its own tree or a difference is UNEXPECTED.
+
 ### On one machine
 
 Requirements: Linux, JDK 17 or later, Python 3, curl (with GSS-API for the
@@ -494,6 +539,7 @@ dev-support/jetty12-phase-a/replay.sh ~/reports/report-*
 | `BASELINE_REF` / `CANDIDATE_REF` | `origin/PREPARATION` / `origin/feat/HARNESS` | the two trees |
 | `ANCESTRY_CHECK` | `true` | `compare.sh` stops when the candidate lacks a baseline commit's change (`lib/ancestry.py`) |
 | `PLAN_CHECK` | `true` | `compare.sh` stops when the candidate is not the baseline plus `PR_BRANCHES` (`lib/compare_plan.py`) |
+| `CLASSONLY_FAIL` | `false` | whether an unexpected one-side class fails the end-to-end check (R87); with `false` it is listed as "would fail" without changing the verdict; in CI the Compare step of `tmpl_jetty12_phase_a.yml` sets it |
 | `PR_BRANCHES` | the six PR branches in merge order | the branches merged into trunk, in merge order, comma-separated (e.g. `origin/HADOOP-20012-upstream,...,origin/jetty-phase-a`); the plan check runs only when set. The workflow sets it for every run; a run whose two sides are one commit skips the check |
 | `MAVEN_MIRROR_URL` | none | mirror of Maven Central, e.g. `https://maven-central.storage-download.googleapis.com/maven2` when the build host is rate-limited |
 | `MVN_EXTRA_ARGS` | none | added to every Maven call |
@@ -522,6 +568,16 @@ architecture and an overall verdict. Supporting data sits next to it
 `unit-compare.json`, `downstream-compare.json`, `impact.md`) and under
 `results/<side>/` (raw observations, CLI output, daemon start-up, scenario
 logs, surefire reports).
+
+When `UNIT_HISTORY_DIR` names earlier runs' report directories, the unit
+comparison's `unit-compare.json` and its section in `report.md` also say, for
+every test that fails or is flaky in the run, in how many of those runs it was
+fail or flaky on each side (`--history`, R85). It does not change the verdict.
+In CI the `compare` job downloads those directories first with
+`ci/history.sh <repo> <workflow file name> <arch> <dest dir>`: the
+`report-<arch>` artifact of the last five completed normal runs of that
+workflow (no aa or broken run) other than the current one, each into `<dest dir>/<run id>`, skipping a run
+without the artifact.
 
 A test JVM that runs for more than 600 s (`STALL_AFTER`; Hadoop kills it at
 900 s) gets snapshots of every TCP socket's kernel state (`ss -tinmoep`), the

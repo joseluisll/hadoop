@@ -31,6 +31,11 @@ failed on both sides is listed without failing.
 A test that exists only on the candidate (one the patch adds) is listed with
 its result; one that fails there fails the run unless a 'candidate-only-fail
 <module>|<test>' rule in RULES accepts it (a known flake, T20).
+
+--history DIR (repeatable) names an earlier run's report directory holding
+unit-compare.json. For every test that is fail or flaky on either side in this
+run, the report says in how many of those runs it was fail or flaky on each
+side (T11). It does not change the verdict.
 """
 
 import argparse
@@ -87,10 +92,28 @@ def checks_only(p):
         (p[side]["status"] or {}).get("maven_exit") == 0 for side in ("baseline", "candidate"))
 
 
+def history_failures(d):
+    """{test_key: {"baseline": bool, "candidate": bool}} from an earlier run's
+    unit-compare.json: whether the test was fail or flaky on each side (T11)."""
+    fails = {}
+    for category in ("both_fail", "flaky", "regressions", "fixed",
+                     "candidate_only", "missing_on_candidate", "skipped_on_candidate"):
+        for item in d.get(category, []):
+            key = f"{item['module']}|{item['test']}"
+            f = fails.setdefault(key, {"baseline": False, "candidate": False})
+            if item.get("baseline") in ("fail", "flaky"):
+                f["baseline"] = True
+            if item.get("candidate") in ("fail", "flaky"):
+                f["candidate"] = True
+    return fails
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
     ap.add_argument("--expected", help="rules for failing candidate-only tests")
+    ap.add_argument("--history", action="append", default=[], metavar="DIR",
+                    help="an earlier run's report directory holding unit-compare.json")
     ap.add_argument("baseline")
     ap.add_argument("candidate")
     a = ap.parse_args()
@@ -101,6 +124,7 @@ def main():
     per_module, regressions, missing, skipped, fixed, both_fail, flaky = [], [], [], [], [], [], []
     maven_failed_candidate, maven_failed_both = [], []
     candidate_only = []
+    failing_or_flaky = []
     for m in modules:
         bt, bs = read_module(os.path.join(a.baseline, m))
         ct, cs = read_module(os.path.join(a.candidate, m))
@@ -132,6 +156,8 @@ def main():
                 candidate_only.append(item)
             if "flaky" in (sb, sc):
                 flaky.append(item)
+            if sb in ("fail", "flaky") or sc in ("fail", "flaky"):
+                failing_or_flaky.append(item)
         count = lambda t, s: sum(v == s for v in t.values())  # noqa: E731
         per_module.append({
             "module": name,
@@ -142,6 +168,23 @@ def main():
                           "fail": count(ct, "fail"), "skipped": count(ct, "skipped"),
                           "status": cs},
         })
+    # T11: count, for each test failing or flaky in this run, in how many of
+    # the earlier runs named by --history it was fail or flaky on each side.
+    history_runs = []
+    for d in a.history:
+        p = os.path.join(d, "unit-compare.json")
+        if os.path.exists(p):
+            with open(p, encoding="utf-8") as fh:
+                history_runs.append(history_failures(json.load(fh)))
+    history = []
+    if history_runs:
+        for i in failing_or_flaky:
+            key = f"{i['module']}|{i['test']}"
+            b = sum(1 for h in history_runs if h.get(key, {}).get("baseline"))
+            c = sum(1 for h in history_runs if h.get(key, {}).get("candidate"))
+            history.append({"module": i["module"], "test": i["test"],
+                            "baseline_runs": b, "candidate_runs": c,
+                            "runs": len(history_runs)})
     not_run = [p["module"] for p in per_module
                if (p["candidate"]["tests"] == 0 or p["baseline"]["tests"] == 0)
                and not checks_only(p)]
@@ -160,6 +203,7 @@ def main():
               "maven_failed_on_both": maven_failed_both,
               "candidate_only": candidate_only,
               "candidate_only_failed": candidate_only_failed,
+              "history": history,
               "unused_rules": allow.unused() if allow else []}
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "unit-compare.json"), "w", encoding="utf-8") as f:
@@ -198,6 +242,17 @@ def main():
                         "UNEXPECTED": "**none: fails the run**"}.get(i.get("status"), "")
                 f.write(f"| {i['module']} | `{i['test']}` | {i['candidate']} | {rule} |\n")
             f.write("\n")
+        if history:
+            f.write(f"### Flaky test history ({len(history)} tests)\n\n"
+                    "For each test that is fail or flaky on either side in this run, how many "
+                    "of the earlier runs named by `--history` had it fail or flaky on each "
+                    "side. It does not change the verdict.\n\n"
+                    "| Module | Test | Fail/flaky on baseline | Fail/flaky on candidate | "
+                    "Runs |\n|---|---|---|---|---|\n")
+            for h in history:
+                f.write(f"| {h['module']} | `{h['test']}` | {h['baseline_runs']} | "
+                        f"{h['candidate_runs']} | {h['runs']} |\n")
+            f.write("\n")
         if allow and allow.unused():
             f.write("Rules that matched nothing: "
                     + "; ".join(f"`{u}`" for u in allow.unused()) + "\n\n")
@@ -210,7 +265,7 @@ def main():
                     "results/<side>/unit/<module>/mvn.log): " + ", ".join(not_run) + "\n")
     print(f"unit comparison: {verdict}, {len(regressions)} regressions, {len(missing)} missing, "
           f"{len(skipped)} newly skipped, {len(candidate_only_failed)} failing only on the "
-          f"candidate without a rule")
+          f"candidate without a rule, {len(history)} in the flaky history")
     return 0 if verdict == "PASS" else 1
 
 

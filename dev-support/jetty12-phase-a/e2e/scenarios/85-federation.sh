@@ -131,6 +131,44 @@ print(apps[0]["id"] if apps else "")' 2>/dev/null || true)
       check "${id}" false "no jetty12-federated application on the router"
     done
   fi
+  # A distributed shell application submitted to sc1's RM directly: the
+  # router's read paths then compare an application it did not submit
+  # (YARN-12024, YARN-12025). The client takes no -D options, so its
+  # configuration is the sub-cluster's own, whose yarn.resourcemanager
+  # address, scheduler and web application addresses are sc1's.
+  cli dshell-direct-sc1 --merge-stderr --expect-regex '(Application completed successfully)' -- \
+    env HADOOP_CONF_DIR="${RUN}/conf-rmsc1" \
+    yarn jar "${DSHELL_JAR}" -jar "${DSHELL_JAR}" -shell_command echo \
+    -shell_args jetty12-direct-sc1 -num_containers 1 -container_memory 256 \
+    -master_memory 256 -appname jetty12-direct-sc1
+  # The router lists the applications of every sub-cluster, but finds one by
+  # id only through its home sub-cluster in the state store, which only a
+  # submission through the router records. So the listings must show the
+  # application, and the reads by id are recorded without an expectation:
+  # both sides answer that the home sub-cluster is unknown.
+  DIRECT=$(rest "${Y}/apps" | python3 -c '
+import json, sys
+apps = ((json.load(sys.stdin).get("apps") or {}).get("app")) or []
+apps = [a for a in apps if a.get("name") == "jetty12-direct-sc1"]
+print(f"{apps[0]['id']} {apps[0].get('finalStatus', '')}" if apps else "")' 2>/dev/null || true)
+  DIRECT_APP=${DIRECT%% *}
+  if [[ -n "${DIRECT_APP}" ]]; then
+    # The client above waited for the application to finish.
+    check router-apps-direct "$([[ "${DIRECT#* }" == SUCCEEDED ]] && echo true || echo false)" \
+      "router REST listing: ${DIRECT}"
+    cli router-app-list-direct --expect-regex '(jetty12-direct-sc1)' -- \
+      yarn application -Dyarn.resourcemanager.address="${YROUTER_RPC}" -list -appStates ALL
+    http router-app-direct "${Y}/apps/${DIRECT_APP}" --expect-status any
+    http router-app-state-direct "${Y}/apps/${DIRECT_APP}/state" --expect-status any
+    on1=$(rest "${RM_URL}/ws/v1/cluster/apps/${DIRECT_APP}" | grep -c '"id"' || true)
+    on2=$(rest "${RM2_URL}/ws/v1/cluster/apps/${DIRECT_APP}" | grep -c '"id"' || true)
+    check app-on-one-subcluster-direct "$([[ $((on1 + on2)) -eq 1 ]] && echo true || echo false)" "sc1 ${on1}, sc2 ${on2}"
+  else
+    for id in router-apps-direct router-app-list-direct router-app-direct router-app-state-direct \
+              app-on-one-subcluster-direct; do
+      check "${id}" false "no jetty12-direct-sc1 application on the router"
+    done
+  fi
   # Placement is also checked with an application submitted to the router's
   # REST API; its AM never registers, so it would end FAILED. The REST
   # forwarding fails as well for now (YARN-12025).

@@ -78,6 +78,7 @@ arch_conf() {
     "dfs.namenode.rpc-address.ns2=${HOST}:9002" \
     "dfs.namenode.http-address.ns2=${HOST}:9882" \
     $(ha_hdfs_props routerfed "r1 r2" "${ROUTER_RPC[*]}" "${ROUTER_HTTP[*]}" "") \
+    "dfs.client.failover.random.order=false" \
     "dfs.ha.fencing.methods=shell(/bin/true)"
   site "${HADOOP_CONF_DIR}/hdfs-site.xml" "dfs.namenode.shared.edits.dir" \
     "dfs.namenode.shared.edits.dir.ns1=$(ha_journal ns1)" \

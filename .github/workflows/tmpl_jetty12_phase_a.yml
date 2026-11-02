@@ -406,6 +406,9 @@ jobs:
     if: (!cancelled()) && needs.build.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: 60
+    permissions:
+      actions: read
+      contents: read
     steps:
       # The whole history and every branch: compare.sh checks the candidate's
       # ancestry and its change against the PR branches, which needs the
@@ -434,8 +437,23 @@ jobs:
             ${HARNESS}/ci/artifacts.sh unpack-build "${side}" "${RUNNER_TEMP}/builds/build-${side}"
           done
           ${HARNESS}/ci/artifacts.sh unpack-results "${RUNNER_TEMP}"/results/*
+      - name: Download previous reports for history
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "${RUNNER_TEMP}/history"
+          ${HARNESS}/ci/history.sh "${{ github.repository }}" \
+            "jetty12_phase_a_${{ inputs.arch }}.yml" "${{ inputs.arch }}" \
+            "${RUNNER_TEMP}/history"
+        continue-on-error: true
       - name: Compare
         shell: bash
+        env:
+          UNIT_HISTORY_DIR: ${{ runner.temp }}/history
+          # R87: the owner sets it to true once a run batch shows which
+          # one-side classes are left without a classonly rule.
+          CLASSONLY_FAIL: "false"
         run: ${HARNESS}/compare.sh ${{ inputs.arch }}
       - name: Summary
         if: always()

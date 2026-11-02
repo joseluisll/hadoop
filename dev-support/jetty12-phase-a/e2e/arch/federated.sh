@@ -96,7 +96,8 @@ arch_conf() {
     "dfs.namenode.rpc-address.ns1=${HOST}:${FED_RPC[0]}" \
     "dfs.namenode.http-address.ns1=${HOST}:${FED_HTTP[0]}" \
     "dfs.namenode.rpc-address.ns2=${HOST}:${FED_RPC[1]}" \
-    "dfs.namenode.http-address.ns2=${HOST}:${FED_HTTP[1]}"
+    "dfs.namenode.http-address.ns2=${HOST}:${FED_HTTP[1]}" \
+    "dfs.client.failover.random.order=false"
   # Router WebHDFS redirects name the router by its id, the local hostname
   # plus the RPC port (Router#setRpcServerAddress), whatever its RPC address;
   # the router listens on all interfaces so the datanode reaches it (on CI

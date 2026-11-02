@@ -38,11 +38,15 @@ PLAN = os.path.join(HERE, "compare_plan.py")
 DOWNSTREAM = os.path.join(HERE, "compare_downstream.py")
 ANCESTRY = os.path.join(HERE, "ancestry.py")
 REPORT = os.path.join(HERE, "report.py")
+ATTRIBUTION = os.path.join(HERE, "attribution.py")
 
 
-def run(script, *args, cwd=None):
+def run(script, *args, cwd=None, env=None):
+    e = git_env()
+    if env:
+        e.update(env)
     return subprocess.run([sys.executable, "-I", script, *args],
-                          cwd=cwd, capture_output=True, text=True, env=git_env())
+                          cwd=cwd, capture_output=True, text=True, env=e)
 
 
 def write_text(path, text):
@@ -83,7 +87,7 @@ def observation(component, ident, ok=True, **view):
 
 
 def e2e(tmp, case, baseline, candidate, verdict, rc, rules="", aborted=None,
-        classload=None, logscan=None):
+        classload=None, logscan=None, env=None):
     base = os.path.join(tmp, "e2e", case)
     for side, lines in (("baseline", baseline), ("candidate", candidate)):
         os.makedirs(os.path.join(base, side))
@@ -101,7 +105,7 @@ def e2e(tmp, case, baseline, candidate, verdict, rc, rules="", aborted=None,
     write_text(expected, rules)
     out = os.path.join(base, "out")
     r = run(E2E, "--expected", expected, "--out", out, "--arch", "simple",
-            os.path.join(base, "baseline"), os.path.join(base, "candidate"))
+            os.path.join(base, "baseline"), os.path.join(base, "candidate"), env=env)
     result = read_result(case, os.path.join(out, "e2e-compare-simple.json"), r)
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
 
@@ -125,7 +129,7 @@ def surefire(tests):
 
 
 def unit(tmp, case, baseline, candidate, verdict, rc, baseline_exit=0, candidate_exit=0,
-         keys=None, rules=""):
+         keys=None, rules="", history=None):
     base = os.path.join(tmp, "unit", case)
     for side, tests, exit_code in (("baseline", baseline, baseline_exit),
                                    ("candidate", candidate, candidate_exit)):
@@ -134,12 +138,18 @@ def unit(tmp, case, baseline, candidate, verdict, rc, baseline_exit=0, candidate
         write_text(os.path.join(module, "status"), f"{exit_code} 1\n")
     out = os.path.join(base, "out")
     write_text(os.path.join(base, "rules.txt"), rules)
+    history_args = []
+    for i, d in enumerate(history or []):
+        hdir = os.path.join(base, "history", str(i))
+        write_json(os.path.join(hdir, "unit-compare.json"), d)
+        history_args += ["--history", hdir]
     r = run(UNIT, "--out", out, "--expected", os.path.join(base, "rules.txt"),
-            os.path.join(base, "baseline"), os.path.join(base, "candidate"))
+            *history_args, os.path.join(base, "baseline"), os.path.join(base, "candidate"))
     result = read_result(case, os.path.join(out, "unit-compare.json"), r)
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
     for key, want in (keys or {}).items():
         expect(f"{case}: {key}", result.get(key), want)
+    return result
 
 
 def downstream(tmp, case, baseline, candidate, verdict, rc):
@@ -221,6 +231,51 @@ def report(tmp, case, checks, overall, rc, broken=False):
     expect(case, (lines[0].split()[1], r.returncode), (overall, rc))
 
 
+RULE_FILES = ("expected-differences.txt", "expected-api-differences.txt",
+              "expected-downstream-differences.txt")
+
+
+def artifact_json(unexpected=0, unused=(), diffs=None):
+    return {"summary": {"unexpected": unexpected, "unused_rules": list(unused)},
+            "differences": list(diffs or [])}
+
+
+def api_json(unexpected=0, unused=(), findings=None):
+    return {"verdict": "FAIL" if unexpected else "PASS",
+            "summary": {"unexpected": unexpected},
+            "findings": list(findings or []), "unused_rules": list(unused)}
+
+
+def downstream_json(unexpected=0, unused=(), diffs=None):
+    return {"verdict": "FAIL" if unexpected else "PASS",
+            "summary": {"unexpected": unexpected},
+            "differences": list(diffs or []), "unused_rules": list(unused)}
+
+
+def matched_tree():
+    return {"artifact-diff.json": artifact_json(),
+            "api-compat.json": api_json(),
+            "downstream-compare.json": downstream_json()}
+
+
+def attribution(tmp, case, trees, verdict, rc, rules=None, contains=None):
+    base = os.path.join(tmp, "attribution", case)
+    trees_dir = os.path.join(base, "trees")
+    for name, files in trees.items():
+        for filename, value in files.items():
+            write_json(os.path.join(trees_dir, name, filename), value)
+    rules_dir = os.path.join(base, "rules")
+    for filename in RULE_FILES:
+        write_text(os.path.join(rules_dir, filename), (rules or {}).get(filename, ""))
+    r = run(ATTRIBUTION, "--rules", rules_dir, trees_dir)
+    result = read_result(case, os.path.join(trees_dir, "attribution.json"), r)
+    expect(case, (result["verdict"], r.returncode), (verdict, rc))
+    if contains is not None:
+        problems = [p for t in result["trees"] for p in t["problems"]]
+        expect(f"{case}: reason", any(contains in p for p in problems), True)
+    return result
+
+
 def main():
     with tempfile.TemporaryDirectory() as tmp:
         e2e(tmp, "e2e identical observations PASS",
@@ -289,6 +344,22 @@ def main():
             [observation("comp", "one")], [observation("comp", "one")], "FAIL", 1,
             logscan={"baseline": {}, "candidate": {"nn": {"NoClassDefFoundError: Foo": 1}}})
 
+        # T3: a class loaded on one side only is matched against a classonly
+        # rule. Unexpected ones fail only with CLASSONLY_FAIL=true.
+        one_side = {"baseline": {"nn": {"org.example.Foo": "lib/jetty-foo.jar"}},
+                    "candidate": {"nn": {"org.example.Foo": "lib/jetty-foo.jar",
+                                         "org.example.Bar": "lib/jetty-bar.jar"}}}
+        e2e(tmp, "e2e a classonly rule accepting a one-side class PASSes",
+            [observation("comp", "one")], [observation("comp", "one")], "PASS", 0,
+            classload=one_side,
+            rules="classonly nn:org\\.example\\.Bar  # expected\n")
+        e2e(tmp, "e2e an unexpected one-side class does not fail with the switch off",
+            [observation("comp", "one")], [observation("comp", "one")], "PASS", 0,
+            classload=one_side)
+        e2e(tmp, "e2e an unexpected one-side class fails with CLASSONLY_FAIL=true",
+            [observation("comp", "one")], [observation("comp", "one")], "FAIL", 1,
+            classload=one_side, env={"CLASSONLY_FAIL": "true"})
+
         unit(tmp, "unit tests passing on both sides PASS",
              [("C", "one", "pass")], [("C", "one", "pass")], "PASS", 0)
         unit(tmp, "unit pass on baseline and fail on candidate FAILs",
@@ -320,6 +391,19 @@ def main():
              [("C", "one", "pass")], [("C", "one", "fail")], "FAIL", 1,
              rules="candidate-only-fail moduleA\\|C#one  # known flake\n",
              keys={"unused_rules": ["line 1: candidate-only-fail moduleA\\|C#one"]})
+        unit(tmp, "unit a regression reports its history",
+             [("C", "one", "pass")], [("C", "one", "fail")], "FAIL", 1,
+             history=[
+                 {"flaky": [{"module": "moduleA", "test": "C#one",
+                             "baseline": "flaky", "candidate": "pass"}]},
+                 {"regressions": [{"module": "moduleA", "test": "C#one",
+                                   "baseline": "pass", "candidate": "fail"}]},
+             ],
+             keys={"history": [{"module": "moduleA", "test": "C#one",
+                                "baseline_runs": 1, "candidate_runs": 1, "runs": 2}]})
+        unit(tmp, "unit no --history leaves the history empty",
+             [("C", "one", "pass")], [("C", "one", "fail")], "FAIL", 1,
+             keys={"history": []})
 
         downstream(tmp, "downstream identical results PASS",
                    "simple/hadoop-common\tg:a:jar:1.0:compile\n",
@@ -458,6 +542,33 @@ def main():
                {**caught, "ancestry.json": "FAIL"}, "FAIL", 1, broken=True)
         report(tmp, "report a broken candidate nothing catches exits 1",
                all_pass, "PASS", 1, broken=True)
+
+        # T17: a ticket's rule must match in its own tree; nothing may be
+        # UNEXPECTED in any tree.
+        rule = "dist-file-added org/example/.*  # HADOOP-20012 changes this\n"
+        attribution(tmp, "attribution a ticket rule unused in its own tree FAILs",
+                    {"ticket-1": {
+                        "artifact-diff.json": artifact_json(
+                            unused=["line 1: dist-file-added org/example/.*"]),
+                        "api-compat.json": api_json(),
+                        "downstream-compare.json": downstream_json()}},
+                    "FAIL", 1, rules={"expected-differences.txt": rule},
+                    contains="HADOOP-20012 rule unused in its own tree")
+        attribution(tmp, "attribution an UNEXPECTED difference in a prefix tree FAILs",
+                    {"prefix-2": {
+                        "artifact-diff.json": artifact_json(
+                            unexpected=1,
+                            diffs=[{"kind": "dist-file-added",
+                                    "subject": "org/example/x",
+                                    "status": "UNEXPECTED"}]),
+                        "api-compat.json": api_json(),
+                        "downstream-compare.json": downstream_json()}},
+                    "FAIL", 1, contains="UNEXPECTED dist-file-added org/example/x")
+        result = attribution(tmp, "attribution all trees matched PASS",
+                             {"ticket-1": matched_tree(), "prefix-2": matched_tree()},
+                             "PASS", 0, rules={"expected-differences.txt": rule})
+        expect("attribution all trees matched: no problems",
+               [p for t in result["trees"] for p in t["problems"]], [])
     print("test_comparators: ok")
 
 

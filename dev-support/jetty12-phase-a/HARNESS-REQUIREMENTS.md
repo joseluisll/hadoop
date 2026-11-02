@@ -205,7 +205,9 @@ response"); each group names the files it comes from.
   jar's version is not part of the comparison. Classes loaded on one side
   only are counted per daemon and listed, with the daemon and the side, in
   the end-to-end section (`one_side_classes` in `e2e-compare-<arch>.json`);
-  Impact on users gives their count per side. They do not fail the run (T3).
+  Impact on users gives their count per side. Each is matched against a
+  `classonly` rule (R87); an unexpected one fails the run only with
+  `CLASSONLY_FAIL=true`. *Formerly T3.*
 - **R39.** All daemon logs, `.out` files, container logs and scenario logs
   are scanned for class-loading, linkage and JAX-RS provider errors
   (`NoClassDefFoundError`, `ClassNotFoundException`, `NoSuchMethodError`,
@@ -323,7 +325,8 @@ response"); each group names the files it comes from.
   may contain `#`.
 - **R62.** End-to-end rule kinds: `obs` (excuses a DIFF, a REGRESSION or a
   MISSING), `obsdiff` (a DIFF only), `obsfield` (a DIFF when every differing
-  JSON path matches a rule), `classjar` (`<daemon>:<class>`) and `logscan`
+  JSON path matches a rule), `classjar` (`<daemon>:<class>`), `classonly`
+  (`<daemon>:<class>`, a class loaded on one side only, R87) and `logscan`
   (`<source>:<message>`).
 - **R63.** Every rule names the ticket that causes the difference, and
   patterns are kept narrow: limited to the entries the patch is meant to
@@ -468,11 +471,102 @@ response"); each group names the files it comes from.
   HADOOP-19970 `classjar` rule's `[a-z]+` missed `nn1`, `jn2`, `rm1`,
   `router2`, `nmsc1`, ... and failed ha-run-3, mixed-run-4 and
   federated-run-5), and exits 1 when a rule matched nothing. *Formerly T6.*
+- **R84.** In the `secure` architecture, the MapReduce scenario submits jobs
+  with `-D hadoop.security.authorization=false` in the job's own configuration
+  (`MR_SEC_OPTS` in `e2e/scenarios/50-mapreduce.sh`), because MAPREDUCE-7548
+  makes the AM reject its tasks' umbilical calls: `TaskUmbilicalProtocolPB`
+  declares protocol name `org.apache.hadoop.mapred.TaskUmbilicalProtocol`, but
+  `MRAMPolicyProvider` registers the ACL under `TaskUmbilicalProtocolPB`. The
+  AM reads `hadoop.security.authorization` from the job's configuration
+  (`TaskAttemptListenerImpl.java:180-183`, `MRClientService.java:136-139`), so
+  turning it off skips the AM's ACL check only; the daemons keep it on from
+  `core-site.xml`. A control job without the override is expected to fail
+  (`--expect-rc 1`), so the harness notices when the bug is fixed.
+  *Formerly T8.*
+- **R85.** The unit comparison reports the flaky history of the tests that
+  fail or are flaky in a run: `compare_unit.py --history DIR` (repeatable)
+  reads each earlier run's `unit-compare.json`, and for every test that is
+  fail or flaky on either side in this run, its report says in how many of
+  those runs it was fail or flaky on each side. `ci/history.sh <repo>
+  <workflow file name> <arch> <dest dir>` downloads the `report-<arch>`
+  artifact of the last five completed normal runs of that workflow (branch
+  `jetty12-phase-a-<arch>-run-<N>`: no aa or broken run, which fail tests on
+  purpose) other than the current one into `<dest dir>/<run id>`, skipping a
+  run without the artifact; `compare.sh` passes every sub-directory of `UNIT_HISTORY_DIR`
+  as `--history` when it is set. It does not change the verdict; a test
+  flaky on the baseline and failing on
+  the candidate already fails as a regression. A run without history leaves
+  the section out. *Formerly T11.*
+- **R86.** In `ha`, `mixed` and `federated`, both sides set
+  `dfs.client.failover.random.order=false` in the HDFS configuration, so each
+  client tries the active namenode first. With the default `true`, a random
+  first choice sends some client requests to the standby, which deserializes
+  and loads their RPC classes there before rejecting them; the classes then
+  appear in the one-side-only class view (R38) as noise. It does not change
+  what the scenarios check: failover itself is driven by them. *Formerly T25.*
+- **R87.** A class loaded on one side only is an end-to-end difference of kind
+  `classonly <daemon>:<class>` in `e2e/expected-e2e-differences.txt`. The
+  comparison matches every entry in `one_side_classes` against the rules and
+  records the rule that accepted it (`expected`) and its reason (`reason`).
+  With `CLASSONLY_FAIL=false` (the default), an unexpected one-side class is
+  listed and counted as "would fail with CLASSONLY_FAIL=true" without changing
+  the verdict; with `CLASSONLY_FAIL=true`, an unexpected one-side class fails
+  the end-to-end check. In CI the Compare step of `tmpl_jetty12_phase_a.yml`
+  sets it, to `false` until the owner turns it on. The rules cover the
+  timeline server's JSON writer classes, chosen at random at each start
+  (YARN-12030), and the Servlet 4.0 types HADOOP-19970's bytecode verifier
+  loads while linking the 4.0
+  `HttpServletRequest` and `HttpServletRequestWrapper`
+  (`javax.servlet.http.HttpServletMapping`, `javax.servlet.http.PushBuilder`).
+  Replay (R80) matches `classonly` rules, including in old reports, through
+  `classload-compare-<arch>.json` when `one_side_classes` is absent.
+  *Formerly T10 with T3.*
+- **R88.** In `federated`, the scenario submits a distributed-shell
+  application to sub-cluster sc1's resource manager directly, through the
+  sub-cluster's own client configuration (its `yarn.resourcemanager.address`
+  and the matching scheduler and web application addresses). The router's
+  REST listing must show it finished with `SUCCEEDED` (`router-apps-direct`),
+  its RPC listing must show it (`router-app-list-direct`), and it must be on
+  exactly one sub-cluster (`app-on-one-subcluster-direct`). The router finds
+  an application by id only through its home sub-cluster in the state
+  store, which only a submission through the router records
+  (`FederationInterceptorREST.getHomeSubClusterInfoByAppId`), so the reads by
+  id (`router-app-direct`, `router-app-state-direct`) are recorded with no
+  expected status and compared between the sides. The existing
+  router-submission checks are kept. This compares the router's read paths on
+  an application it did not submit (YARN-12024, YARN-12025).
+  *Formerly T9.*
+- **R89.** Per-ticket and merge-order runs, for checks 1, 2 and 5 only.
+  `attribution.sh list` prints the tree names: `ticket-<n>` for each PR
+  branch alone and `prefix-<n>` for each prefix of the merge order of length
+  2 to 5. `attribution.sh <tree>` creates the tree as a detached merge commit
+  in a worktree under `WORKDIR`, without creating a branch, sets
+  `CANDIDATE_REF`, and runs for that candidate what a normal run runs for
+  checks 1, 2 and 5: the build, the artifact diff, the API check and the
+  downstream check for both sides, writing the comparisons to
+  `results/attribution/<tree>/`. `lib/attribution.py` reads those
+  comparisons and checks that in a ticket tree every rule whose reason starts
+  with that branch's ticket matched at least once and that nothing is
+  UNEXPECTED, and that in a prefix tree nothing is UNEXPECTED; it writes
+  `attribution.json` and `attribution.md` and exits 1 when it fails. The
+  branches and order come from `PR_ORDER` in `lib/compare_plan.py`. The
+  fork-only workflow `jetty12_phase_a_attribution.yml` starts on a push to
+  `jetty12-phase-a-attribution-run-*` and runs one job per tree. In CI the
+  steps run apart: `attribution.sh merge <tree>` creates the tree and sets
+  `CANDIDATE_REF`, and `attribution.sh compare <tree>` runs the comparisons
+  once both sides are built. The baseline is built once per run, in its own
+  job, and each tree job builds only its candidate; both reuse a saved build
+  of the same code (R73's keys, with `BUILD_NATIVE` and `BUILD_IMAGE` as the
+  template's build job sets them, through
+  `.github/actions/jetty12-phase-a-build-side`), so the baseline a normal run
+  saved is not built again. *Formerly T17.*
 
 ## TO-BE: identified improvements
 
-Identified during the runs and reviews up to 2026-11-01; none is
-implemented yet. Each says where it came from.
+Identified during the runs and reviews up to 2026-11-01. T7, T21 and T24 are
+done in the rule files; T3, T8, T9, T10, T11, T17, T20 and T25 are done as
+requirements (each entry says which); the rest are not implemented yet. Each
+says where it came from.
 
 - **T1. Raw-request scenarios.** `probe.py raw` (R31) is not used by any
   scenario yet. Add raw requests to `10-web-common` against every web server:
@@ -493,9 +587,10 @@ implemented yet. Each says where it came from.
   no longer initializes) or starts loading another library goes unreported.
   Report them per daemon in the end-to-end section and Impact on users,
   after masking the known noise (T10). Owner's decision (2026-11-02): report
-  them now; they fail without a rule only once T10 and T25 are done. The
-  report part is done (R38, 2026-11-02); what remains is the evidence part
-  (step 2), and failing without a `classonly` rule (step 4).
+  them now; they fail without a rule only once T10 and T25 are done. Done as R87:
+  the report part (R38, 2026-11-02) and the failing part behind the
+  `CLASSONLY_FAIL` switch; the switch is turned on by the owner after a run
+  batch. The evidence part remains in step 2.
   *Source: requirement extraction from
   `lib/compare_e2e.py`; secure-run-8 timeline server.*
 
@@ -537,27 +632,27 @@ implemented yet. Each says where it came from.
   API under SPNEGO are compared nowhere. Find a harness-side configuration
   that lets the jobs run (for example an ACL entry the MR AM's policy provider
   accepts) while MAPREDUCE-7548 is open, so these checks compare something.
-  *Source: secure-run-4, -6, -8, -9.*
+  Done as R84. *Source: secure-run-4, -6, -8, -9.*
 - **T9. YARN federation application checks.** In `federated`, 9 observations
   fail on both sides (YARN-12024, YARN-12025); `router-app`,
   `router-app-state`, `router-app-status` and `app-on-one-subcluster` read
   back an application that could not be submitted through the router. Submit
   the application to one sub-cluster's RM directly and read it back through
-  the router, so the router's read paths are compared.
+  the router, so the router's read paths are compared. Done as R88.
   *Source: federated-run-5.*
 - **T10. Timeline server class-load noise.** The timeline server loads either
   Jettison/JAXB or Jackson classes depending on the writer chosen at start-up
   (YARN-12030); its classes loaded on one side only flip between runs
   (secure-run-6 and secure-run-8 in opposite directions). Mask these classes,
   as the observations already are (`obsdiff`), so T3 can report the rest.
-  *Source: secure-run-8.*
+  Done as R87. *Source: secure-run-8.*
 - **T11. Flaky test history.** `TestHttpServer2Metrics#testHttpServer2Metrics`
   (a race in the test, pre-existing) was flaky in three runs, and other tests
   appear flaky in single runs (`TestBlockTokenWithDFSStriped#testEnd2End`,
   `TestFederationInterceptor#testRecover*`, `TestRouterRpc#testNamenodeMetrics`).
   Keep a record of flaky tests across runs in the report, so a test that turns
   flaky only on the candidate stands out. The `TestHttpServer2Metrics` race
-  itself is a Hadoop fix, outside the harness.
+  itself is a Hadoop fix, outside the harness. Done as R85.
   *Source: simple runs 14 to 16, federated-run-6, secure-run-9.*
 
 The next items come from analysing the AS-IS requirements against what
@@ -602,7 +697,7 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   (trunk plus one ticket's upstream branch) and runs for each prefix of the
   merge order, limited to checks 1, 2 and 5 (no cluster), and require each
   ticket's rules to match in its own run. Owner's decision (2026-11-02): yes,
-  for checks 1, 2 and 5 only. *Source: requirements analysis.*
+  for checks 1, 2 and 5 only. Done as R89. *Source: requirements analysis.*
 - **T18. Verify `announced:`.** `announced:` is free text (R64); a release
   note can change after the rule is written (HADOOP-19970's was rewritten
   twice). For `announced: <JIRA> release note`, read the JIRA's release note
@@ -685,7 +780,7 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   one-side-only class view of T3. Set `dfs.client.failover.random.order=false`
   in the configurations of `ha`, `mixed` and `federated`, so both sides send
   client requests to the active namenode first. It does not change what the
-  scenarios check: failover itself is driven by the scenarios.
+  scenarios check: failover itself is driven by the scenarios. Done as R86.
   *Source: ha-run-5; `hdfs-default.xml`.*
 
 Withdrawn after review: "extract the text of XML error bodies". The probe
@@ -770,19 +865,19 @@ replayed with R80).
 
 ### Step 3: attribution
 
-- T17: per-ticket and merge-order runs, checks 1, 2 and 5 only.
+- T17 is done as R89: per-ticket and merge-order runs, checks 1, 2 and 5 only.
 - T18 is not automated (owner's decision).
 
 ### Step 4: pre-existing holes in coverage
 
-- T10 and T25, then T3: mask the timeline server's class-load noise and make
-  the client failover order deterministic, then fail on a class loaded on
-  one side only that no `classonly` rule accepts (they are already listed,
-  R38).
-- T11: flaky test history.
-- T8 and T9: MapReduce under Kerberos and the YARN federation application
-  checks. They cost more; they restore coverage that is now zero, but not
-  specific to these tickets.
+- T10 and T25, then T3: done as R87 (T10 and T3) and R86 (T25). The timeline
+  server's class-load noise is masked and the client failover order is
+  deterministic.
+- T11 is done (R85): the unit comparison reports the flaky history of the
+  tests that fail or are flaky in a run.
+- T9 is done as R88: the YARN federation application checks submit to a
+  sub-cluster's RM directly and read the application back through the router.
+  T8 is done (R84).
 
 ### Before phase B
 

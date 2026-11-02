@@ -89,8 +89,16 @@ done
 [[ -n "${archs// /}" ]] || log "no architecture ran end to end"
 
 if [[ -d "${B}/unit" && -d "${C}/unit" ]]; then
+  # T11: each earlier run's report directory, when UNIT_HISTORY_DIR names them.
+  history_args=()
+  if [[ -n "${UNIT_HISTORY_DIR:-}" ]]; then
+    for d in "${UNIT_HISTORY_DIR}"/*; do
+      [[ -d "${d}" ]] && history_args+=(--history "${d}")
+    done
+  fi
   python3 -I "${HARNESS_DIR}/lib/compare_unit.py" --out "${OUT}" \
-    --expected "${HARNESS_DIR}/expected-unit-differences.txt" "${B}/unit" "${C}/unit" || true
+    --expected "${HARNESS_DIR}/expected-unit-differences.txt" "${history_args[@]}" \
+    "${B}/unit" "${C}/unit" || true
 else
   log "skipping unit test comparison: both sides must have run unit-tests.sh"
 fi

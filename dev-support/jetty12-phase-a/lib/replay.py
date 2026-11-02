@@ -49,8 +49,8 @@ def e2e_matches(allow, compare_dir):
     """Match every end-to-end rule the comparison would, in its order
     (lib/compare_e2e.py): 'obs' excuses a DIFF, a REGRESSION or a MISSING;
     'obsdiff' a DIFF; 'obsfield' a DIFF when every differing field matches; a
-    class loaded from a different jar is 'classjar'; an error only the
-    candidate logs 'logscan'."""
+    class loaded from a different jar is 'classjar'; a class loaded on one side
+    only is 'classonly'; an error only the candidate logs 'logscan'."""
     for path in sorted(glob.glob(os.path.join(compare_dir, "e2e-compare-*.json"))):
         d = load(path)
         if not d or "rows" not in d:
@@ -72,6 +72,17 @@ def e2e_matches(allow, compare_dir):
                 allow.match("obsfield", r["key"] + p)
         for m in d.get("class_jar_moves", []):
             allow.match("classjar", f"{m['daemon']}:{m['class']}")
+        # A report written before 'one_side_classes' was recorded has the same
+        # lists in classload-compare-<arch>.json (only_baseline/only_candidate).
+        one = d.get("one_side_classes")
+        if one is None:
+            cl = load(os.path.join(compare_dir, f"classload-compare-{d.get('arch', '')}.json"))
+            one = [{"daemon": daemon, "side": side, "class": c}
+                   for daemon, r in (cl or {}).items()
+                   for side in ("baseline", "candidate")
+                   for c in r.get(f"only_{side}", [])]
+        for x in one:
+            allow.match("classonly", f"{x['daemon']}:{x['class']}")
         for e in d.get("new_log_errors", []):
             allow.match("logscan", f"{e['source']}:{e['message']}")
 

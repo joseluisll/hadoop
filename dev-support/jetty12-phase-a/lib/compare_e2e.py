@@ -236,6 +236,21 @@ def main():
     # Errors in logs that only the candidate has, or has far more often.
     new_errors = log_errors(allow, a.baseline, a.candidate)
 
+    # T3: match every class loaded on one side only against a classonly rule.
+    # With the switch off, unexpected ones are listed and counted but do not
+    # fail the run; with CLASSONLY_FAIL=true they fail it (the owner turns the
+    # switch on after a run batch shows what is left).
+    one_side = []
+    for d, r in sorted(cl.items()):
+        for side in ("baseline", "candidate"):
+            for c in r[f"only_{side}"]:
+                rule = allow.match("classonly", f"{d}:{c}")
+                one_side.append({"daemon": d, "side": side, "class": c,
+                                 "expected": bool(rule),
+                                 "reason": rule and rule["reason"]})
+    unexpected_one_side = [x for x in one_side if not x["expected"]]
+    classonly_fail = os.environ.get("CLASSONLY_FAIL", "false").lower() == "true"
+
     counts = {}
     for r in rows:
         counts[r["class"]] = counts.get(r["class"], 0) + 1
@@ -248,6 +263,8 @@ def main():
         "new_log_errors": [e for e in new_errors if not e["expected"]],
         "duplicate_ids": sorted(dups_b | dups_c),
     }
+    if classonly_fail:
+        blocking["unexpected_one_side_classes"] = unexpected_one_side
     verdict = "PASS" if not any(blocking.values()) else "FAIL"
     result = {
         "verdict": verdict, "counts": counts,
@@ -260,11 +277,10 @@ def main():
                           "only_candidate": len(r["only_candidate"]),
                           "different_jar": len(r["different_jar"])}
                       for d, r in cl.items()},
-        # T3, reported without failing until T10 and T25 mask the known noise.
-        "one_side_classes": [{"daemon": d, "side": side, "class": c}
-                             for d, r in sorted(cl.items())
-                             for side in ("baseline", "candidate")
-                             for c in r[f"only_{side}"]],
+        # T3: one-side classes, matched against classonly rules. The counts say
+        # how many a rule accepts and how many would fail with CLASSONLY_FAIL.
+        "one_side_classes": one_side,
+        "classonly_fail": classonly_fail,
         "unused_rules": [f"line {r['line']}: {r['kind']} {r['pattern']}"
                          for r in allow.rules if r["hits"] == 0],
     }
@@ -320,6 +336,15 @@ def write_markdown(path, result, blocking):
                 for r in items:
                     f.write(f"| `{r['key']}` | {(r['detail'] or '').replace('|', '/')} |\n")
                 f.write("\n")
+        unexpected_one = blocking.get("unexpected_one_side_classes", [])
+        if unexpected_one:
+            f.write(f"### Unexpected one-side classes ({len(unexpected_one)})\n\n"
+                    "CLASSONLY_FAIL=true: these fail the run. With the switch off they are "
+                    "only listed below, as would fail.\n\n"
+                    "| Daemon | Loaded on | Class |\n|---|---|---|\n")
+            for x in unexpected_one:
+                f.write(f"| {x['daemon']} | {x['side']} only | `{x['class']}` |\n")
+            f.write("\n")
         if blocking["duplicate_ids"]:
             f.write("### Observation ids recorded more than once\n\nEach id must be unique; "
                     "the later record hides the earlier one.\n\n")
@@ -347,16 +372,22 @@ def write_markdown(path, result, blocking):
             f.write(f"| {d} | {r['baseline_classes']} | {r['candidate_classes']} | "
                     f"{r['only_baseline']} | {r['only_candidate']} | {r['different_jar']} |\n")
         f.write("\nA class loaded from a different jar must be in the allowlist. A class "
-                "loaded on one side only is listed below without failing (T3): some depend on "
-                "timing, such as the timeline server's JSON writer (T10) and the client's "
-                "random failover order (T25); the rest is a feature that no longer, or newly, "
-                "initializes.\n\n")
+                "loaded on one side only is listed below; a classonly rule may accept it "
+                "(T3). Unexpected one-side classes fail the run only with "
+                "CLASSONLY_FAIL=true; with the switch off they are listed and counted as "
+                "would fail with CLASSONLY_FAIL=true. Some depend on timing, such as the "
+                "timeline server's JSON writer (T10) and the client's random failover "
+                "order (T25); the rest is a feature that no longer, or newly, initializes.\n\n")
         one = result["one_side_classes"]
         if one:
-            f.write(f"<details><summary>Classes loaded on one side only ({len(one)})"
-                    "</summary>\n\n| Daemon | Loaded on | Class |\n|---|---|---|\n")
+            accepted = sum(1 for x in one if x.get("expected"))
+            unexpected = len(one) - accepted
+            f.write(f"<details><summary>Classes loaded on one side only ({len(one)}: "
+                    f"{accepted} accepted, {unexpected} would fail with CLASSONLY_FAIL=true)"
+                    "</summary>\n\n| Daemon | Loaded on | Class | Rule |\n|---|---|---|---|\n")
             for x in one:
-                f.write(f"| {x['daemon']} | {x['side']} only | `{x['class']}` |\n")
+                f.write(f"| {x['daemon']} | {x['side']} only | `{x['class']}` | "
+                        f"{x['reason'] or '**would fail with CLASSONLY_FAIL=true**'} |\n")
             f.write("\n</details>\n\n")
         moves = result["class_jar_moves"]
         if moves:
