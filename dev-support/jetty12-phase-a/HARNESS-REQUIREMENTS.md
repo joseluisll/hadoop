@@ -791,10 +791,14 @@ empty `error_text` all have an empty body (`jmx-trace`, `conf-bad-name`,
 ## Next plan
 
 Proposed course of action (2026-11-01); the owner took the step 0
-decisions on 2026-11-02. The requirements document comes first: no harness process or allowlist rule changes until the
-step that covers it. In step 1, T5, T6 and T16 are implemented (R78 to R80)
-and the verdict defects of the review of 2026-11-02 are fixed (R41, R45, R54);
-T24 is done and T20 is decided. The next work is step 2.
+decisions on 2026-11-02. The requirements document comes first: no harness
+process or allowlist rule changes until the step that covers it. Steps 0 and
+1 are done. Steps 3 and 4 were implemented on 2026-11-02 (commit
+`9092fb6ebf7` on `feat/HARNESS`: R84 to R89), checked locally (comparator
+and probe self-tests, the replay of the five latest reports, an in-memory
+merge of every attribution tree), but not yet run in CI or on a cluster.
+The next work is step 2a, then step 2, in the order that closes HADOOP-19970
+first.
 
 ### Step 0: requirements and decisions (document only)
 
@@ -850,34 +854,64 @@ Done: T20 as R83 (a failing candidate-only test fails the run unless a
 rule accepts it as a known flake), and T24, the job-counter rule's reason (with the owner's agreement,
 replayed with R80).
 
+### Step 2a: run what steps 3 and 4 added (needs the owner's OK to push)
+
+One batch on `9092fb6ebf7` or later: the five architectures
+(`jetty12-phase-a-<arch>-run-N`), one A/A run and two broken-candidate runs
+(R69), and the first attribution run
+(`jetty12-phase-a-attribution-run-1`). Each must pass. Read from it:
+
+- R84: in `secure`, the MapReduce jobs compare and `control-job` fails on
+  both sides; note how long the control job takes to fail.
+- R85: the unit report has the flaky history section.
+- R86 and R87: how many one-side classes are left without a `classonly` rule
+  ("would fail with CLASSONLY_FAIL=true"). When none are left, or each left
+  has a rule, the owner sets `CLASSONLY_FAIL: "true"` in the template's
+  Compare step: the failing part of T3.
+- R88: in `federated`, `router-apps-direct`, `router-app-list-direct` and
+  `app-on-one-subcluster-direct` pass on both sides.
+- R89: every tree's verdict, and whether the baseline was reused instead of
+  built (the tree jobs' logs). `ticket-6` is HADOOP-19970 alone: every
+  HADOOP-19970 rule must match there, which proves the rules belong to it.
+
 ### Step 2: detection gaps for phase A and HADOOP-19970
 
-- T12: compare the published POMs.
-- T13: add the downstream artifacts the tickets touch.
-- T14: class loading in container JVMs.
-- T15: LICENSE and NOTICE consistency.
-- T1 with T19: raw-request scenarios, including HTTP/1.0.
-- T22: the servlet behaviour probe.
-- T3, evidence part: keep the raw class-load and class-resolution lines of
-  the classes loaded on one side only (its reporting part stays in step 4).
-- T23: list the API a replaced jar makes available.
-- T4: report the new probe fields.
+In this order: the first four bear on what HADOOP-19970 changes (its
+dependency declarations, its LICENSE and NOTICE entries, the servlet API at
+run time, the API it makes available), and the static ones need no cluster.
 
-### Step 3: attribution
+1. T12 and T15, static checks on the artifacts: the published POMs, then
+   LICENSE and NOTICE consistency.
+2. T23: list the API the replaced servlet API jar makes available, for the
+   HADOOP-19970 release note.
+3. T22 with T19: the servlet behaviour probe, including the default answers
+   over HTTP/1.0.
+4. T14: class loading in container JVMs.
+5. Then the rest, which bears on phase A as a whole:
+   - T13: add the downstream artifacts the tickets touch.
+   - T1: the other raw-request scenarios.
+   - T3, evidence part: keep the raw class-load and class-resolution lines
+     of the classes loaded on one side only (its reporting part is done,
+     R87).
+   - T4: report the new probe fields.
+
+### Step 3: attribution (implemented, not yet run: step 2a)
 
 - T17 is done as R89: per-ticket and merge-order runs, checks 1, 2 and 5 only.
 - T18 is not automated (owner's decision).
 
-### Step 4: pre-existing holes in coverage
+### Step 4: pre-existing holes in coverage (implemented, not yet run: step 2a)
 
 - T10 and T25, then T3: done as R87 (T10 and T3) and R86 (T25). The timeline
   server's class-load noise is masked and the client failover order is
   deterministic.
 - T11 is done (R85): the unit comparison reports the flaky history of the
   tests that fail or are flaky in a run.
-- T9 is done as R88: the YARN federation application checks submit to a
-  sub-cluster's RM directly and read the application back through the router.
-  T8 is done (R84).
+- T9 is done as R88: an application submitted to a sub-cluster's RM
+  directly is checked through the router's REST and RPC listings. The router
+  finds an application by id only through the state store, which only a
+  submission through the router fills, so the reads by id are recorded and
+  compared without an expectation. T8 is done (R84).
 
 ### Before phase B
 

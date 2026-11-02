@@ -15,12 +15,17 @@
 # Jetty 12 migration plan (HADOOP-19912)
 
 All status in this document was read from JIRA, GitHub and the fork on
-2026-11-01, against trunk at `57f78d283ae`. It is a snapshot: JIRA and the PRs
+2026-11-02 (the PRs, Yetus and Build) and 2026-11-01 (the rest), against
+trunk at `57f78d283ae`. It is a snapshot: JIRA and the PRs
 are the source of truth. PR numbers are `apache/hadoop` PRs.
 
 **Where it stands:** none of the 17 subtasks is resolved, nothing is merged,
 and no PR in the series has an approval. The code for every subtask exists.
-The next bottleneck is review, starting with HADOOP-20012.
+The next bottleneck is review, starting with HADOOP-20012. Stages 1 and 2 have
+no red result left that the patches cause: what remains is `test4tests` on
+pom-only changes, trunk's SpotBugs debt, Yetus runs to repeat, and
+HADOOP-19970's `TestJettyClasspath`, which passes once HADOOP-20014 merges.
+See [HADOOP-19970: what it needs to merge](#hadoop-19970-what-it-needs-to-merge).
 
 ## Goal
 
@@ -83,13 +88,13 @@ the patch.
 
 | Ticket | JIRA status | Assignee | PR | Yetus | On head? | Build | Approval |
 |---|---|---|---|---|---|---|---|
-| [HADOOP-20012](https://issues.apache.org/jira/browse/HADOOP-20012) | In Progress | Jose Luis López | [#8890](https://github.com/apache/hadoop/pull/8890) | -1, 10-31 | Yes | Pass | None |
-| [HADOOP-20014](https://issues.apache.org/jira/browse/HADOOP-20014) | In Progress | Jose Luis López | [#8892](https://github.com/apache/hadoop/pull/8892) | -1, 10-31 | No | Fail | None |
-| [HADOOP-20013](https://issues.apache.org/jira/browse/HADOOP-20013) | In Progress | Jose Luis López | [#8891](https://github.com/apache/hadoop/pull/8891) | -1, 10-31 | Yes | Pass | None |
-| [HADOOP-20015](https://issues.apache.org/jira/browse/HADOOP-20015) | In Progress | Jose Luis López | [#8893](https://github.com/apache/hadoop/pull/8893) | +1, 10-31 | Yes | Pass | None |
-| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | +1, 10-31 | Yes | Pass | None |
-| [HADOOP-19970](https://issues.apache.org/jira/browse/HADOOP-19970) | In Progress | Jose Luis López | [#8699](https://github.com/apache/hadoop/pull/8699), draft | -1, 11-01 | Yes | Fail | None |
-| [HADOOP-20049](https://issues.apache.org/jira/browse/HADOOP-20049) | Open | Jose Luis López | [#8903](https://github.com/apache/hadoop/pull/8903) | -1, 10-31 | No | Running | None |
+| [HADOOP-20012](https://issues.apache.org/jira/browse/HADOOP-20012) | In Progress | Jose Luis López | [#8890](https://github.com/apache/hadoop/pull/8890) | -1, 11-01 | Yes | Pass | None |
+| [HADOOP-20014](https://issues.apache.org/jira/browse/HADOOP-20014) | In Progress | Jose Luis López | [#8892](https://github.com/apache/hadoop/pull/8892) | -1, 11-02 | Yes | Pass | None |
+| [HADOOP-20013](https://issues.apache.org/jira/browse/HADOOP-20013) | In Progress | Jose Luis López | [#8891](https://github.com/apache/hadoop/pull/8891) | -1 (patch), 11-01 | Yes | Pass | None |
+| [HADOOP-20015](https://issues.apache.org/jira/browse/HADOOP-20015) | In Progress | Jose Luis López | [#8893](https://github.com/apache/hadoop/pull/8893) | -1 (patch), 11-01 | Yes | Pass | None |
+| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | -1 (patch), 11-01 | Yes | Pass | None |
+| [HADOOP-19970](https://issues.apache.org/jira/browse/HADOOP-19970) | In Progress | Jose Luis López | [#8699](https://github.com/apache/hadoop/pull/8699), draft | -1, 11-02 | Yes | Fail | None |
+| [HADOOP-20049](https://issues.apache.org/jira/browse/HADOOP-20049) | Open | Jose Luis López | [#8903](https://github.com/apache/hadoop/pull/8903) | -1, 11-01 | Yes | Pass | None |
 | [HADOOP-20003](https://issues.apache.org/jira/browse/HADOOP-20003) | Open | None | No PR | - | - | - | - |
 | [HADOOP-20005](https://issues.apache.org/jira/browse/HADOOP-20005) | Open | None | No PR | - | - | - | - |
 | [HADOOP-20004](https://issues.apache.org/jira/browse/HADOOP-20004) | Open | None | No PR | - | - | - | - |
@@ -106,21 +111,24 @@ The tickets without a PR have their commit staged on the fork (tag
 
 ### What the red results mean
 
-- **#8890 (20012):** `test4tests` only. It is a pom change with no test.
-- **#8891 (20013):** branch-side SpotBugs only: trunk's 80 existing warnings.
-  The patch-side SpotBugs row passes.
-- **#8892 (20014):** the Yetus `test4tests` vote is from before trunk was
-  merged into the branch on 2026-11-01. The Build check failed after that
-  merge. Its cause is not identified: the fork run had no conclusion when read.
-- **#8699 (19970):** branch-side SpotBugs, as above, and unit failures. In
-  both Yetus and Build, the failures seen are `TestJettyClasspath`, expected
-  until 20014 merges. Yetus also failed `TestCapacityOverTimePolicy`, probably
-  YARN-12023 ([#8814](https://github.com/apache/hadoop/pull/8814)); that link
-  is not confirmed. Reviewers pjfanning and pan3793 commented earlier; the PR
+- **#8890 (20012):** `test4tests` only, on the current head. It is a pom
+  change with no test.
+- **#8891, #8893, #8894 (20013, 20015, 20016):** the last Yetus run, at
+  21:20 on 2026-11-01, three minutes after the heads were pushed, says the
+  patch "does not apply to trunk". GitHub reports all three mergeable and
+  their Build checks pass, so the run needs repeating; the cause is not
+  identified. Before that push, #8893 and #8894 had Yetus +1 and #8891 only
+  branch-side SpotBugs (trunk's 80 existing warnings).
+- **#8892 (20014):** `test4tests` only, on the current head (2026-11-02).
+  The Build check now passes; the earlier failure after the trunk merge did
+  not come back.
+- **#8699 (19970):** branch-side SpotBugs, as above, and four unit failures,
+  all `TestJettyClasspath` (mapred, nodemanager, applicationhistoryservice,
+  yarn-common), expected until 20014 merges. `TestCapacityOverTimePolicy`
+  no longer fails. Reviewers pjfanning and pan3793 commented earlier; the PR
   was then split into 20012 to 20016.
-- **#8903 (20049):** `test4tests`, plus `TestNameNodeMXBean`, in a file the patch
-  does not touch. The PR was rebased on trunk on 2026-11-01 and its checks are
-  re-running.
+- **#8903 (20049):** `test4tests` only, on the current head; the
+  `TestNameNodeMXBean` failure did not come back after the rebase.
 - **#8704 (19972):** branch-side SpotBugs, as above, and one unit failure,
   `TestSSLHttpServerMTLS`, a known intermittent test (HADOOP-19997,
   [#8783](https://github.com/apache/hadoop/pull/8783)). This run is the full
@@ -263,20 +271,80 @@ on any difference that no rule accepts. See `README.md` and
   the baseline and its change against the PR branches are checked before
   anything is compared, and the run stops when either check fails (R78 to R80
   in the requirements; formerly T5, T16 and T6).
+- **Added on 2026-11-02, not yet run in CI** (`feat/HARNESS` at
+  `9092fb6ebf7`, R84 to R89): MapReduce under Kerberos compares real jobs
+  despite MAPREDUCE-7548, with a control job that notices when the fix
+  lands; classes loaded on one side only are matched against rules, and can
+  fail the run behind a switch; deterministic HDFS client failover; flaky
+  test history from earlier runs; YARN federation checks on an application
+  submitted to a sub-cluster directly; and attribution runs, which check
+  artifacts, API and downstream resolution for each PR branch alone and for
+  each prefix of the merge order. The attribution run's `ticket-6` tree is
+  HADOOP-19970 alone, which shows which accepted differences are its own.
 
 Its own "phase A" means 20012 to 20016 with 19970, and its "phase B" means the
 Jetty upgrade, HADOOP-19972. Neither is the branch `jetty-phase-b`, which is
 HADOOP-19971, nor the phases of HADOOP-19395.
+
+## HADOOP-19970: what it needs to merge
+
+HADOOP-19970 can merge when all of these hold:
+
+1. **Its prerequisites are in trunk:** 20012, 20014, 20013, 20015 and 20016,
+   in that order. Its own JIRA blockers (MAPREDUCE-7545, HADOOP-19979,
+   YARN-12004, YARN-12005) are all resolved; the link "blocked by
+   HADOOP-20014" is not made yet.
+2. **Its PR is green on its head:** rebased on that trunk, the Build check
+   passes and Yetus has no -1 the patch causes. `TestJettyClasspath` passes
+   once 20014 is in; branch-side SpotBugs is trunk's debt and is explained on
+   the PR.
+3. **The harness passes on it** (`dev-support/jetty12-phase-a`):
+   - all five architectures pass on the candidate, with the A/A and
+     broken-candidate runs green;
+   - the attribution run passes: in `ticket-6` (HADOOP-19970 alone) every
+     HADOOP-19970 rule matches and nothing is unexpected, and every prefix
+     tree passes;
+   - the detection gaps that bear on what HADOOP-19970 changes are closed:
+     published POMs (T12), LICENSE and NOTICE consistency (T15), the servlet
+     behaviour probe with the HTTP/1.0 default answers (T22, T19), the API
+     the new servlet API jar makes available (T23), and class loading in
+     container JVMs (T14).
+4. **Its release note** says what users see: the servlet API coordinate
+   changes from `javax.servlet:javax.servlet-api` 3.1.0 to
+   `org.eclipse.jetty.toolchain:jetty-servlet-api` 4.0.9 with the
+   `javax.servlet` packages unchanged, the Servlet 4.0 types and methods that
+   become available (from T23), and every accepted user-visible difference of
+   its own whose rule says `announced: HADOOP-19970 release note`, checked by
+   hand (T18).
+5. **A committer approves the PR.**
+
+### Course of action
+
+1. **Run what the harness gained** (owner's OK to push the run branches):
+   the five architectures, the A/A and two broken-candidate runs, and
+   `jetty12-phase-a-attribution-run-1`. Settle what they show; turn on
+   `CLASSONLY_FAIL` once no unexpected one-side class is left.
+2. **Repeat Yetus on #8891, #8893 and #8894**, whose last run could not apply
+   the patch, so that all five stage 1 PRs show only `test4tests` or trunk's
+   SpotBugs. Then ask for review of #8890 first, as pjfanning asked.
+3. **Close HADOOP-19970's detection gaps**, one implementation round each,
+   with all five architectures run after each: T12 and T15 (static, no
+   cluster), then T23, then T22 with T19, then T14.
+4. **Draft HADOOP-19970's release note** from the harness's Impact on users
+   and the T23 list, while stage 1 is in review.
+5. **When 20014 is in trunk:** rebase HADOOP-19970 on trunk, check Build and
+   Yetus on the new head, run the harness on it once more, mark #8699 ready
+   for review, and ask the earlier reviewers (pjfanning, pan3793).
+6. Then HADOOP-20049, which comes next in the merge order.
 
 ## Open items
 
 Owner's actions:
 
 1. Get reviews on #8890 to #8894, starting with #8890.
-2. Find out why the Build check failed on #8892.
+2. Repeat Yetus on #8891, #8893 and #8894.
 3. Send the `[DISCUSS]` mail on retiring the catalog, which decides between 20008
    and 19998.
-4. Identify the unit regression in `federated` run 7.
 
 JIRA changes not yet made:
 
