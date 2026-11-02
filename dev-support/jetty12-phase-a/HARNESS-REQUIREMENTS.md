@@ -406,7 +406,11 @@ response"); each group names the files it comes from.
   its report names the missing commits and the files they change. A change
   the candidate already has from a merge or cherry-pick counts as contained.
   A merge commit counts against its first parent, as a rebase would replay
-  it. Set `ANCESTRY_CHECK=false` to compare anyway. *Formerly T5.*
+  it. Set `ANCESTRY_CHECK=false` to compare anyway. In CI, the queue job runs
+  this check and R79 before it waits for its turn (`tree_checks` in
+  `lib/common.sh`), so a wrong candidate fails in minutes, not after the
+  builds; `compare.sh` runs both again on the refs as they are then, because
+  the baseline can move during the wait. *Formerly T5.*
 - **R79.** When `PR_BRANCHES` names the branches merged into trunk, in merge
   order, `compare.sh` also checks that the candidate's change against the
   baseline, without the harness and `.github/`, is exactly their combined

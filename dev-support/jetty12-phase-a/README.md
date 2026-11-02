@@ -140,7 +140,9 @@ skipped when the two sides resolve to the same commit: a self-comparison run
 (`jetty12-phase-a-<arch>-run-aa-*`, R68) has no patch, so the plan check would
 report every PR branch file as missing and stop the run before it compared
 anything. The workflow sets `PR_BRANCHES` for those runs too; the check is
-skipped all the same.
+skipped all the same. In CI the queue job runs both checks first, before it
+waits for its turn and before any build, and the run stops there when either
+fails; its summary holds their sections.
 
 The report starts with **Impact on users** (`lib/impact.py`), built from all
 the checks: for the daemons and applications on the Hadoop classpath, the

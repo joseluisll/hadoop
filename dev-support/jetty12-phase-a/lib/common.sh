@@ -99,6 +99,29 @@ checks_supported() {
   [[ -z "${b}" || -z "${c}" || "${b}" != "${c}" ]]
 }
 
+# tree_checks <out dir>: the ancestry and plan checks (R78, R79), each
+# writing its section into <out dir>. Returns 1 when the candidate is not the
+# tree to test. The workflow's queue job runs it before waiting for its turn,
+# and compare.sh again on the refs it compares.
+tree_checks() {
+  local out="$1" stop=0 b plan_args=()
+  if ! checks_supported; then
+    log "skipping the ancestry and plan checks: both sides are ${BASELINE_REF} (a self-comparison)"
+    return 0
+  fi
+  if [[ "${ANCESTRY_CHECK:-true}" == true ]]; then
+    python3 -I "${HARNESS_DIR}/lib/ancestry.py" --out "${out}" \
+      --baseline "${BASELINE_REF}" --candidate "${CANDIDATE_REF}" || stop=1
+  fi
+  if [[ -n "${PR_BRANCHES:-}" && "${PLAN_CHECK:-true}" == true ]]; then
+    # PR_BRANCHES: the branches merged into trunk, in merge order, comma-separated.
+    for b in ${PR_BRANCHES//,/ }; do plan_args+=(--branch "${b}"); done
+    python3 -I "${HARNESS_DIR}/lib/compare_plan.py" --out "${out}" \
+      --baseline "${BASELINE_REF}" --candidate "${CANDIDATE_REF}" "${plan_args[@]}" || stop=1
+  fi
+  return "${stop}"
+}
+
 ref_for_side() {
   if [[ "$1" == baseline ]]; then echo "${BASELINE_REF}"; else echo "${CANDIDATE_REF}"; fi
 }

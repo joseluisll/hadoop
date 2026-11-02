@@ -56,19 +56,7 @@ C=$(results_dir candidate)
 python3 -I "${HARNESS_DIR}/lib/test_comparators.py" || die "the comparators' self-check failed"
 
 stop=0
-if ! checks_supported; then
-  log "skipping the ancestry and plan checks: both sides are ${BASELINE_REF} (a self-comparison)"
-elif [[ "${ANCESTRY_CHECK:-true}" == true ]]; then
-  python3 -I "${HARNESS_DIR}/lib/ancestry.py" --out "${OUT}" \
-    --baseline "${BASELINE_REF}" --candidate "${CANDIDATE_REF}" || stop=1
-fi
-if checks_supported && [[ -n "${PR_BRANCHES:-}" && "${PLAN_CHECK:-true}" == true ]]; then
-  # PR_BRANCHES: the branches merged into trunk, in merge order, comma-separated.
-  plan_args=()
-  for b in ${PR_BRANCHES//,/ }; do plan_args+=(--branch "${b}"); done
-  python3 -I "${HARNESS_DIR}/lib/compare_plan.py" --out "${OUT}" \
-    --baseline "${BASELINE_REF}" --candidate "${CANDIDATE_REF}" "${plan_args[@]}" || stop=1
-fi
+tree_checks "${OUT}" || stop=1
 if (( stop )); then
   # || true: report.py exits 1 when the overall verdict is not PASS, which
   # set -e would turn into an exit before the reason below is logged.
