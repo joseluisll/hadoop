@@ -384,6 +384,45 @@ def main():
         plan(repo, "plan a branch that changes a file and a candidate with that change PASSes",
              "baseline", rev(repo), ["branch"], "PASS", 0)
 
+        repo = new_repo(tmp, "plan-landed")
+        commit(repo, "a.txt", "a\n", "a")
+        commit(repo, "b.txt", "b\n", "b")
+        root = rev(repo)
+        git(repo, "checkout", "-q", "-b", "landed", root)
+        commit(repo, "a.txt", "a2\n", "landed change")
+        git(repo, "checkout", "-q", "-b", "open", root)
+        commit(repo, "b.txt", "b2\n", "open change")
+        git(repo, "checkout", "-q", "-b", "baseline", root)
+        commit(repo, "c.txt", "c\n", "a later trunk commit")
+        git(repo, "merge", "-q", "--squash", "landed")
+        git(repo, "commit", "-q", "-m", "squash of landed")
+        git(repo, "checkout", "-q", "-b", "candidate", "baseline")
+        git(repo, "merge", "-q", "--no-ff", "-m", "merge open", "open")
+        plan(repo, "plan a branch squashed into the baseline is landed and PASSes",
+             "baseline", rev(repo), ["landed", "open"], "PASS", 0)
+        out = read_json(os.path.join(repo, "out",
+                                     "plan a branch squashed into the baseline is landed and PASSes",
+                                     "compare-plan.json"))
+        expect("plan names the squashed branch as landed",
+               [x["ref"] for x in out["landed"]], ["landed"])
+        git(repo, "checkout", "-q", "-b", "merged", root)
+        commit(repo, "d.txt", "d\n", "merged change")
+        git(repo, "checkout", "-q", "baseline")
+        git(repo, "merge", "-q", "--no-ff", "-m", "merge merged", "merged")
+        git(repo, "checkout", "-q", "candidate")
+        git(repo, "merge", "-q", "--no-ff", "-m", "merge baseline", "baseline")
+        plan(repo, "plan a branch merged into the baseline as commits PASSes",
+             "baseline", rev(repo), ["landed", "merged", "open"], "PASS", 0)
+        git(repo, "checkout", "-q", "-b", "partial", root)
+        commit(repo, "e.txt", "e\n", "partial e")
+        commit(repo, "f.txt", "f\n", "partial f")
+        git(repo, "checkout", "-q", "baseline")
+        git(repo, "cherry-pick", "partial~1")
+        git(repo, "checkout", "-q", "candidate")
+        git(repo, "merge", "-q", "--no-ff", "-m", "merge baseline", "baseline")
+        plan(repo, "plan a branch only partly in the baseline FAILs",
+             "baseline", rev(repo), ["partial", "open"], "FAIL", 1)
+
         all_pass = {"ancestry.json": "PASS", "artifact-diff.json": "PASS",
                     "api-compat.json": "PASS", "e2e-compare-simple.json": "PASS",
                     "unit-compare.json": "PASS"}

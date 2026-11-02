@@ -424,8 +424,12 @@ response"); each group names the files it comes from.
   resolved by hand does not replay; the intended resolutions are listed in the
   module (`NOTICE_REPLAY`: NOTICE-binary drops both tickets' removed lines and
   keeps the added `jakarta.annotation-api` entry) and a file with no entry
-  there counts as a difference. Set `PLAN_CHECK=false` to compare anyway. The
-  workflow sets `PR_BRANCHES` to the six branches in merge order, so CI runs
+  there counts as a difference. A branch already merged into the baseline is
+  not replayed and is listed as landed: its tip is an ancestor of the
+  baseline, or a baseline commit since its base has the branch's whole change
+  as its `git patch-id`, as a squash merge does. A branch only partly in the
+  baseline is not landed, and its files are differences. Set
+  `PLAN_CHECK=false` to compare anyway. The workflow sets `PR_BRANCHES` to the six branches in merge order, so CI runs
   the check; both checks are skipped when the two sides resolve to one commit
   (a self-comparison run, R68), which has no patch for them to check.
   *Formerly T16.*

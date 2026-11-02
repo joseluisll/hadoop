@@ -128,14 +128,19 @@ claim to be, and stops without comparing when they are not:
   round, is a difference. A conflict the candidate resolved by hand and a
   binary blob cannot be replayed; the intended resolutions are listed in
   `lib/compare_plan.py` (`NOTICE-binary`), and a file with no resolution there
-  counts as a difference.
+  counts as a difference. A branch already merged into the baseline, as
+  commits or squashed (same `git patch-id`), is listed as landed and not
+  replayed, so a merged PR does not stop the runs; remove it from
+  `PR_BRANCHES` and `PR_ORDER` when the report lists it. A branch only partly
+  merged is not landed.
 
 Either check failing writes its own section as the report and exits 1. Set
 `ANCESTRY_CHECK=false` or `PLAN_CHECK=false` to compare anyway. Both are
 skipped when the two sides resolve to the same commit: a self-comparison run
 (`jetty12-phase-a-<arch>-run-aa-*`, R68) has no patch, so the plan check would
 report every PR branch file as missing and stop the run before it compared
-anything. The workflow also leaves `PR_BRANCHES` empty for those runs.
+anything. The workflow sets `PR_BRANCHES` for those runs too; the check is
+skipped all the same.
 
 The report starts with **Impact on users** (`lib/impact.py`), built from all
 the checks: for the daemons and applications on the Hadoop classpath, the
@@ -484,7 +489,7 @@ dev-support/jetty12-phase-a/replay.sh ~/reports/report-*
 | `BASELINE_REF` / `CANDIDATE_REF` | `origin/PREPARATION` / `origin/feat/HARNESS` | the two trees |
 | `ANCESTRY_CHECK` | `true` | `compare.sh` stops when the candidate lacks a baseline commit's change (`lib/ancestry.py`) |
 | `PLAN_CHECK` | `true` | `compare.sh` stops when the candidate is not the baseline plus `PR_BRANCHES` (`lib/compare_plan.py`) |
-| `PR_BRANCHES` | the six PR branches in merge order | the branches merged into trunk, in merge order, comma-separated (e.g. `origin/HADOOP-20012-upstream,...,origin/jetty-phase-a`); the plan check runs only when set. The workflow sets it in CI and leaves it empty for `-run-aa-` runs; a run whose two sides are one commit skips the check anyway |
+| `PR_BRANCHES` | the six PR branches in merge order | the branches merged into trunk, in merge order, comma-separated (e.g. `origin/HADOOP-20012-upstream,...,origin/jetty-phase-a`); the plan check runs only when set. The workflow sets it for every run; a run whose two sides are one commit skips the check |
 | `MAVEN_MIRROR_URL` | none | mirror of Maven Central, e.g. `https://maven-central.storage-download.googleapis.com/maven2` when the build host is rate-limited |
 | `MVN_EXTRA_ARGS` | none | added to every Maven call |
 | `BUILD_NATIVE` | `false` | build the distribution with the native libraries (`-Pnative`, OpenSSL and Snappy required); needs the toolchain of `start-build-env.sh`, which CI uses |

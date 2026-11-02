@@ -71,3 +71,16 @@ def changed_paths(rev_from, rev_to, ignored):
     out = git("diff", "--name-only", "--no-renames", rev_from, rev_to,
               "--", ":(top)", *[f":(top,exclude){g}" for g in ignored])
     return set((out or "").split())
+
+
+def patch_ids(diff):
+    """{patch id: commit} of a 'git log -p' or 'git diff' text; a diff with no
+    commit line is keyed to None. --stable ignores line numbers and
+    whitespace, so a change merged onto a later trunk keeps its id."""
+    r = subprocess.run(["git", "patch-id", "--stable"], input=diff or b"",
+                       capture_output=True)
+    out = {}
+    for line in r.stdout.decode().splitlines():
+        pid, commit = line.split()
+        out[pid] = None if commit.strip("0") == "" else commit
+    return out

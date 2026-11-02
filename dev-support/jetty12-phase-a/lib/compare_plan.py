@@ -40,6 +40,12 @@ Reported as differences:
                    give the candidate's blob
   missing          changed by a branch, not changed on the candidate
 
+A branch already merged into the baseline is left out of the replay and listed
+as landed: merged as commits (its tip is an ancestor of the baseline) or
+squashed (a baseline commit since the branch's base has the branch's whole
+change as its patch, by git patch-id). A branch only partly in the baseline is
+not landed, and its files show as missing or replay-differs.
+
 Two replay cases cannot be reproduced and are reported, never hidden:
   - a binary blob (LICENSE-binary, NOTICE-binary): git merge-file merges bytes
     as text. A branch's change to a binary blob is applied whole, so a later
@@ -69,7 +75,7 @@ import sys
 import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from gitrefs import changed_paths, git, rev_parse, tree_blobs  # noqa: E402
+from gitrefs import changed_paths, git, patch_ids, rev_parse, tree_blobs  # noqa: E402
 
 # The branches merged into trunk, in the order they are merged. jetty-phase-a is
 # HADOOP-19970 (PR #8699); the others are PRs #8890 to #8894. The order matters
@@ -122,6 +128,18 @@ class Branch:
             return None
         return anc, tip
 
+    def landed(self, baseline):
+        """The baseline commit that already has this branch's change, or None.
+        A branch merged as commits changes nothing since its base, which is
+        then its tip."""
+        if not self.paths:
+            return self.base if self.base == rev_parse(self.ref) else None
+        paths = sorted(self.paths)
+        mine = patch_ids(git("diff", "--binary", self.base, self.ref, "--", *paths,
+                             binary=True))
+        theirs = patch_ids(git("log", "-p", "--binary", "--format=commit %H",
+                               f"{self.base}..{baseline}", "--", *paths, binary=True))
+        return next((theirs[p] for p in mine if p in theirs), None)
 
 def replay(baseline_blob, branches, path):
     """The baseline blob with each branch's change merged in order, and the
@@ -195,6 +213,12 @@ def main():
         if not rev_parse(ref):
             sys.exit(f"cannot resolve branch {ref} to a commit")
         branches.append(Branch(ref, baseline, ignored))
+    landed = []
+    for b in list(branches):
+        commit = b.landed(baseline)
+        if commit:
+            landed.append({"ref": b.ref, "commit": commit})
+            branches.remove(b)
 
     base_blobs, cand_blobs = tree_blobs(baseline), tree_blobs(candidate)
     changed = changed_paths(baseline, candidate, ignored)
@@ -242,6 +266,7 @@ def main():
                   "by_one_branch": sum(1 for v in owners.values() if len(v) == 1),
                   "by_several_branches": sum(1 for v in owners.values() if len(v) > 1)},
         "findings": findings,
+        "landed": landed,
         "unused_replay_resolutions": unused_replays,
         "branches_without_changes": unused_branches,
     }
@@ -260,6 +285,8 @@ def main():
         print(f"  unused replay resolution: {r}")
     for r in unused_branches:
         print(f"  branch without changes: {r}")
+    for x in landed:
+        print(f"  landed in the baseline, not replayed: {x['ref']} ({x['commit'][:11]})")
     return 0 if verdict == "PASS" else 1
 
 
@@ -292,6 +319,10 @@ def markdown(result):
     if result["unused_replay_resolutions"]:
         out.append("Replay resolutions listed but not needed: "
                    + ", ".join(f"`{r}`" for r in result["unused_replay_resolutions"]) + ".\n")
+    if result["landed"]:
+        out.append("Branches already in the baseline, not replayed: "
+                   + ", ".join(f"`{x['ref']}` ({x['commit'][:11]})" for x in result["landed"])
+                   + ". Remove them from `PR_BRANCHES` and `PR_ORDER`.\n")
     if result["branches_without_changes"]:
         out.append("Branches with no change outside the ignored paths: "
                    + ", ".join(f"`{r}`" for r in result["branches_without_changes"]) + ".\n")
