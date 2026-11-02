@@ -30,6 +30,9 @@ TIER="${1:-quick}"
 ARCHS="${2:-all}"
 H="${HARNESS_DIR}"
 
+# A broken comparator would cost a whole run, build included, to find out (R81).
+python3 -I "${H}/lib/test_comparators.py" || die "the comparators' self-check failed"
+
 for side in baseline candidate; do
   "${H}/build.sh" "${side}" || die "build of ${side} failed"
 done

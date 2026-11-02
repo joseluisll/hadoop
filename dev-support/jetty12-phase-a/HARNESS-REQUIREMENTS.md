@@ -334,6 +334,36 @@ response"); each group names the files it comes from.
   `webhdfs-user` changes a default in `hdfs-default.xml`); its verdict must be
   FAIL. These runs skip the unit jobs, which build from source and cannot see
   the broken distribution.
+- **R81.** `compare.sh` first runs `lib/test_comparators.py`, as `e2e/run.sh`
+  runs `e2e/lib/test_probe.py`, and stops if it fails, before the ancestry
+  check; `run-all.sh` runs it before its builds, and the workflow's queue
+  job runs it after checkout and before waiting for earlier runs. The check
+  runs each comparator the way the scripts do (`python3 -I <script> ...`) on
+  synthetic inputs in a temporary directory, with a throwaway git repository
+  for `ancestry.py` (git run without inherited `GIT_*` variables and with
+  `core.hooksPath=/dev/null`), and asserts the verdict each writes and its
+  exit code, failing with the case name and the comparator's stderr when a
+  comparator crashes without writing JSON:
+  `compare_e2e.py` (identical observations PASS; a differing observation
+  FAILs; a missing or empty `observations.jsonl` is NOT RUN; a DIFF an
+  `obs` or `obsdiff` rule matches PASSes, but an `obsdiff` rule does not
+  excuse a REGRESSION; an `obsfield` rule matching only some differing
+  fields FAILs and one matching every field PASSes; a rule matching only a
+  prefix of the subject does not excuse a DIFF; an observation only on the
+  baseline, a duplicate observation id, a class loaded from a different jar
+  without a `classjar` rule and a new log error on the candidate each FAIL;
+  candidate daemons not starting FAILs and baseline daemons not starting is
+  NOT RUN);
+  `compare_unit.py` (tests passing on both sides PASS; pass to fail, flaky
+  to fail, missing or skipped on the candidate FAILs);
+  `compare_downstream.py` (identical results PASS; an unmatched difference
+  FAILs); `ancestry.py` (candidate contains every baseline commit PASSes;
+  a cherry-picked baseline commit PASSes; a baseline commit changing only
+  ignored paths PASSes; one the candidate lacks FAILs); and `report.py`
+  (all checks PASS; one check FAILs; one NOT RUN and the rest PASS is
+  INCOMPLETE). It does not cover `compare_plan.py`, `artifact_diff.py`,
+  `api_compat.py` or `impact.py`, which need PR branches or built
+  distributions, or have no verdict.
 
 ### CI and execution (`.github/workflows/*jetty12_phase_a*.yml`, `ci/*`)
 
@@ -657,6 +687,11 @@ there:
 - R41: an empty `observations.jsonl` is NOT RUN, not a PASS.
 - R45: a test that ran on the baseline and is skipped on the candidate fails
   the suite. Check 4 has no allowlist, so a skip the patch intends fails too.
+- R81: `lib/test_comparators.py` checks the verdicts and exit codes of
+  `compare_e2e.py`, `compare_unit.py`, `compare_downstream.py`, `ancestry.py`
+  and `report.py`; `compare.sh` runs it first, `run-all.sh` runs it before
+  its builds, and the workflow's queue job runs it before waiting; this
+  closes the review's "Tests for the comparators" gap.
 
 Still open, both needing the owner's decision:
 

@@ -74,7 +74,9 @@ the report lists the accepted changes nobody was told about.
    both sides. `probe.py raw` sends a request byte for byte, for what a client
    library refuses or rewrites. `e2e/run.sh` first runs
    `e2e/lib/test_probe.py`, which checks the probe against a local server,
-   without a cluster. Every
+   without a cluster; `compare.sh` first runs `lib/test_comparators.py`,
+   which checks the comparison scripts the same way, and `run-all.sh` and the
+   workflow's queue job run it before their builds and their wait. Every
    daemon JVM logs the classes it loads, and all daemon and container logs
    are scanned for class loading, linkage and JAX-RS provider errors. Line
    numbers in Java stack frames are dropped before comparing, so an error
@@ -384,6 +386,10 @@ broken-candidate run skips the unit test jobs: they build from source and
 cannot see the broken distribution. Other
 changes can be given to `ci/artifacts.sh unpack-build` in `BREAK_CANDIDATE`
 (specs of `ci/break_candidate.py`).
+
+Before waiting, each run checks the comparison scripts
+(`lib/test_comparators.py`), so a broken comparator fails at once instead of
+after the wait and the builds (R81).
 
 Runs go **one at a time**, across all five workflows, oldest first: each
 run's first jobs wait (polling every minute) until no earlier harness run

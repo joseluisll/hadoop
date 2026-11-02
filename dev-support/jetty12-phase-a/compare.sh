@@ -52,6 +52,9 @@ done
 B=$(results_dir baseline)
 C=$(results_dir candidate)
 
+# A broken comparator would cost a whole run to find out.
+python3 -I "${HARNESS_DIR}/lib/test_comparators.py" || die "the comparators' self-check failed"
+
 stop=0
 if ! checks_supported; then
   log "skipping the ancestry and plan checks: both sides are ${BASELINE_REF} (a self-comparison)"
