@@ -99,9 +99,9 @@ for _ in {1..60}; do
   sleep 0.5
 done
 if grep -q '^READY ' "${RES}/servletprobe.log" 2>/dev/null; then
-  http probe-base "http://127.0.0.1:${PROBE_PORT}/probe" --expect-status 200 --shape json --no-auth
-  http probe-forward "http://127.0.0.1:${PROBE_PORT}/probe/forward" --expect-status 200 --shape json --no-auth
-  http probe-include "http://127.0.0.1:${PROBE_PORT}/probe/include" --expect-status 200 --shape json --no-auth
+  http probe-base "http://127.0.0.1:${PROBE_PORT}/probe" --expect-status 200 --shape json-values --no-auth
+  http probe-forward "http://127.0.0.1:${PROBE_PORT}/probe/forward" --expect-status 200 --shape json-values --no-auth
+  http probe-include "http://127.0.0.1:${PROBE_PORT}/probe/include" --expect-status 200 --shape json-values --no-auth
   raw probe-http10-put "http://127.0.0.1:${PROBE_PORT}/probe" "PUT /probe HTTP/1.0\r\n\r\n"
   raw probe-http10-options "http://127.0.0.1:${PROBE_PORT}/probe" "OPTIONS /probe HTTP/1.0\r\n\r\n"
   raw probe-http10-trace "http://127.0.0.1:${PROBE_PORT}/probe" "TRACE /probe HTTP/1.0\r\n\r\n"

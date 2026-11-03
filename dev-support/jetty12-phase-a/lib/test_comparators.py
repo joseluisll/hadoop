@@ -34,6 +34,8 @@ import tempfile
 import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, HERE)
+from compare_plan import PR_ORDER  # noqa: E402
 E2E = os.path.join(HERE, "compare_e2e.py")
 UNIT = os.path.join(HERE, "compare_unit.py")
 PLAN = os.path.join(HERE, "compare_plan.py")
@@ -112,6 +114,7 @@ def e2e(tmp, case, baseline, candidate, verdict, rc, rules="", aborted=None,
             os.path.join(base, "baseline"), os.path.join(base, "candidate"), env=env)
     result = read_result(case, os.path.join(out, "e2e-compare-simple.json"), r)
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
+    return result
 
 
 def surefire(tests):
@@ -170,7 +173,7 @@ def downstream(tmp, case, baseline, candidate, verdict, rc):
 
 
 def artifact_diff(tmp, case, baseline, candidate, verdict, rc, rules="",
-                  repo=None, baseline_ref=None, candidate_ref=None):
+                  repo=None, baseline_ref=None, candidate_ref=None, env=None):
     base = os.path.join(tmp, "artifact", case)
     for side, dist in (("baseline", baseline), ("candidate", candidate)):
         results = os.path.join(base, side)
@@ -186,7 +189,7 @@ def artifact_diff(tmp, case, baseline, candidate, verdict, rc, rules="",
         args += ["--repo", repo, "--baseline-ref", baseline_ref,
                  "--candidate-ref", candidate_ref]
     args += [os.path.join(base, "baseline"), os.path.join(base, "candidate")]
-    r = run(ARTIFACT, *args)
+    r = run(ARTIFACT, *args, env=env)
     result = read_result(case, os.path.join(out, "artifact-diff.json"), r)
     expect(case, (result["summary"]["unexpected"] == 0, r.returncode),
            (verdict == "PASS", rc))
@@ -319,6 +322,8 @@ def report(tmp, case, checks, overall, rc, broken=False):
 
 RULE_FILES = ("expected-differences.txt", "expected-api-differences.txt",
               "expected-downstream-differences.txt")
+ALL_TREES = ([f"ticket-{i}" for i in range(1, len(PR_ORDER) + 1)]
+             + [f"prefix-{k}" for k in range(2, min(5, len(PR_ORDER)) + 1)])
 
 
 def artifact_json(unexpected=0, unused=(), diffs=None):
@@ -357,7 +362,8 @@ def attribution(tmp, case, trees, verdict, rc, rules=None, contains=None):
     result = read_result(case, os.path.join(trees_dir, "attribution.json"), r)
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
     if contains is not None:
-        problems = [p for t in result["trees"] for p in t["problems"]]
+        problems = list(result.get("problems", [])) + [
+            p for t in result["trees"] for p in t["problems"]]
         expect(f"{case}: reason", any(contains in p for p in problems), True)
     return result
 
@@ -380,6 +386,16 @@ def main():
             [""], [observation("comp", "one")], "NOT RUN", 1)
         e2e(tmp, "e2e observations files with only a blank line are NOT RUN",
             [""], [""], "NOT RUN", 1)
+        # T39: a probe answer recorded by value shows both values in the DIFF.
+        result = e2e(tmp, "e2e a JSON value difference shows both values",
+                     [observation("probe", "probe-base",
+                                  body={"json": {"mapping": {"match": "EXACT"}}})],
+                     [observation("probe", "probe-base",
+                                  body={"json": {"mapping": {"match": None}}})],
+                     "FAIL", 1)
+        detail = [r["detail"] for r in result["rows"] if r["key"] == "probe:probe-base"][0]
+        expect("e2e a JSON value difference shows both values: detail",
+               ('"EXACT"' in detail, "null" in detail), (True, True))
 
         # Allowlist: a DIFF the rules excuse PASSes, a REGRESSION never does,
         # an obsfield rule must match every differing field and a rule's regex
@@ -437,6 +453,23 @@ def main():
             classload={"baseline": {"map": {"org.example.Foo": "lib/jetty-foo.jar"}},
                        "candidate": {"map": {"org.example.Foo": "lib/jetty-bar.jar"}}},
             rules="classjar map:org\\.example\\.Foo  # expected\n")
+        # T44: the per-run application id, container id and filecache number of
+        # a container's job.jar are masked before two paths are compared.
+        job_jar = ("/w/%s/nm-local/usercache/u/appcache/application_%s_0001/"
+                   "container_%s_0001_01_000002/filecache/%s/job.jar/job.jar")
+        e2e(tmp, "e2e the same job.jar under two application ids is not a move",
+            [observation("comp", "one")], [observation("comp", "one")], "PASS", 0,
+            classload={"baseline": {"map": {"org.example.Foo":
+                                            job_jar % ("baseline", "111", "111", "10")}},
+                       "candidate": {"map": {"org.example.Foo":
+                                             job_jar % ("candidate", "222", "222", "33")}}})
+        e2e(tmp, "e2e a job.jar with another name is still a move",
+            [observation("comp", "one")], [observation("comp", "one")], "FAIL", 1,
+            classload={"baseline": {"map": {"org.example.Foo":
+                                            job_jar % ("baseline", "111", "111", "10")}},
+                       "candidate": {"map": {"org.example.Foo":
+                                             (job_jar % ("candidate", "222", "222", "33"))
+                                             .replace("job.jar/job.jar", "other.jar/other.jar")}}})
         e2e(tmp, "e2e a new log error on the candidate FAILs",
             [observation("comp", "one")], [observation("comp", "one")], "FAIL", 1,
             logscan={"baseline": {}, "candidate": {"nn": {"NoClassDefFoundError: Foo": 1}}})
@@ -523,6 +556,8 @@ def main():
             '  <dependencies>\n'
             '    <dependency><groupId>org.example</groupId>'
             '<artifactId>dep</artifactId><version>1.0</version></dependency>\n'
+            '    <dependency><groupId>org.example</groupId>'
+            '<artifactId>no-version</artifactId></dependency>\n'
             '  </dependencies>\n'
             '  <dependencyManagement><dependencies>\n'
             '    <dependency><groupId>org.example</groupId>'
@@ -548,12 +583,12 @@ def main():
                       rules="pom-dependency-changed .*\\|org\\.example:dep  # expected\n",
                       repo=poms, baseline_ref=base, candidate_ref=candidate)
         commit(poms, "pom.xml", pom.replace(
-            "<version>1.0</version></dependency>\n  </dependencies>\n"
-            "  <dependencyManagement>",
-            "<version>1.0</version></dependency>\n"
-            "    <dependency><groupId>org.example</groupId>"
-            "<artifactId>new</artifactId><version>1.0</version></dependency>\n"
-            "  </dependencies>\n  <dependencyManagement>"), "added")
+            '    <dependency><groupId>org.example</groupId>'
+            '<artifactId>no-version</artifactId></dependency>\n',
+            '    <dependency><groupId>org.example</groupId>'
+            '<artifactId>no-version</artifactId></dependency>\n'
+            '    <dependency><groupId>org.example</groupId>'
+            '<artifactId>new</artifactId><version>1.0</version></dependency>\n'), "added")
         candidate = rev(poms)
         artifact_diff(tmp, "artifact T12 an added dependency FAILs",
                       dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
@@ -628,6 +663,57 @@ def main():
                       dist, dist, "PASS", 0,
                       rules="pom-dependency-changed .*\\|org\\.example:dep  # expected\n",
                       repo=poms, baseline_ref=base, candidate_ref=candidate)
+
+        # T40: a direct dependency's declared version is compared; a dependency
+        # with no <version> (managed elsewhere) still compares equal.
+        commit(poms, "pom.xml", pom.replace(
+            "<artifactId>dep</artifactId><version>1.0</version>",
+            "<artifactId>dep</artifactId><version>1.1</version>"), "version")
+        candidate = rev(poms)
+        result = artifact_diff(tmp, "artifact T40 a dependency version change FAILs",
+                               dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
+                               candidate_ref=candidate)
+        expect("artifact T40 only the versioned dependency changes",
+               [d["subject"] for d in result["differences"]
+                if d["kind"] == "pom-dependency-changed"],
+               ["org.example:parent|org.example:dep"])
+        expect("artifact T40 the version is in the detail",
+               "version=1.0" in result["differences"][0]["detail"]
+               and "version=1.1" in result["differences"][0]["detail"], True)
+        artifact_diff(tmp, "artifact T40 a dependency version change with a rule PASSes",
+                      dist, dist, "PASS", 0,
+                      rules="pom-dependency-changed .*\\|org\\.example:dep  # expected\n",
+                      repo=poms, baseline_ref=base, candidate_ref=candidate)
+
+        # T41: the detail must be the same bytes under any hash seed.
+        det = new_repo(tmp, "deterministic")
+        dep = ('    <dependency><groupId>org.example</groupId>'
+               '<artifactId>dep</artifactId><version>1.0</version>'
+               '<exclusions><exclusion><groupId>org.example</groupId>'
+               '<artifactId>a</artifactId></exclusion>'
+               '<exclusion><groupId>org.example</groupId>'
+               '<artifactId>b</artifactId></exclusion></exclusions></dependency>\n')
+        det_pom = ('<?xml version="1.0"?>\n'
+                   '<project xmlns="http://maven.apache.org/POM/4.0.0">\n'
+                   '  <groupId>org.example</groupId>\n'
+                   '  <artifactId>parent</artifactId>\n'
+                   '  <version>1.0</version>\n'
+                   '  <dependencies>\n' + dep + '  </dependencies>\n</project>\n')
+        commit(det, "pom.xml", det_pom, "base")
+        det_base = rev(det)
+        commit(det, "pom.xml", det_pom.replace(
+            "</exclusions></dependency>",
+            "<exclusion><groupId>org.example</groupId>"
+            "<artifactId>c</artifactId></exclusion></exclusions></dependency>"), "exclusions")
+        det_candidate = rev(det)
+        details = [artifact_diff(
+                       tmp, f"artifact T41 deterministic detail (seed {seed})",
+                       dist, dist, "FAIL", 1, repo=det, baseline_ref=det_base,
+                       candidate_ref=det_candidate, env={"PYTHONHASHSEED": seed}
+                   )["differences"][0]["detail"]
+                   for seed in ("1", "2")]
+        expect("artifact T41 the detail is the same under two hash seeds",
+               details[0], details[1])
 
         # T15: LICENSE-binary and NOTICE-binary consistency.
         def dist_with(name, jars, lic, notice="", jar_notices=None):
@@ -847,10 +933,18 @@ def main():
                         "downstream-compare.json": downstream_json()}},
                     "FAIL", 1, contains="UNEXPECTED dist-file-added org/example/x")
         result = attribution(tmp, "attribution all trees matched PASS",
-                             {"ticket-1": matched_tree(), "prefix-2": matched_tree()},
+                             {t: matched_tree() for t in ALL_TREES},
                              "PASS", 0, rules={"expected-differences.txt": rule})
         expect("attribution all trees matched: no problems",
                [p for t in result["trees"] for p in t["problems"]], [])
+        # T47: a tree whose job failed leaves no directory; it is expected from
+        # PR_ORDER, named, and fails the run.
+        missing = [t for t in ALL_TREES if t != "prefix-3"]
+        result = attribution(tmp, "attribution a missing tree FAILs",
+                             {t: matched_tree() for t in missing}, "FAIL", 1,
+                             contains="missing tree prefix-3")
+        expect("attribution a missing tree FAILs: named",
+               any("prefix-3" in p for p in result.get("problems", [])), True)
     print("test_comparators: ok")
 
 

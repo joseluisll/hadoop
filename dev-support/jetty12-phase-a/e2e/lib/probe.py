@@ -154,6 +154,16 @@ def json_shape(value):
     return "str"
 
 
+def json_values(value):
+    """The JSON values as they are, with every string masked (R34), so a
+    difference shows what each side answered (T39)."""
+    if isinstance(value, dict):
+        return {k: json_values(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [json_values(v) for v in value]
+    return mask(value) if isinstance(value, str) else value
+
+
 def merge_shapes(a, b):
     out = dict(a)
     for k, v in b.items():
@@ -271,11 +281,12 @@ def body_shape(kind, body, content_type):
             kind = "xml"
         else:
             kind = "text"
-    if kind == "json":
+    if kind in ("json", "json-values"):
         try:
-            return {"json": json_shape(json.loads(text))}
+            value = json.loads(text)
         except ValueError:
             return {"json_error": True, "first_line": mask(text.strip().split("\n")[0])[:200]}
+        return {"json": json_shape(value) if kind == "json" else json_values(value)}
     if kind == "xml":
         return {"xml": xml_shape(text)}
     if kind == "html":
@@ -586,7 +597,8 @@ def main():
     h.add_argument("--reject-regex", action="append")
     h.add_argument("--expect-json", action="append")
     h.add_argument("--shape", default="auto",
-                   choices=["auto", "json", "xml", "html", "text", "sha256", "lines", "none"])
+                   choices=["auto", "json", "json-values", "xml", "html", "text",
+                            "sha256", "lines", "none"])
     h.add_argument("--ignore-header", action="append")
     h.add_argument("--follow", action="store_true")
     h.add_argument("--allow-error", action="store_true",
@@ -602,7 +614,8 @@ def main():
     r.add_argument("--request", required=True)
     r.add_argument("--expect-status", default="any")
     r.add_argument("--shape", default="auto",
-                   choices=["auto", "json", "xml", "html", "text", "sha256", "lines", "none"])
+                   choices=["auto", "json", "json-values", "xml", "html", "text",
+                            "sha256", "lines", "none"])
     r.add_argument("--ignore-header", action="append")
     r.add_argument("--head-only", action="store_true")
     r.add_argument("--timeout", type=float, default=30)

@@ -193,7 +193,7 @@ jobs:
         with:
           baseline: ${{ env.BASELINE }}
           candidate: ${{ github.sha }}
-          free-disk: "false"
+          free-disk: "true"
       - uses: actions/download-artifact@v4
         with:
           name: attribution-build-baseline

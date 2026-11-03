@@ -175,8 +175,10 @@ def _git_ls_tree(repo, ref):
             if p.endswith("pom.xml") and not p.startswith("dev-support/jetty12-phase-a/")]
 
 
-def _pom_dep(el):
-    """(key, scope, optional, exclusions) for a <dependency> element."""
+def _pom_dep(el, props):
+    """(key, scope, optional, version, exclusions) for a <dependency> element.
+    The declared version is resolved from the POM's properties; a dependency
+    with none (managed elsewhere) keeps None."""
     g = _text(_find(el, "groupId"))
     a = _text(_find(el, "artifactId"))
     t = _text(_find(el, "type"))
@@ -186,24 +188,37 @@ def _pom_dep(el):
         key += f":{t}" + (f":{c}" if c else "")
     scope = _text(_find(el, "scope")) or "compile"
     optional = _text(_find(el, "optional")) or "false"
+    version = _text(_find(el, "version"))
+    version = _resolve_version(version, props) if version else None
     exclusions = set()
     ex = _find(el, "exclusions")
     if ex is not None:
         for e in _findall(ex, "exclusion"):
             exclusions.add(f"{_text(_find(e, 'groupId'))}:{_text(_find(e, 'artifactId'))}")
-    return key, scope, optional, frozenset(exclusions)
+    return key, scope, optional, version, frozenset(exclusions)
 
 
 def _pom_deps(root, section):
-    """{key: (scope, optional, exclusions)} for a dependencies section."""
+    """{key: (scope, optional, version, exclusions)} for a dependencies section."""
     out = {}
     d = _find(root, section)
     if d is None:
         return out
+    props = _pom_props(root)
     for dep in _findall(d, "dependency"):
-        key, scope, optional, exclusions = _pom_dep(dep)
-        out[key] = (scope, optional, exclusions)
+        key, scope, optional, version, exclusions = _pom_dep(dep, props)
+        out[key] = (scope, optional, version, exclusions)
     return out
+
+
+def _dep_detail(dep):
+    """A dependency's comparison fields, in a stable order: a frozenset's repr
+    order depends on the hash seed, so exclusions are sorted (T41)."""
+    scope, optional, version, exclusions = dep
+    detail = f"scope={scope} optional={optional} version={version or '-'}"
+    if exclusions:
+        detail += " exclusions=[" + ", ".join(sorted(exclusions)) + "]"
+    return detail
 
 
 def _pom_managed(root):
@@ -285,7 +300,7 @@ def compare_poms(repo, b_ref, c_ref, record):
         for key in sorted(b_deps.keys() & c_deps.keys()):
             if b_deps[key] != c_deps[key]:
                 record("pom-dependency-changed", f"{module}|{key}",
-                       f"{b_deps[key]} -> {c_deps[key]}")
+                       f"{_dep_detail(b_deps[key])} -> {_dep_detail(c_deps[key])}")
         b_managed = _pom_managed(b_root) if b_root is not None else {}
         c_managed = _pom_managed(c_root) if c_root is not None else {}
         b_props = _pom_props(b_root) if b_root is not None else {}

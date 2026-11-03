@@ -22,8 +22,10 @@ Each tree directory holds what attribution.sh wrote for it: artifact-diff.json,
 api-compat.json and downstream-compare.json. In a ticket-<n> tree every rule
 whose reason starts with the branch's ticket must have matched at least once;
 in any tree nothing may be UNEXPECTED. The branches and their order come from
-PR_ORDER in compare_plan.py. Writes attribution.json and attribution.md in the
-given directory and exits 1 when a tree fails.
+PR_ORDER in compare_plan.py; the expected tree list is built from them, so a
+tree whose job produced no results is a problem and fails the run (T47).
+Writes attribution.json and attribution.md in the given directory and exits 1
+when a tree fails or is missing.
 """
 
 import argparse
@@ -43,6 +45,15 @@ COMPARISONS = (
     ("api-compat", "api-compat.json", "expected-api-differences.txt"),
     ("downstream", "downstream-compare.json", "expected-downstream-differences.txt"),
 )
+
+
+def expected_trees():
+    """The tree names attribution.sh list prints, from PR_ORDER (R89): a ticket
+    tree per branch and a prefix tree per prefix of length 2 to 5. A tree whose
+    job failed has no directory, so it must be expected, not discovered."""
+    n = len(PR_ORDER)
+    return ([f"ticket-{i}" for i in range(1, n + 1)]
+            + [f"prefix-{k}" for k in range(2, min(5, n) + 1)])
 
 
 def ticket_of(branch):
@@ -140,15 +151,16 @@ def main():
     ap.add_argument("trees", help="directory with one sub-directory per tree")
     args = ap.parse_args()
 
+    present = {name for name in os.listdir(args.trees)
+               if os.path.isdir(os.path.join(args.trees, name))}
     trees = [check_tree(name, os.path.join(args.trees, name), args.rules)
-             for name in sorted(os.listdir(args.trees))
-             if os.path.isdir(os.path.join(args.trees, name))]
-    if not trees:
-        result = {"verdict": "FAIL", "trees": [],
-                  "problems": [f"no tree directories in {args.trees}"]}
-    else:
-        failed = [t for t in trees if t["verdict"] != "PASS"]
-        result = {"verdict": "FAIL" if failed else "PASS", "trees": trees}
+             for name in sorted(present)]
+    missing = [t for t in expected_trees() if t not in present]
+    problems = [f"missing tree {t}: no results in {args.trees}" for t in missing]
+    failed = [t for t in trees if t["verdict"] != "PASS"]
+    result = {"verdict": "FAIL" if failed or missing else "PASS", "trees": trees}
+    if problems:
+        result["problems"] = problems
     with open(os.path.join(args.trees, "attribution.json"), "w", encoding="utf-8") as f:
         json.dump(result, f, indent=1)
     with open(os.path.join(args.trees, "attribution.md"), "w", encoding="utf-8") as f:

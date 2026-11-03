@@ -262,25 +262,33 @@ on any difference that no rule accepts. See `README.md` and
 
 - **Covers:** stages 1 and 2 only. It does not cover 20049, 20048, the rest of
   stage 3, stage 4 or 19972.
-- **Latest runs, launched 2026-11-01 23:27:** on baseline `4f4422ad` and
-  candidate `bc5d054a`, all five architectures have `Overall: PASS`:
-  `simple` (19), `secure` (11), `ha` (7), `federated` (9) and `mixed` (8).
-  The federated-run-7 regression was the race README lists under "No JIRA
-  yet" (`TestFederationInterceptor#testSubClusterTimeOut`).
+- **Latest runs, batch of 2026-11-03:** on baseline `4f4422ad` and candidate
+  `93165486a76`, all five architectures and the A/A run are FAIL, and both
+  broken-candidate runs caught their breakage (`Harness check: PASS`). The
+  failures are harness defects, not patch defects: a scenario's done marker
+  was lost in the two scenarios that run `set --`, class-load log lines were
+  read as errors, a container's per-run `job.jar` path counted as a class
+  move, and the servlet probe compared only JSON types. T42, T43, T44's
+  first part, T39, T40, T41 and T47 fix them; the next batch must show them
+  gone. The previous batch (launched 2026-11-01 23:27, candidate `bc5d054a`)
+  was all PASS, but it predates R84-R89 and the checks that now fail.
 - **Now proven when the run gets that far:** the candidate's ancestry against
   the baseline and its change against the PR branches are checked before
   anything is compared, and the run stops when either check fails (R78 to R80
   in the requirements; formerly T5, T16 and T6).
-- **Added on 2026-11-02, not yet run in CI** (`feat/HARNESS` at
-  `9092fb6ebf7`, R84 to R89): MapReduce under Kerberos compares real jobs
-  despite MAPREDUCE-7548, with a control job that notices when the fix
-  lands; classes loaded on one side only are matched against rules, and can
-  fail the run behind a switch; deterministic HDFS client failover; flaky
-  test history from earlier runs; YARN federation checks on an application
-  submitted to a sub-cluster directly; and attribution runs, which check
-  artifacts, API and downstream resolution for each PR branch alone and for
-  each prefix of the merge order. The attribution run's `ticket-6` tree is
-  HADOOP-19970 alone, which shows which accepted differences are its own.
+- **Run in the 2026-11-03 batch** (`feat/HARNESS`, R84 to R89): MapReduce
+  under Kerberos compares real jobs despite MAPREDUCE-7548, with a control
+  job that notices when the fix lands; classes loaded on one side only are
+  matched against rules, and can fail the run behind a switch; deterministic
+  HDFS client failover; flaky test history from earlier runs; YARN
+  federation checks on an application submitted to a sub-cluster directly;
+  and attribution runs, which check artifacts, API and downstream resolution
+  for each PR branch alone and for each prefix of the merge order. The
+  attribution run's `ticket-6` tree is HADOOP-19970 alone, which shows which
+  accepted differences are its own. The first attribution run listed 9 trees
+  because `prefix-5`'s job failed on its runner ("No space left on device");
+  T47 now names a missing tree and fails on it, and the tree jobs free the
+  runner's preinstalled toolchains.
 
 Its own "phase A" means 20012 to 20016 with 19970, and its "phase B" means the
 Jetty upgrade, HADOOP-19972. Neither is the branch `jetty-phase-b`, which is
@@ -304,11 +312,12 @@ HADOOP-19970 can merge when all of these hold:
    - the attribution run passes: in `ticket-6` (HADOOP-19970 alone) every
      HADOOP-19970 rule matches and nothing is unexpected, and every prefix
      tree passes;
-   - the detection gaps that bear on what HADOOP-19970 changes are closed:
-     published POMs (T12), LICENSE and NOTICE consistency (T15), the servlet
-     behaviour probe with the HTTP/1.0 default answers (T22, T19), the API
-     the new servlet API jar makes available (T23), and class loading in
-     container JVMs (T14).
+   - the detection gaps that bear on what HADOOP-19970 changes are closed
+     (implemented as R90-R95; the 2026-11-03 batch is the first to exercise
+     them): published POMs (T12), LICENSE and NOTICE consistency (T15), the
+     servlet behaviour probe with the HTTP/1.0 default answers (T22, T19),
+     the API the new servlet API jar makes available (T23), and class
+     loading in container JVMs (T14).
 4. **Its release note** says what users see: the servlet API coordinate
    changes from `javax.servlet:javax.servlet-api` 3.1.0 to
    `org.eclipse.jetty.toolchain:jetty-servlet-api` 4.0.9 with the
@@ -322,8 +331,10 @@ HADOOP-19970 can merge when all of these hold:
 
 1. **Run what the harness gained** (owner's OK to push the run branches):
    the five architectures, the A/A and two broken-candidate runs, and
-   `jetty12-phase-a-attribution-run-1`. Settle what they show; turn on
-   `CLASSONLY_FAIL` once no unexpected one-side class is left.
+   `jetty12-phase-a-attribution-run-1`. The first batch ran on 2026-11-03 and
+   failed on harness defects (T42, T43, T44's first part, T39), now fixed;
+   run a fresh batch and settle what it shows. Turn on `CLASSONLY_FAIL` once
+   no unexpected one-side class is left.
 2. **Repeat Yetus on #8891, #8893 and #8894**, whose last run could not apply
    the patch, so that all five stage 1 PRs show only `test4tests` or trunk's
    SpotBugs. Then ask for review of #8890 first, as pjfanning asked.

@@ -34,7 +34,12 @@ response"); each group names the files it comes from.
   apache trunk plus the fork's `.github`) with a **candidate** tree (the
   phase A patch) and reports every difference between them.
 - **R2.** A difference the patch is meant to cause is accepted only by a
-  rule in an allowlist; every other difference fails the run.
+  rule in an allowlist; every other difference fails the run. Some are
+  listed without failing: an end-to-end observation that is FIXED,
+  BOTH_FAIL or recorded only on the candidate (R37), and classes loaded on
+  one side only when `CLASSONLY_FAIL=false` (R87). A test that exists only
+  on the candidate is listed with its result, and fails only when it fails
+  (R83).
 - **R3.** The goal is to find what the patch changes for Hadoop's users that
   its JIRA, its PR or its release note does not say: unexpected changes, and
   impact on clients and downstream projects.
@@ -65,7 +70,8 @@ response"); each group names the files it comes from.
   ignored: `META-INF/MANIFEST.MF`, `META-INF/maven/**/pom.xml` and
   `pom.properties`, `META-INF/DEPENDENCIES`, `*-version-info.properties`,
   `httpfs.properties` and jar signature files; in the distribution, `*.pid`
-  files, `logs/` and version-info files.
+  files, `logs/` and version-info files. Symbolic links in the distribution
+  are skipped.
 - **R11.** For each launcher view (`hadoop`, `hdfs`, `yarn`, `mapred` from
   `classpath --glob`; `tools` = mapred plus `share/hadoop/tools`;
   `yarn-timelinereader` = yarn plus `share/hadoop/yarn/timelineservice`;
@@ -81,17 +87,28 @@ response"); each group names the files it comes from.
   job fails if it does not pass.
 - **R90.** For every `pom.xml` in the tree outside the harness, both sides'
   declared dependencies with their scope (default `compile`), `optional`
-  flag, type/classifier and exclusions, their managed versions resolved from
-  the same POM's properties and their parent are compared, read from git
+  flag, declared `<version>` (resolved from the same POM's properties; empty
+  when it has none and the version is managed elsewhere), type/classifier and
+  exclusions, their managed versions resolved from the same POM's properties
+  and their parent are compared, read from git
   (`git show <ref>:<path>`) so no build is needed and the comparison runs
   wherever `artifact-diff.sh` runs: `pom-dependency-added`, `-removed`,
-  `-changed` (scope, optional or exclusions), `pom-managed-added`, `-removed`,
-  `-changed` (old and new version) and `pom-parent-changed`; a POM that does not parse is `pom-unparseable`
-  (subject: its path). The subject is
+  `-changed` (scope, optional, declared version or exclusions),
+  `pom-managed-added`, `-removed`, `-changed` (old and new version) and
+  `pom-parent-changed`; a POM that does not parse is `pom-unparseable`
+  (subject: its path). A `pom-dependency-changed` detail names both sides as
+  `scope=... optional=... version=... exclusions=[...]`, with the exclusions
+  sorted, so two runs of one build write the same bytes. The subject is
   `module|group:artifact[:type[:classifier]]`; an UNEXPECTED difference fails
   check 1. The dependency-reduced POMs the shaded clients
   (`hadoop-client-api`, `-runtime`, `-minicluster`) publish are generated at
   build time and are not in git, so they are not compared. *Formerly T12.*
+
+  Extensions T40 and T41 (done): a declared dependency's `<version>` is
+  compared and appears in the detail (T40); the exclusions are formatted
+  sorted, so the detail is deterministic (T41). The T12 comparison against
+  `origin/PREPARATION` and `HEAD` records 84 differences and none
+  UNEXPECTED.
 - **R91.** `LICENSE-binary` and `NOTICE-binary` are checked against each
   side's distribution: every third-party jar (not `org.apache.hadoop`) under
   `share/` is listed in the distribution's `LICENSE-binary` or
@@ -179,6 +196,14 @@ response"); each group names the files it comes from.
   dies on both sides is BOTH_FAIL and listed, instead of losing its later
   observations unseen.
 
+  Extension T42 (done): the done file reaches the scenario's inner shell in
+  the environment variable `SCENARIO_DONE_FILE`, not as a positional
+  parameter. `10-web-common.sh` and `70-secure.sh` run `set -- ${line}`,
+  which replaced `$5`: the marker went to the instance's readiness URL and
+  the scenario was reported as ending early although every check passed.
+  `e2e/lib/env.sh` `run_scenario` holds the step so `test_probe.py` can run
+  it on a scenario that uses `set --` and on one that exits 1.
+
 #### Observations (`e2e/lib/probe.py`)
 
 - **R28.** Each observation is a JSON line with `ok` (did this side meet the
@@ -227,6 +252,13 @@ response"); each group names the files it comes from.
   "absent" when a class or method is missing. A scenario starts it, records
   its answers as observations, and sends raw requests to it over HTTP/1.0 and
   HTTP/1.1. *Formerly T22.*
+
+  Extension T39 (done): the three probe requests record the answers by value
+  with `--shape json-values`, which keeps every JSON value and applies
+  R34's masks to the strings, instead of `--shape json`, which kept only
+  each value's type. A DIFF therefore shows both sides' values in its
+  detail (`/body/json/mapping/match: "EXACT" vs null`) instead of
+  `"str" vs "null"`.
 - **R94.** The same four default answers (`PUT`, `OPTIONS`, `TRACE`, `HEAD`)
   are sent with `probe.py raw` over HTTP/1.0 to Hadoop's own servlets on
   every web server the scenario already probes. *Formerly T19.*
@@ -243,8 +275,10 @@ response"); each group names the files it comes from.
   (recorded on one side only).
 - **R37.** The run fails on an unexpected DIFF, an unexpected REGRESSION, an
   observation recorded only on the baseline, and an observation id recorded
-  twice on a side. An observation recorded only on the candidate, FIXED and
-  BOTH_FAIL are listed without failing.
+  twice on a side. FIXED, BOTH_FAIL and an observation recorded only on the
+  candidate do not fail the run and are not listed under the blocking
+  headings: FIXED and a candidate-only MISSING are only counted in the
+  classification, and BOTH_FAIL is also listed under a heading of its own.
 - **R38.** Every daemon JVM logs the classes it loads (`-Xlog:class+load`).
   JDK classes and classes generated at run time are left out. A class loaded
   on both sides from a jar with another artifact name or in another directory
@@ -255,6 +289,14 @@ response"); each group names the files it comes from.
   Impact on users gives their count per side. Each is matched against a
   `classonly` rule (R87); an unexpected one fails the run only with
   `CLASSONLY_FAIL=true`. *Formerly T3.*
+
+  Extension T44, first part (done): before two jar paths are compared, the
+  side name and the per-run application id, container id and filecache number
+  are masked, so the same `job.jar` under two application ids is not a move.
+  A different jar name or another directory under the distribution still is.
+  That a class may move between two jars both sides ship (for example
+  `jakarta.activation-api` and `jakarta.activation` in `mixed`) is not
+  accepted; that is T44's second part, open.
 - **R95.** MapReduce container JVMs log the classes they load too
   (`-Xlog:class+load` in `yarn.app.mapreduce.am.command-opts`,
   `mapreduce.map.java.opts` and `mapreduce.reduce.java.opts`, into the
@@ -262,7 +304,9 @@ response"); each group names the files it comes from.
   per container type (`mr-am`, `map`, `reduce`) and compared as a daemon
   (R38), one table per type merging every container of that type. The
   distributed shell application master is not collected: its Java options are
-  set in `Client.java` without a configuration hook. *Formerly T14.*
+  set in `Client.java` without a configuration hook. A container's `job.jar`
+  paths differ in the application id and filecache number of each run, which
+  are masked as R38's T44 extension describes. *Formerly T14.*
 - **R39.** All daemon logs, `.out` files, container logs and scenario logs
   are scanned for class-loading, linkage and JAX-RS provider errors
   (`NoClassDefFoundError`, `ClassNotFoundException`, `NoSuchMethodError`,
@@ -273,6 +317,13 @@ response"); each group names the files it comes from.
   reader or writer not found, `NoContentException`,
   `ModelValidationException`, `WebApplicationException`, "Could not
   instantiate"), with ids and numbers masked.
+
+  Extension T43 (done): class-load logs are not scanned. The container
+  `classload-<type>.log` files (R95) and the daemons' `classload/` directory
+  name exception classes (`java.lang.ClassCastException`, ...) in
+  `[class,load]` lines without anything having gone wrong, and each side's
+  path made them different messages; a real `ERROR` line in the same
+  directory is still an error.
 - **R40.** A log error fails the run when the candidate has it and the
   baseline does not, or the candidate has it more than twice as often and at
   least 6 more.
@@ -442,9 +493,12 @@ response"); each group names the files it comes from.
   a cherry-picked baseline commit PASSes; a baseline commit changing only
   ignored paths PASSes; one the candidate lacks FAILs); and `report.py`
   (all checks PASS; one check FAILs; one NOT RUN and the rest PASS is
-  INCOMPLETE). It does not cover `compare_plan.py`, `artifact_diff.py`,
-  `api_compat.py` or `impact.py`, which need PR branches or built
-  distributions, or have no verdict.
+  INCOMPLETE), `compare_plan.py` (branches that delete or change files,
+  landed and partly merged branches), `artifact_diff.py` (T12's POM
+  differences and T15's licence checks), `api_compat.py` (T23's added types
+  and members) and `attribution.py` (unused ticket rules, UNEXPECTED
+  differences, a missing tree). Only `impact.py` is not covered: it has no
+  verdict of its own.
 
 ### CI and execution (`.github/workflows/*jetty12_phase_a*.yml`, `ci/*`)
 
@@ -525,7 +579,12 @@ response"); each group names the files it comes from.
   directories (a pattern that misses an architecture's names: the first
   HADOOP-19970 `classjar` rule's `[a-z]+` missed `nn1`, `jn2`, `rm1`,
   `router2`, `nmsc1`, ... and failed ha-run-3, mixed-run-4 and
-  federated-run-5), and exits 1 when a rule matched nothing. *Formerly T6.*
+  federated-run-5), and exits 1 when a rule matched nothing. A rule whose
+  kind none of the reports recorded data for (`pom-*`, `license-*` and
+  `notice-*`, added after these reports were written) is listed as "not
+  replayable" and does not fail, because the report cannot say whether it
+  would have matched; a rule whose kind is present but matched nothing still
+  fails. *Formerly T6.*
 - **R84.** In the `secure` architecture, the MapReduce scenario submits jobs
   with `-D hadoop.security.authorization=false` in the job's own configuration
   (`MR_SEC_OPTS` in `e2e/scenarios/50-mapreduce.sh`), because MAPREDUCE-7548
@@ -616,12 +675,21 @@ response"); each group names the files it comes from.
   `.github/actions/jetty12-phase-a-build-side`), so the baseline a normal run
   saved is not built again. *Formerly T17.*
 
+  Extension T47 (done): `lib/attribution.py` builds the expected tree list
+  from `PR_ORDER`, as `attribution.sh list` does (`ticket-1` to
+  `ticket-<n>`, `prefix-2` to `prefix-<n>`), and reports every expected tree
+  with no results as `missing tree <name>: no results in <dir>` in
+  `attribution.json` and `attribution.md`; a missing tree fails the verdict.
+  A tree whose job failed (the first CI run's `prefix-5`, "No space left on
+  device") can no longer shrink the report silently.
+
 ## TO-BE: identified improvements
 
-Identified during the runs and reviews up to 2026-11-01. T7, T21 and T24 are
-done in the rule files; T3, T8, T9, T10, T11, T17, T20 and T25 are done as
-requirements (each entry says which); the rest are not implemented yet. Each
-says where it came from.
+Identified during the runs and reviews up to 2026-11-03. T7, T21 and T24 are
+done in the rule files; T3, T8, T9, T10, T11, T12, T14, T15, T17, T19, T20,
+T22, T23 and T25 are done as requirements (each entry says which), and T39,
+T40, T41, T42, T43, T44's first part and T47 are done as extensions of the
+requirements listed above. The rest are open; each says where it came from.
 
 - **T1. Raw-request scenarios.** `probe.py raw` (R31) is not used by any
   scenario yet. Add raw requests to `10-web-common` against every web server:
@@ -838,6 +906,51 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   scenarios check: failover itself is driven by the scenarios. Done as R86.
   *Source: ha-run-5; `hdfs-default.xml`.*
 
+The next items are the runs review's T44 to T49 on 2026-11-03
+(`2026-11-03-2138-Harness-Runs-Review.md`, G3 to G10). T44's first part and
+T47 are done as extensions of R38/R95 and R89 (above); the rest are open.
+
+- **T44, second part. A class in two shipped jars.** T44's first part masks
+  the per-run ids in the class-load comparison (R38). The second part is
+  about a class both sides can load from two jars they both ship:
+  `mixed-run-9` has 30 moves of three classes on ten daemons from
+  `jakarta.activation-api-1.2.1.jar` to `jakarta.activation-1.2.2.jar`, with
+  no `dist-file-*` difference for either jar, and classpath order decides.
+  Treat such a class as not a difference. Needs the owner's decision
+  (adding a rule was rejected; the owner decides whether the comparison
+  changes). *Source: G4; mixed-run-9.*
+
+- **T45. Make the A/A run a gate.** An A/A run that reports any blocking
+  difference is a harness failure: require `PASS` (or at least zero blocking
+  entries) before a normal batch is read, and list the blocking entries that
+  made it fail. Extends R68. Needs the owner's decision because it changes
+  acceptance. *Source: G3, G9; simple-run-aa-9 FAIL.*
+
+- **T46. A noise budget before `CLASSONLY_FAIL`.** Keep the switch off until
+  an A/A run reports zero unexpected one-side classes, or mask the classes
+  that differ between two runs of one build (record them from an A/A run) and
+  fail only on classes not in that set. Extends R87 and the T3 extension.
+  Needs the owner's decision. *Source: G9; 10 one-side classes in
+  simple-run-aa-9.*
+
+- **T48. Correct the attribution rules.** Retag `expected-differences.txt`
+  lines 125 and 140 to HADOOP-20015, and add a rule for ticket-6's
+  `pom-dependency-changed ...hadoop-yarn-common|...jersey-test-framework-provider-jetty`
+  (or decide that a ticket tree without its merge predecessors is not a
+  shippable state and do not fail on such interactions). Changes rules:
+  needs the owner's decision (R65) and a replay (R80). *Source: G10;
+  attribution ticket-5, ticket-6.*
+
+- **T49. Record the federated direct reads without an expectation until the
+  router listing is understood.** `dshell-direct-sc1` runs on both sides but
+  the router's `/apps` listing omits it, on both sides. Record
+  `router-apps-direct`, `router-app-list-direct` and
+  `app-on-one-subcluster-direct` as comparisons, not expectations, and file a
+  YARN issue for the listing; `app-on-one-subcluster-direct` can use the
+  sub-cluster's own listing meanwhile. Extends R88. Needs the owner's
+  decision (R88's listing expectations would be amended). *Source: G7;
+  federated-run-10.*
+
 Withdrawn after review: "extract the text of XML error bodies". The probe
 already extracts it (R29); the 17 error responses of secure-run-9 with an
 empty `error_text` all have an empty body (`jmx-trace`, `conf-bad-name`,
@@ -849,11 +962,15 @@ Proposed course of action (2026-11-01); the owner took the step 0
 decisions on 2026-11-02. The requirements document comes first: no harness
 process or allowlist rule changes until the step that covers it. Steps 0 and
 1 are done. Steps 3 and 4 were implemented on 2026-11-02 (commit
-`9092fb6ebf7` on `feat/HARNESS`: R84 to R89), checked locally (comparator
-and probe self-tests, the replay of the five latest reports, an in-memory
-merge of every attribution tree), but not yet run in CI or on a cluster.
-The next work is step 2a, then step 2, in the order that closes HADOOP-19970
-first.
+`9092fb6ebf7` on `feat/HARNESS`: R84 to R89) and run in CI on 2026-11-03
+(the batch of step 2a). That batch failed every architecture and the A/A
+run for harness defects, not patch defects: the scenario done marker was
+lost (G1), class-load logs were read as errors (G2), a container's per-run
+`job.jar` path counted as a move (G3) and the servlet probe compared only
+JSON types (G5). The fixes are T42, T43, T44's first part and T39, done as
+extensions of R82, R39, R38/R95 and R93 (above), with T40, T41 and T47.
+The next work is a fresh batch (step 2a) with those fixes, then step 2 in
+the order that closes HADOOP-19970 first.
 
 ### Step 0: requirements and decisions (document only)
 
@@ -909,12 +1026,17 @@ Done: T20 as R83 (a failing candidate-only test fails the run unless a
 rule accepts it as a known flake), and T24, the job-counter rule's reason (with the owner's agreement,
 replayed with R80).
 
-### Step 2a: run what steps 3 and 4 added (needs the owner's OK to push)
+### Step 2a: run what steps 3 and 4 added (run; read the next batch)
 
-One batch on `9092fb6ebf7` or later: the five architectures
-(`jetty12-phase-a-<arch>-run-N`), one A/A run and two broken-candidate runs
+The batch was run on 2026-11-03 on `93165486a76`: the five architectures
+(`jetty12-phase-a-<arch>-run-N`), the A/A run and two broken-candidate runs
 (R69), and the first attribution run
-(`jetty12-phase-a-attribution-run-1`). Each must pass. Read from it:
+(`jetty12-phase-a-attribution-run-1`). Every normal run FAILed, and the A/A
+run with it, for the harness defects T42, T43, T44's first part and T39 now
+fix; the broken candidates were caught (`Harness check: PASS`); the
+attribution run reported 9 trees because `prefix-5`'s job failed on its
+runner ("No space left on device"), which T47 now reports and fails. The
+next batch must show these gone; read from it:
 
 - R84: in `secure`, the MapReduce jobs compare and `control-job` fails on
   both sides; note how long the control job takes to fail.
@@ -925,9 +1047,13 @@ One batch on `9092fb6ebf7` or later: the five architectures
   Compare step: the failing part of T3.
 - R88: in `federated`, `router-apps-direct`, `router-app-list-direct` and
   `app-on-one-subcluster-direct` pass on both sides.
-- R89: every tree's verdict, and whether the baseline was reused instead of
-  built (the tree jobs' logs). `ticket-6` is HADOOP-19970 alone: every
-  HADOOP-19970 rule must match there, which proves the rules belong to it.
+- R89 and T47: every expected tree's verdict, and whether the baseline was
+  reused instead of built (the tree jobs' logs). `ticket-6` is HADOOP-19970
+  alone: every HADOOP-19970 rule must match there, which proves the rules
+  belong to it. A tree the report does not show is now a problem.
+- R82, R39, R38/R95 and R93 (T42, T43, T44's first part, T39): no
+  `scenario:*` false early end, no class-load log errors, no per-run
+  `job.jar` moves in the A/A run, and the probe's answers compared by value.
 
 ### Step 2: detection gaps for phase A and HADOOP-19970
 
@@ -950,12 +1076,12 @@ run time, the API it makes available), and the static ones need no cluster.
      R87).
    - T4: report the new probe fields.
 
-### Step 3: attribution (implemented, not yet run: step 2a)
+### Step 3: attribution (run in the 2026-11-03 batch; T47 now reports a missing tree)
 
 - T17 is done as R89: per-ticket and merge-order runs, checks 1, 2 and 5 only.
 - T18 is not automated (owner's decision).
 
-### Step 4: pre-existing holes in coverage (implemented, not yet run: step 2a)
+### Step 4: pre-existing holes in coverage (run in the 2026-11-03 batch)
 
 - T10 and T25, then T3: done as R87 (T10 and T3) and R86 (T25). The timeline
   server's class-load noise is masked and the client failover order is

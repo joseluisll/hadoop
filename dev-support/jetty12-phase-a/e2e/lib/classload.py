@@ -40,10 +40,23 @@ VERSION = re.compile(r"-\d[\w.\-]*(?=\.jar$)")
 # Jars outside the distribution (staged test tools) keep absolute paths, which
 # name the side: <WORKDIR>/baseline/tools/... vs <WORKDIR>/candidate/tools/...
 SIDE_ROOT = re.compile(r"^.*/(baseline|candidate)(?=/)")
+# A MapReduce container's job.jar lives under nm-local/usercache/<user>/
+# appcache/application_<ts>_<n>/container_.../filecache/<k>/job.jar/job.jar.
+# The application id, container id and filecache number are new on every run
+# and on both sides, so they are masked before two paths are compared (T44).
+RUN_IDS = [
+    (re.compile(r"application_\d+_\d+"), "application_ID"),
+    (re.compile(r"container_(e\d+_)?\d+_\d+_\d+_\d+"), "container_ID"),
+    (re.compile(r"/filecache/\d+/"), "/filecache/N/"),
+]
 
 
 def side_relative(path):
-    return SIDE_ROOT.sub("<side>", path)
+    """The path with the per-run ids and the side's name masked."""
+    path = SIDE_ROOT.sub("<side>", path)
+    for regex, repl in RUN_IDS:
+        path = regex.sub(repl, path)
+    return path
 
 
 def jar_of(source, dist):

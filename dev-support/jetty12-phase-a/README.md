@@ -49,9 +49,13 @@ the report lists the accepted changes nobody was told about.
      loaded from;
    - every module's resolved dependencies, all scopes (`dependency:list`);
    - every published POM's declared dependencies with their scope,
-     `optional` flag and exclusions, its managed versions and its parent,
-     read from git for both refs (`pom-dependency-*`, `pom-managed-*`,
-     `pom-parent-changed`, `pom-unparseable`, R90). The dependency-reduced POMs the shaded
+     `optional` flag, declared `<version>` (resolved from the POM's
+     properties; a dependency with none is managed elsewhere) and exclusions,
+     its managed versions and its parent, read from git for both refs
+     (`pom-dependency-*`, `pom-managed-*`, `pom-parent-changed`,
+     `pom-unparseable`, R90). A `pom-dependency-changed` detail lists the
+     fields with the exclusions sorted, so two runs of one build write the
+     same bytes. The dependency-reduced POMs the shaded
      clients publish are generated at build time and are not compared;
    - `LICENSE-binary` and `NOTICE-binary`: every third-party jar in the
      distribution is listed and every listed coordinate exists, and a jar new
@@ -98,12 +102,19 @@ the report lists the accepted changes nobody was told about.
    listed per daemon and accepted only by a `classonly <daemon>:<class>` rule
    (R87), and an unexpected one fails the end-to-end check only when
    `CLASSONLY_FAIL=true` (the default, `false`, lists it as "would fail"
-   without changing the verdict). A servlet probe (R93) runs an HttpServer2
-   on the side's classpath and records what a servlet sees at run time; the
+   without changing the verdict). Before the jar a class came from is
+   compared, the side name and the per-run application, container and
+   filecache ids are masked, so a container's `job.jar` under two
+   application ids is not a move (T44). A servlet probe (R93) runs an
+   HttpServer2 on the side's classpath and records what a servlet sees at run
+   time, by value: its JSON answers keep their values (with the usual masks),
+   so a difference shows what each side answered. The
    scenarios also send raw HTTP/1.0 requests (R94). MapReduce container JVMs
    log their class loads (R95), collected and compared per container type.
    All daemon and container logs
-   are scanned for class loading, linkage and JAX-RS provider errors. Line
+   are scanned for class loading, linkage and JAX-RS provider errors, except
+   the class-load logs themselves: their `[class,load]` lines name exception
+   classes without an error having happened (T43). Line
    numbers in Java stack frames are dropped before comparing, so an error
    page that prints a stack trace does not differ just because a jar in it
    was recompiled or upgraded.
@@ -222,7 +233,7 @@ first; the standby does not load request classes on one side only (R86).
 | Suite | Tests |
 |---|---|
 | `changed` | the modules phase A changes (web and Jersey tests in `quick`, everything in `full`, in parallel where a module has Hadoop's `parallel-tests` profile), plus the HTTP tests of KMS, HDFS, RBF, timeline service and MR jobs (the listed tests in both tiers); `changed-1` to `changed-4` split it for CI |
-| `secure` | `TestHttpServerWithSpnego`, `TestSSLHttpServer*`, `TestKDiag*`, `TestSecureNameNode`, `TestSaslDataTransfer`, `TestWebHdfsTokens`, `TestBlockTokenWithDFS*`, `TestKMS`, `TestHttpFSWithKerberos`, `TestRouterWithSecureStartup`, `TestRouterHttpDelegationToken`, `TestRouterSecurityManager`, `TestRMWebappAuthentication`, `TestRMWebServicesDelegationTokenAuthentication`, `TestTimelineAuthenticationFilterForV1`, `TestSecureLogins`, `TestJHSSecurity` |
+| `secure` | `TestHttpServerWithSpnego`, `TestSSLHttpServer*`, `TestKDiag*`, `TestSecureNameNode`, `TestSaslDataTransfer`, `TestWebHdfsTokens`, `TestDelegationToken`, `TestBlockTokenWithDFS*`, `TestKMS`, `TestHttpFSWithKerberos`, `TestHttpFSServerWebServer`, `TestRouterWithSecureStartup`, `TestRouterHttpDelegationToken`, `TestRouterSecurityManager`, `TestRMWebappAuthentication`, `TestRMWebServicesDelegationTokenAuthentication`, `TestRMWebServicesHttpStaticUserPermissions`, `TestTimelineAuthenticationFilterForV1`, `TestSecureLogins`, `TestJHSSecurity` |
 | `ha` | `TestZKFailoverController`, `TestNodeFencer`, `TestWebHDFSForHA`, `TestFailoverWithBlockTokensEnabled`, `TestHAStateTransitions`, `TestDFSZKFailoverController`, `TestStandbyCheckpoints`, `TestDelegationTokensWithHA`, `TestQuorumJournalManager`, `TestRMFailover`, `TestApplicationClientProtocolOnHA`, `TestResourceTrackerOnHA`, `TestRMHA`, `TestRMEmbeddedElector` |
 | `federated` | `TestViewFileSystemHdfs`, `TestViewFsHdfs`, `TestRefreshNamenodes`, `TestWebHdfsWithMultipleNameNodes`, `TestMultipleNNPortQOP`, `TestRouterRpc`, `TestRouterAdminCLI`, `TestRouterMountTable`, `TestRouterWebHdfsMethods`, `TestRouterWebHDFSContract*`, `TestFederationClientInterceptor`, `TestFederationInterceptorREST`, `TestRouterWebServicesREST`, `TestGlobalPolicyGenerator`, `TestFederationInterceptor`, `TestZookeeperFederationStateStore` |
 | `mixed` | `TestSecureNNWithQJM` (secure + HA), `TestRouterNamenodeHeartbeat`, `TestRouterNamenodeMonitoring`, `TestRouterFaultTolerant`, `TestObserverWithRouter`, `TestRouterRPCClientRetries` |
@@ -508,7 +519,9 @@ builds only its candidate, and both reuse a saved build of the same code
 a baseline that a normal run saved is not built again. A final job downloads
 every tree's results and runs `lib/attribution.py`, which writes
 `attribution.json` and `attribution.md` and fails when a ticket's rule matched
-nothing in its own tree or a difference is UNEXPECTED.
+nothing in its own tree, a difference is UNEXPECTED, or a tree of `PR_ORDER`
+has no results (`missing tree <name>`), so a failed tree job cannot shrink
+the report silently (T47).
 
 ### On one machine
 
@@ -566,7 +579,7 @@ dev-support/jetty12-phase-a/replay.sh ~/reports/report-*
 | `ANCESTRY_CHECK` | `true` | `compare.sh` stops when the candidate lacks a baseline commit's change (`lib/ancestry.py`) |
 | `PLAN_CHECK` | `true` | `compare.sh` stops when the candidate is not the baseline plus `PR_BRANCHES` (`lib/compare_plan.py`) |
 | `CLASSONLY_FAIL` | `false` | whether an unexpected one-side class fails the end-to-end check (R87); with `false` it is listed as "would fail" without changing the verdict; in CI the Compare step of `tmpl_jetty12_phase_a.yml` sets it |
-| `PR_BRANCHES` | the six PR branches in merge order | the branches merged into trunk, in merge order, comma-separated (e.g. `origin/HADOOP-20012-upstream,...,origin/jetty-phase-a`); the plan check runs only when set. The workflow sets it for every run; a run whose two sides are one commit skips the check |
+| `PR_BRANCHES` | none | the branches merged into trunk, in merge order, comma-separated (e.g. `origin/HADOOP-20012-upstream,...,origin/jetty-phase-a`); the plan check runs only when set. The workflow sets it for every run; a run whose two sides are one commit skips the check |
 | `MAVEN_MIRROR_URL` | none | mirror of Maven Central, e.g. `https://maven-central.storage-download.googleapis.com/maven2` when the build host is rate-limited |
 | `MVN_EXTRA_ARGS` | none | added to every Maven call |
 | `BUILD_NATIVE` | `false` | build the distribution with the native libraries (`-Pnative`, OpenSSL and Snappy required); needs the toolchain of `start-build-env.sh`, which CI uses |
@@ -660,7 +673,10 @@ sockets.
 - **A scenario that ends early** is an observation: every scenario records
   `scenario:<name>.completed`, failed when the script did not reach its last
   line, and `scenario:<name>.timeout` when it was cut off. Its observations
-  after that point are lost, so the end is compared instead (R82).
+  after that point are lost, so the end is compared instead (R82). The
+  marker's file name reaches the scenario's shell in an environment variable,
+  so a scenario that runs `set --` (`10-web-common`, `70-secure`) cannot
+  overwrite it (T42).
 - **BOTH_FAIL** observations, tests failing on both sides and unit modules
   whose Maven run failed on both sides are not caused by the patch, but each
   one hides what it was checking: look at them before relying on a run.

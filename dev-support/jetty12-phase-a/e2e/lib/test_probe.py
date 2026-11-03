@@ -35,7 +35,10 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-PROBE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "probe.py")
+HERE = os.path.dirname(os.path.abspath(__file__))
+PROBE = os.path.join(HERE, "probe.py")
+LOGSCAN = os.path.join(HERE, "logscan.py")
+HARNESS = os.path.dirname(os.path.dirname(HERE))
 PAGE = ("<html><head><title>Error 403 Forbidden</title></head><body><table>"
         "<tr><th>URI:</th><td>/x</td></tr><tr><th>MESSAGE:</th><td>%s</td></tr>"
         "</table><p>Powered by Jetty</p></body></html>")
@@ -129,7 +132,61 @@ def probe(tmp, cmd, url, *args, env=None):
         return json.loads(f.read())["obs"]
 
 
+def logscan_case(tmp):
+    """A class-load line naming an exception is not an error; an ERROR line is."""
+    logs = os.path.join(tmp, "logs")
+    container = os.path.join(logs, "userlogs", "app1", "container_1_2_3_4",
+                             "classload-map.log")
+    os.makedirs(os.path.dirname(container))
+    with open(container, "w", encoding="utf-8") as f:
+        f.write("[0.512s][info][class,load] java.lang.ClassCastException "
+                "source: file:/x/hadoop-common.jar\n")
+    daemon_classload = os.path.join(logs, "classload", "nn1.log")
+    os.makedirs(os.path.dirname(daemon_classload))
+    with open(daemon_classload, "w", encoding="utf-8") as f:
+        f.write("[0.512s][info][class,load] java.lang.ClassCastException "
+                "source: file:/x/hadoop-common.jar\n")
+    daemon = os.path.join(logs, "hadoop-nn1-namenode-host.log")
+    with open(daemon, "w", encoding="utf-8") as f:
+        f.write("2026-11-03 ERROR NoClassDefFoundError: Foo\n")
+    r = subprocess.run([sys.executable, "-I", LOGSCAN, logs,
+                        os.path.join(tmp, "res")],
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    got = json.loads(r.stdout)
+    assert got == {"nn1": {"NoClassDefFoundError: Foo": 1}}, got
+
+
+def done_marker_case(tmp):
+    """The runner's scenario step writes its marker even when the scenario runs
+    `set --`, and leaves it absent when the scenario dies early."""
+    workdir = os.path.join(tmp, "work")
+    os.makedirs(os.path.join(workdir, "baseline", "dist", "hadoop-3.4.0"))
+    runs = []
+    for name, body in (("ok", "set -- a b c d e f\n"), ("early", "set -- a b c d e f\nexit 1\n")):
+        scenario = os.path.join(tmp, name + ".sh")
+        with open(scenario, "w", encoding="utf-8") as f:
+            f.write(body)
+        done = os.path.join(tmp, name + ".done")
+        script = f'''
+source "{HARNESS}/lib/common.sh"
+SIDE=baseline
+source "{HARNESS}/e2e/lib/env.sh"
+run_scenario "{HARNESS}" baseline simple "{scenario}" "{done}" "{tmp}/{name}.log"
+'''
+        r = subprocess.run(["bash", "-c", script], capture_output=True, text=True,
+                           env={**os.environ, "WORKDIR": workdir})
+        runs.append((name, r, done))
+    name, r, done = runs[0]
+    assert r.returncode == 0 and os.path.exists(done), (r.returncode, r.stderr)
+    name, r, done = runs[1]
+    assert r.returncode == 1 and not os.path.exists(done), (r.returncode, r.stderr)
+
+
 def main():
+    with tempfile.TemporaryDirectory() as tmp:
+        logscan_case(tmp)
+        done_marker_case(tmp)
     server = ThreadingHTTPServer(("127.0.0.1", 0), Server)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     base = f"http://127.0.0.1:{server.server_address[1]}"
@@ -150,6 +207,12 @@ def main():
         old, new = both("json")
         assert old["body"] == new["body"], "the shape cannot tell these apart"
         assert old["error_text"] != new["error_text"], (old, new)
+        # T39: json-values keeps the values, with the usual masks.
+        old, new = both("json", "--shape", "json-values")
+        assert old["body"]["json"]["RemoteException"]["exception"] == "AccessControlException", old
+        assert old["body"]["json"]["RemoteException"]["message"] == "denied by HOST", old
+        assert new["body"]["json"]["RemoteException"]["message"] == "denied", new
+        assert old["body"] != new["body"], (old, new)
         assert "denied by HOST" in old["error_text"][1], old
         old, _ = both("xml")
         assert old["error_text"] == ["message=denied"], old

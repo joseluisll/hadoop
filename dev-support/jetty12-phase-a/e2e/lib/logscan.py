@@ -22,7 +22,8 @@ Scans every daemon log, .out file, container log under the log dir, and the
 scenario logs under <results dir>/scenarios. Prints JSON:
 {"<source>": {"<normalized message>": count}}, where source is the daemon
 or "containers" / "scenarios". Messages are normalized (ids, numbers,
-timestamps masked) so the two sides can be compared.
+timestamps masked) so the two sides can be compared. Class-load logs are
+skipped: they name exception classes without an error having happened.
 """
 
 import collections
@@ -65,7 +66,17 @@ def source_of(path, log_dir):
     return m.group(1) if m else base
 
 
+def is_classload(path):
+    """A class-load log: the container `classload-<type>.log` files (T14) and
+    the daemons' own class-load tables, whose lines name exception classes
+    without anything having gone wrong."""
+    return (re.match(r"classload-.*\.log$", os.path.basename(path)) is not None
+            or "classload" in path.split(os.sep)[:-1])
+
+
 def scan(path, counts, source):
+    if is_classload(path):
+        return
     try:
         with open(path, encoding="utf-8", errors="replace") as f:
             for line in f:

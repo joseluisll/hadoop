@@ -243,6 +243,23 @@ wait_app_state() {
   return 1
 }
 
+# run_scenario <harness dir> <side> <arch> <scenario> <done file> <log file>:
+# run one scenario in its own shell, cut off after E2E_SCENARIO_TIMEOUT, and
+# write <done file> when it reaches its last line. The done file reaches the
+# inner shell in an environment variable: a scenario that runs `set --`
+# (10-web-common, 70-secure) would replace a positional parameter and the
+# marker would be written somewhere else.
+run_scenario() {
+  SCENARIO_DONE_FILE=$5 timeout "${E2E_SCENARIO_TIMEOUT:-3600}" bash -c '
+    set -u
+    source "$1/lib/common.sh"
+    SIDE=$2 ARCH=$3
+    source "$1/e2e/lib/env.sh"
+    source "$4"
+    : > "${SCENARIO_DONE_FILE}"
+  ' _ "$1" "$2" "$3" "$4" > "$6" 2>&1
+}
+
 # latest_app [name regex]: id of the most recently submitted application.
 latest_app() {
   rest "${RM_URL}/ws/v1/cluster/apps" | python3 -c '
