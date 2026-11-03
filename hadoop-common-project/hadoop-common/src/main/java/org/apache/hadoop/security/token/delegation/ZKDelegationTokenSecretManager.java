@@ -338,6 +338,9 @@ public abstract class ZKDelegationTokenSecretManager<TokenIdent extends Abstract
           })
           .forDeletes(childData -> processKeyRemoved(childData.getPath()))
           .forInitialized(keyCacheInitialized::countDown)
+          // loadFromZKCache() reads the initial nodes once the cache is
+          // initialized, so the listener only needs the later changes.
+          .afterInitialized()
           .build();
       keyCache.listenable().addListener(keyCacheListener);
       keyCache.start();
@@ -377,6 +380,9 @@ public abstract class ZKDelegationTokenSecretManager<TokenIdent extends Abstract
               }
             })
             .forInitialized(tokenCacheInitialized::countDown)
+            // loadFromZKCache() reads the initial nodes once the cache is
+            // initialized, so the listener only needs the later changes.
+            .afterInitialized()
             .build();
         tokenCache.listenable().addListener(tokenCacheListener);
         tokenCache.start();
