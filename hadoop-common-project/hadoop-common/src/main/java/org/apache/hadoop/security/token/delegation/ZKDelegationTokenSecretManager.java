@@ -51,6 +51,7 @@ import org.apache.hadoop.security.token.delegation.web.DelegationTokenManager;
 import org.apache.hadoop.util.Preconditions;
 
 import static org.apache.hadoop.security.SecurityUtil.getServerPrincipal;
+import static org.apache.hadoop.util.Time.monotonicNow;
 import static org.apache.hadoop.util.Time.now;
 
 import org.apache.hadoop.util.curator.ZKCuratorManager.HadoopZookeeperFactory;
@@ -159,6 +160,8 @@ public abstract class ZKDelegationTokenSecretManager<TokenIdent extends Abstract
   private CuratorCacheBridge tokenCache;
   private final int seqNumBatchSize;
   private final long cacheInitTimeoutMs;
+  // How often to log a warning while waiting for a cache to initialize.
+  private long cacheInitWarnIntervalMs = 10000;
   private int currentSeqNum;
   private int currentMaxSeqNum;
 
@@ -433,17 +436,45 @@ public abstract class ZKDelegationTokenSecretManager<TokenIdent extends Abstract
     LOG.info("Loaded {} cache.", cacheName);
   }
 
+  @VisibleForTesting
+  void setCacheInitWarnIntervalMs(long intervalMs) {
+    cacheInitWarnIntervalMs = intervalMs;
+  }
+
+  /**
+   * Wait for the initial load of a CuratorCache, logging a warning every
+   * {@link #cacheInitWarnIntervalMs} so that a startup blocked on an
+   * unreachable ZooKeeper shows up in the logs.
+   * <p>
+   * Curator signals initialization only after its persistent watch is set,
+   * and keeps retrying the watch while ZooKeeper is unreachable, so the
+   * wait has no bound other than {@link #ZK_DTSM_ZK_CACHE_INIT_TIMEOUT}.
+   * Note that in Curator 5.2.0 a read that fails during the initial load
+   * still counts as done, so the cache can report initialization while
+   * missing the nodes whose reads failed.
+   */
   private void awaitCacheInitialized(CountDownLatch initialized,
       String cacheName) throws IOException {
+    final long start = monotonicNow();
     try {
-      if (cacheInitTimeoutMs > 0) {
-        if (!initialized.await(cacheInitTimeoutMs, TimeUnit.MILLISECONDS)) {
-          throw new IOException("Timed out after " + cacheInitTimeoutMs
-              + " ms waiting for " + cacheName + " cache initialization, "
-              + "consider increasing " + ZK_DTSM_ZK_CACHE_INIT_TIMEOUT);
+      while (true) {
+        long waitMs = cacheInitWarnIntervalMs;
+        if (cacheInitTimeoutMs > 0) {
+          long remainingMs = cacheInitTimeoutMs - (monotonicNow() - start);
+          if (remainingMs <= 0) {
+            throw new IOException("Timed out after " + cacheInitTimeoutMs
+                + " ms waiting for " + cacheName + " cache initialization, "
+                + "consider increasing " + ZK_DTSM_ZK_CACHE_INIT_TIMEOUT);
+          }
+          waitMs = Math.min(waitMs, remainingMs);
         }
-      } else {
-        initialized.await();
+        if (initialized.await(waitMs, TimeUnit.MILLISECONDS)) {
+          return;
+        }
+        LOG.warn("Still waiting for the {} cache to initialize after {} ms;"
+            + " check that ZooKeeper is reachable. {}={} ms (0 waits"
+            + " indefinitely).", cacheName, monotonicNow() - start,
+            ZK_DTSM_ZK_CACHE_INIT_TIMEOUT, cacheInitTimeoutMs);
       }
     } catch (InterruptedException e) {
       Thread.currentThread().interrupt();
