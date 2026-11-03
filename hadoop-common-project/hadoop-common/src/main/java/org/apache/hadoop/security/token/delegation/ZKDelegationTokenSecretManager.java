@@ -459,7 +459,8 @@ public abstract class ZKDelegationTokenSecretManager<TokenIdent extends Abstract
    * still counts as done, so the cache can report initialization while
    * missing the nodes whose reads failed.
    */
-  private void awaitCacheInitialized(CountDownLatch initialized,
+  @VisibleForTesting
+  void awaitCacheInitialized(CountDownLatch initialized,
       String cacheName) throws IOException {
     final long start = monotonicNow();
     try {

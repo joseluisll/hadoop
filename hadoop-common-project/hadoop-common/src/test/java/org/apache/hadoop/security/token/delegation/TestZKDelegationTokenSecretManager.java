@@ -19,6 +19,7 @@
 package org.apache.hadoop.security.token.delegation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,6 +32,7 @@ import java.util.Arrays;
 import java.util.List;
 
 import java.util.concurrent.Callable;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -40,6 +42,7 @@ import org.apache.curator.RetryPolicy;
 import org.apache.curator.framework.CuratorFramework;
 import org.apache.curator.framework.CuratorFrameworkFactory;
 import org.apache.curator.framework.api.ACLProvider;
+import org.apache.curator.framework.imps.CuratorFrameworkState;
 import org.apache.curator.framework.api.CreateBuilder;
 import org.apache.curator.framework.api.ProtectACLCreateModeStatPathAndBytesable;
 import org.apache.curator.retry.ExponentialBackoffRetry;
@@ -52,6 +55,7 @@ import org.apache.hadoop.security.token.Token;
 import org.apache.hadoop.security.token.delegation.web.DelegationTokenIdentifier;
 import org.apache.hadoop.security.token.delegation.web.DelegationTokenManager;
 import org.apache.hadoop.test.GenericTestUtils;
+import org.apache.hadoop.test.GenericTestUtils.LogCapturer;
 import org.apache.hadoop.test.LambdaTestUtils;
 import org.apache.zookeeper.KeeperException;
 import org.apache.zookeeper.ZooDefs;
@@ -706,6 +710,72 @@ public class TestZKDelegationTokenSecretManager {
       // Restore the default curator so later tests do not see a closed client.
       ZKDelegationTokenSecretManager.setCurator(null);
       curatorFramework.close();
+    }
+  }
+
+  /**
+   * A secret manager whose caches never report initialization, as when
+   * ZooKeeper becomes unreachable before a cache's persistent watch is set.
+   */
+  private static class NeverInitializedSecretManager
+      extends ZKDelegationTokenSecretManager<DelegationTokenIdentifier> {
+
+    NeverInitializedSecretManager(Configuration conf) {
+      super(conf);
+    }
+
+    @Override
+    public DelegationTokenIdentifier createIdentifier() {
+      return new DelegationTokenIdentifier(new Text("never-initialized"));
+    }
+
+    @Override
+    void awaitCacheInitialized(CountDownLatch initialized, String cacheName)
+        throws IOException {
+      // Wait on a latch that Curator never counts down.
+      super.awaitCacheInitialized(new CountDownLatch(1), cacheName);
+    }
+  }
+
+  @Test
+  @Timeout(value = 60)
+  public void testStartFailsAndReleasesResourcesWhenCacheNeverInitializes()
+      throws Exception {
+    Configuration conf = getSecretConf(zkServer.getConnectString());
+    conf.setLong(ZKDelegationTokenSecretManager.ZK_DTSM_ZK_CACHE_INIT_TIMEOUT,
+        1000);
+    NeverInitializedSecretManager sm = new NeverInitializedSecretManager(conf);
+    sm.setCacheInitWarnIntervalMs(100);
+    LogCapturer logs = LogCapturer.captureLogs(
+        LoggerFactory.getLogger(ZKDelegationTokenSecretManager.class));
+    try {
+      IOException e = LambdaTestUtils.intercept(IOException.class,
+          "Could not start Curator keyCacheListener for keys",
+          () -> sm.startThreads());
+      GenericTestUtils.assertExceptionContains(
+          "Timed out after 1000 ms waiting for key cache initialization",
+          e.getCause());
+      assertTrue(logs.getOutput().contains(
+          "Still waiting for the key cache to initialize"),
+          "No warning logged while waiting: " + logs.getOutput());
+
+      // Startup got as far as the counters and the root znodes, and the
+      // failure released what it had started.
+      try (CuratorFramework client = CuratorFrameworkFactory.newClient(
+          zkServer.getConnectString(), new ExponentialBackoffRetry(1000, 3))) {
+        client.start();
+        assertNotNull(client.checkExists()
+            .forPath("/testPath/ZKDTSMRoot/ZKDTSMMasterKeyRoot"),
+            "the key root znode should have been created");
+      }
+      assertFalse(sm.isRunning(), "secret manager should not be running");
+      assertEquals(CuratorFrameworkState.STOPPED, sm.zkClient.getState(),
+          "Curator client should be closed");
+    } finally {
+      logs.stopCapturing();
+      if (sm.zkClient.getState() == CuratorFrameworkState.STARTED) {
+        sm.stopThreads();
+      }
     }
   }
 }
