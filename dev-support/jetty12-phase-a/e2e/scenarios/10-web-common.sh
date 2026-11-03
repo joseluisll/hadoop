@@ -71,4 +71,47 @@ for line in "${INSTANCES[@]}"; do
     http plain-http "http://${base#https://}/jmx" --expect-status any --shape none --allow-error
     http no-credentials "${base}/jmx" --no-auth --expect-status 401 --shape none
   fi
+  # T19 (R94): the same four default answers over HTTP/1.0. probe.py raw sends
+  # the request byte for byte, without the Host header HTTP/1.0 does not need;
+  # the servlet's default doPut/doOptions/doTrace/doHead answer them.
+  raw jmx-http10-put "${base}/jmx?${U}" "PUT /jmx?${U} HTTP/1.0\r\n\r\n"
+  raw jmx-http10-options "${base}/jmx?${U}" "OPTIONS /jmx?${U} HTTP/1.0\r\n\r\n"
+  raw jmx-http10-trace "${base}/jmx?${U}" "TRACE /jmx?${U} HTTP/1.0\r\n\r\n"
+  raw jmx-http10-head "${base}/jmx?${U}" "HEAD /jmx?${U} HTTP/1.0\r\n\r\n"
 done
+
+# T22 (R93): what a servlet sees at run time on this side's classpath. The
+# probe is a single source file started as a JVM, not a daemon; it serves an
+# HttpServer2 named "probe" (so webapps/probe must be on the classpath) and
+# answers as JSON. It is started here and stopped after the requests. Its
+# classpath is the side's distribution, as KerbyKinit's is in conf.sh; the
+# wildcard order picks the servlet API the daemons would see.
+COMPONENT=probe
+PROBE_PORT="${P_PROBE_HTTP}"
+PROBE_WEBAPPS="${RUN}/webapps"
+mkdir -p "${PROBE_WEBAPPS}/probe"
+PROBE_ARGS="${RUN}/servletprobe.args"
+echo "-cp ${RUN}:${DIST}/etc/hadoop:${DIST}/share/hadoop/common/*:${DIST}/share/hadoop/common/lib/*" > "${PROBE_ARGS}"
+timeout 120 java "@${PROBE_ARGS}" "${E2E_DIR}/lib/ServletProbe.java" "${PROBE_PORT}" 90 > "${RES}/servletprobe.log" 2>&1 &
+PROBE_PID=$!
+for _ in {1..60}; do
+  if grep -q '^READY ' "${RES}/servletprobe.log" 2>/dev/null; then break; fi
+  sleep 0.5
+done
+if grep -q '^READY ' "${RES}/servletprobe.log" 2>/dev/null; then
+  http probe-base "http://127.0.0.1:${PROBE_PORT}/probe" --expect-status 200 --shape json --no-auth
+  http probe-forward "http://127.0.0.1:${PROBE_PORT}/probe/forward" --expect-status 200 --shape json --no-auth
+  http probe-include "http://127.0.0.1:${PROBE_PORT}/probe/include" --expect-status 200 --shape json --no-auth
+  raw probe-http10-put "http://127.0.0.1:${PROBE_PORT}/probe" "PUT /probe HTTP/1.0\r\n\r\n"
+  raw probe-http10-options "http://127.0.0.1:${PROBE_PORT}/probe" "OPTIONS /probe HTTP/1.0\r\n\r\n"
+  raw probe-http10-trace "http://127.0.0.1:${PROBE_PORT}/probe" "TRACE /probe HTTP/1.0\r\n\r\n"
+  raw probe-http10-head "http://127.0.0.1:${PROBE_PORT}/probe" "HEAD /probe HTTP/1.0\r\n\r\n"
+  raw probe-http11-put "http://127.0.0.1:${PROBE_PORT}/probe" "PUT /probe HTTP/1.1\r\nHost: 127.0.0.1:${PROBE_PORT}\r\n\r\n"
+  raw probe-http11-options "http://127.0.0.1:${PROBE_PORT}/probe" "OPTIONS /probe HTTP/1.1\r\nHost: 127.0.0.1:${PROBE_PORT}\r\n\r\n"
+  raw probe-http11-trace "http://127.0.0.1:${PROBE_PORT}/probe" "TRACE /probe HTTP/1.1\r\nHost: 127.0.0.1:${PROBE_PORT}\r\n\r\n"
+  raw probe-http11-head "http://127.0.0.1:${PROBE_PORT}/probe" "HEAD /probe HTTP/1.1\r\nHost: 127.0.0.1:${PROBE_PORT}\r\n\r\n"
+else
+  check probe-started false "$(tail -n 5 "${RES}/servletprobe.log" 2>/dev/null)"
+fi
+kill "${PROBE_PID}" 2>/dev/null || true
+wait "${PROBE_PID}" 2>/dev/null || true

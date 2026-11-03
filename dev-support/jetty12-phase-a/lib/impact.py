@@ -110,6 +110,13 @@ def main(cmp_dir):
             kinds = collections.Counter(f["kind"] for f in items)
             rows.append(f"- {label}: {len(items)} ({', '.join(f'{n} {k}' for k, n in kinds.items())}; "
                         f"{status_counts(items)})")
+    added = (api or {}).get("added_api", [])
+    if added:
+        types = sum(len(a["types"]) for a in added)
+        members = sum(len(a["members"]) for a in added)
+        rows.append(f"- API a replaced third-party jar makes available: {types} types and "
+                    f"{members} members in {len(added)} jar replacements; code built against "
+                    "Hadoop may start to use them and fails where only the older jar is present")
     for arch, r in e2e.items():
         if not r or "rows" not in r:
             continue

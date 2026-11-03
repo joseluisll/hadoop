@@ -138,9 +138,9 @@ arch_conf() {
     "mapreduce.jobhistory.webapp.https.address=${HOST}:${P_JHS_HTTPS}" \
     "mapreduce.jobhistory.webapp.spnego-principal=HTTP/_HOST${r}" \
     "mapreduce.jobhistory.webapp.spnego-keytab-file=${kt}" \
-    "yarn.app.mapreduce.am.command-opts=-Xmx384m -Djava.security.krb5.conf=${KRB5_CONFIG}" \
-    "mapreduce.map.java.opts=-Xmx200m -Djava.security.krb5.conf=${KRB5_CONFIG}" \
-    "mapreduce.reduce.java.opts=-Xmx200m -Djava.security.krb5.conf=${KRB5_CONFIG}"
+    "yarn.app.mapreduce.am.command-opts=-Xmx384m -Djava.security.krb5.conf=${KRB5_CONFIG} $(classload_opt mr-am)" \
+    "mapreduce.map.java.opts=-Xmx200m -Djava.security.krb5.conf=${KRB5_CONFIG} $(classload_opt map)" \
+    "mapreduce.reduce.java.opts=-Xmx200m -Djava.security.krb5.conf=${KRB5_CONFIG} $(classload_opt reduce)"
   site "${HADOOP_CONF_DIR}/kms-site.xml" \
     "hadoop.kms.key.provider.uri=jceks://file@${d}/kms.keystore" \
     "hadoop.kms.http.port=${P_KMS}" \

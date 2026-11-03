@@ -103,6 +103,16 @@ for ARCH in ${ARCHS//,/ }; do
 
     # Give the daemons a moment to flush aggregated logs, then look at them.
     sleep 5
+    # R95 (T14): MapReduce container JVMs log the classes they load into their
+    # own container log directory. Merge every container of one type into one
+    # table next to the daemons', so classload.py compares the container type
+    # as a daemon (R38). dshell-am has no Java-options hook in Client.java.
+    mkdir -p "${RES}/classload"
+    for f in "${HADOOP_LOG_DIR}"/userlogs*/*/*/classload-*.log; do
+      [[ -e "${f}" ]] || continue
+      type=$(basename "${f}" .log)
+      cat "${f}" >> "${RES}/classload/${type#classload-}.log"
+    done
     python3 -I "${E2E_DIR}/lib/logscan.py" "${HADOOP_LOG_DIR}" "${RES}" > "${RES}/logscan.json"
     python3 -I "${E2E_DIR}/lib/classload.py" summarize "${RES}/classload" "${DIST}" \
       > "${RES}/classload-summary.json"

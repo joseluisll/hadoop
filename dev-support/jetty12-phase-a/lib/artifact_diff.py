@@ -44,7 +44,9 @@ import io
 import json
 import os
 import re
+import subprocess
 import sys
+import xml.etree.ElementTree as ET
 import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -137,10 +139,343 @@ def read_deps(path):
         return {line.rstrip("\n") for line in f if line.strip()}
 
 
+# --- T12: published POMs ---------------------------------------------------
+
+def _strip_ns(tag):
+    return tag.split("}")[-1] if "}" in tag else tag
+
+
+def _find(el, tag):
+    for child in el:
+        if _strip_ns(child.tag) == tag:
+            return child
+    return None
+
+
+def _findall(el, tag):
+    return [child for child in el if _strip_ns(child.tag) == tag]
+
+
+def _text(el):
+    return el.text.strip() if el is not None and el.text else ""
+
+
+def _git_show(repo, ref, path):
+    r = subprocess.run(["git", "-C", repo, "show", f"{ref}:{path}"],
+                       capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
+def _git_ls_tree(repo, ref):
+    r = subprocess.run(["git", "-C", repo, "ls-tree", "-r", "--name-only", ref],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return []
+    return [p for p in r.stdout.splitlines()
+            if p.endswith("pom.xml") and not p.startswith("dev-support/jetty12-phase-a/")]
+
+
+def _pom_dep(el):
+    """(key, scope, optional, exclusions) for a <dependency> element."""
+    g = _text(_find(el, "groupId"))
+    a = _text(_find(el, "artifactId"))
+    t = _text(_find(el, "type"))
+    c = _text(_find(el, "classifier"))
+    key = f"{g}:{a}"
+    if t or c:
+        key += f":{t}" + (f":{c}" if c else "")
+    scope = _text(_find(el, "scope")) or "compile"
+    optional = _text(_find(el, "optional")) or "false"
+    exclusions = set()
+    ex = _find(el, "exclusions")
+    if ex is not None:
+        for e in _findall(ex, "exclusion"):
+            exclusions.add(f"{_text(_find(e, 'groupId'))}:{_text(_find(e, 'artifactId'))}")
+    return key, scope, optional, frozenset(exclusions)
+
+
+def _pom_deps(root, section):
+    """{key: (scope, optional, exclusions)} for a dependencies section."""
+    out = {}
+    d = _find(root, section)
+    if d is None:
+        return out
+    for dep in _findall(d, "dependency"):
+        key, scope, optional, exclusions = _pom_dep(dep)
+        out[key] = (scope, optional, exclusions)
+    return out
+
+
+def _pom_managed(root):
+    """{key: version} for <dependencyManagement>."""
+    out = {}
+    dm = _find(root, "dependencyManagement")
+    if dm is None:
+        return out
+    deps = _find(dm, "dependencies")
+    if deps is None:
+        return out
+    for dep in _findall(deps, "dependency"):
+        g = _text(_find(dep, "groupId"))
+        a = _text(_find(dep, "artifactId"))
+        t = _text(_find(dep, "type"))
+        c = _text(_find(dep, "classifier"))
+        key = f"{g}:{a}"
+        if t or c:
+            key += f":{t}" + (f":{c}" if c else "")
+        out[key] = _text(_find(dep, "version"))
+    return out
+
+
+def _pom_props(root):
+    out = {}
+    p = _find(root, "properties")
+    if p is not None:
+        for child in p:
+            out[_strip_ns(child.tag)] = _text(child)
+    return out
+
+
+def _pom_parent(root):
+    p = _find(root, "parent")
+    if p is None:
+        return None
+    return (_text(_find(p, "groupId")), _text(_find(p, "artifactId")),
+            _text(_find(p, "version")))
+
+
+def _resolve_version(version, props):
+    if version.startswith("${") and version.endswith("}"):
+        return props.get(version[2:-1], version)
+    return version
+
+
+def _pom_module(root):
+    parent = _pom_parent(root)
+    g = _text(_find(root, "groupId"))
+    if not g and parent:
+        g = parent[0]
+    a = _text(_find(root, "artifactId"))
+    return f"{g}:{a}"
+
+
+def compare_poms(repo, b_ref, c_ref, record):
+    """T12: compare every POM outside the harness between two git refs."""
+    b_paths = set(_git_ls_tree(repo, b_ref))
+    c_paths = set(_git_ls_tree(repo, c_ref))
+    for path in sorted(b_paths | c_paths):
+        b_content = _git_show(repo, b_ref, path) if path in b_paths else None
+        c_content = _git_show(repo, c_ref, path) if path in c_paths else None
+        try:
+            b_root = ET.fromstring(b_content) if b_content else None
+            c_root = ET.fromstring(c_content) if c_content else None
+        except ET.ParseError as e:
+            # A POM the check cannot read would hide its differences.
+            record("pom-unparseable", path, str(e))
+            continue
+        b_module = _pom_module(b_root) if b_root is not None else None
+        c_module = _pom_module(c_root) if c_root is not None else None
+        module = c_module or b_module
+        b_deps = _pom_deps(b_root, "dependencies") if b_root is not None else {}
+        c_deps = _pom_deps(c_root, "dependencies") if c_root is not None else {}
+        for key in sorted(b_deps.keys() - c_deps.keys()):
+            record("pom-dependency-removed", f"{module}|{key}")
+        for key in sorted(c_deps.keys() - b_deps.keys()):
+            record("pom-dependency-added", f"{module}|{key}")
+        for key in sorted(b_deps.keys() & c_deps.keys()):
+            if b_deps[key] != c_deps[key]:
+                record("pom-dependency-changed", f"{module}|{key}",
+                       f"{b_deps[key]} -> {c_deps[key]}")
+        b_managed = _pom_managed(b_root) if b_root is not None else {}
+        c_managed = _pom_managed(c_root) if c_root is not None else {}
+        b_props = _pom_props(b_root) if b_root is not None else {}
+        c_props = _pom_props(c_root) if c_root is not None else {}
+        for key in sorted(b_managed.keys() - c_managed.keys()):
+            record("pom-managed-removed", f"{module}|{key}")
+        for key in sorted(c_managed.keys() - b_managed.keys()):
+            record("pom-managed-added", f"{module}|{key}")
+        for key in sorted(b_managed.keys() & c_managed.keys()):
+            b_ver = _resolve_version(b_managed[key], b_props)
+            c_ver = _resolve_version(c_managed[key], c_props)
+            if b_ver != c_ver:
+                record("pom-managed-changed", f"{module}|{key}", f"{b_ver} -> {c_ver}")
+        b_parent = _pom_parent(b_root) if b_root is not None else None
+        c_parent = _pom_parent(c_root) if c_root is not None else None
+        if b_parent != c_parent:
+            record("pom-parent-changed", f"{module}|parent", f"{b_parent} -> {c_parent}")
+
+
+# --- T15: LICENSE-binary and NOTICE-binary consistency ---------------------
+
+def _jar_coordinate(path):
+    """g:a:v from META-INF/maven/*/*/pom.properties, else the file name."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            for n in z.namelist():
+                if n.startswith("META-INF/maven/") and n.endswith("/pom.properties"):
+                    props = {}
+                    for line in z.read(n).decode("utf-8", "replace").splitlines():
+                        if "=" in line and not line.lstrip().startswith("#"):
+                            k, v = line.split("=", 1)
+                            props[k.strip()] = v.strip()
+                    g, a, v = props.get("groupId"), props.get("artifactId"), props.get("version")
+                    if g and a and v:
+                        return f"{g}:{a}:{v}"
+    except (zipfile.BadZipFile, OSError):
+        pass
+    return os.path.basename(path)
+
+
+def _jar_notice(path):
+    """A jar's own META-INF/NOTICE* text, or None when it ships none."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            for n in z.namelist():
+                if n.startswith("META-INF/NOTICE"):
+                    return z.read(n).decode("utf-8", "replace")
+    except (zipfile.BadZipFile, OSError):
+        pass
+    return None
+
+
+def _jar_names(coord, name):
+    """Names NOTICE-binary may use for a jar: its file name and artifactId."""
+    base = name[:-4] if name.endswith(".jar") else name
+    names = {base}
+    parts = coord.split(":")
+    if len(parts) >= 2:
+        names.add(parts[1])
+        names.add(parts[0] + ":" + parts[1])
+    return names
+
+
+def _notice_mentions(names, text):
+    """True when NOTICE-binary text names the jar by artifactId or project.
+
+    NOTICE-binary writes projects in prose ("Jetty Web Container"), so the
+    artifactId's first token counts as a name when it is distinctive.
+    """
+    low = text.lower()
+    for n in names:
+        if n.lower() in low:
+            return True
+        token = re.split(r"[-:.]", n)[0].lower()
+        if len(token) >= 4 and re.search(r"\b" + re.escape(token) + r"\b", low):
+            return True
+    return False
+
+
+def _third_party_jars(dist):
+    """{coordinate or file name: path} for jars under share/, not Hadoop's."""
+    jars = {}
+    share = os.path.join(dist, "share")
+    for dirpath, _, filenames in os.walk(share):
+        for name in filenames:
+            if not name.endswith(".jar"):
+                continue
+            full = os.path.join(dirpath, name)
+            coord = _jar_coordinate(full)
+            if coord.startswith("org.apache.hadoop:"):
+                continue
+            jars[coord] = full
+    return jars
+
+
+def _license_entries(path):
+    """Jar-like lines of a LICENSE-binary or NOTICE-binary file."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return set()
+    entries = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.endswith(".jar") or re.match(
+                r"^[A-Za-z0-9_.-]+(:[A-Za-z0-9_.-]+)+$", line):
+            entries.add(line)
+    return entries
+
+
+def _jar_listed(coord, name, entries):
+    base = name[:-4] if name.endswith(".jar") else name
+    for e in entries:
+        if e == coord or e == name or e.endswith("/" + name) or name in e or coord in e:
+            return True
+        # LICENSE-binary lists many jars as g:a:v or g:a:type:v while the jar
+        # file is a-v.jar; translate the entry to the file name.
+        parts = e.split(":")
+        if len(parts) >= 2 and parts[1] and parts[-1]:
+            artifact, version = parts[1], parts[-1]
+            candidates = {f"{artifact}-{version}"}
+            # g:a:type:v: the jar file is a-v-type.jar (g:a:v has no type part)
+            if len(parts) >= 4:
+                candidates.add(f"{artifact}-{version}-{parts[2]}")
+            if base in candidates:
+                return True
+    return False
+
+
+def _license_mismatches(dist):
+    """(jars missing a licence entry, entries with no jar) for one side."""
+    jars = _third_party_jars(dist)
+    lic = _license_entries(os.path.join(dist, "LICENSE-binary"))
+    notice = _license_entries(os.path.join(dist, "NOTICE-binary"))
+    missing = set()
+    for coord, full in jars.items():
+        name = os.path.basename(full)
+        if not _jar_listed(coord, name, lic) and not _jar_listed(coord, name, notice):
+            missing.add(coord)
+    stale = set()
+    for e in lic | notice:
+        if not any(_jar_listed(coord, os.path.basename(full), {e})
+                   for coord, full in jars.items()):
+            stale.add(e)
+    return missing, stale
+
+
+def compare_license(b_dist, c_dist, record):
+    """T15: a candidate-only licence mismatch fails; a shared one is pre-existing."""
+    b_missing, b_stale = _license_mismatches(b_dist)
+    c_missing, c_stale = _license_mismatches(c_dist)
+    for coord in sorted(c_missing - b_missing):
+        record("license-jar-missing", coord, "not in LICENSE-binary or NOTICE-binary")
+    for entry in sorted(c_stale - b_stale):
+        record("license-entry-stale", entry, "no jar in the distribution")
+    for coord in sorted(c_missing & b_missing):
+        record("license-jar-missing", coord, "not in LICENSE-binary or NOTICE-binary",
+               expected_reason="pre-existing (both sides)")
+    for entry in sorted(c_stale & b_stale):
+        record("license-entry-stale", entry, "no jar in the distribution",
+               expected_reason="pre-existing (both sides)")
+
+    # A jar new on the candidate that ships its own META-INF/NOTICE* must be
+    # named in NOTICE-binary by artifactId or project name. The jar's own
+    # NOTICE text names the project; NOTICE-binary writes it in prose.
+    b_jars, c_jars = _third_party_jars(b_dist), _third_party_jars(c_dist)
+    try:
+        with open(os.path.join(c_dist, "NOTICE-binary"), encoding="utf-8",
+                  errors="replace") as f:
+            notice_text = f.read()
+    except OSError:
+        notice_text = ""
+    for coord in sorted(c_jars.keys() - b_jars.keys()):
+        path = c_jars[coord]
+        if _jar_notice(path) is None:
+            continue
+        if not _notice_mentions(_jar_names(coord, os.path.basename(path)), notice_text):
+            record("notice-missing", coord, "ships META-INF/NOTICE but is not in NOTICE-binary")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expected", required=True)
     ap.add_argument("--out", required=True)
+    ap.add_argument("--repo", help="git repository holding the two refs (T12)")
+    ap.add_argument("--baseline-ref", help="baseline git ref for T12")
+    ap.add_argument("--candidate-ref", help="candidate git ref for T12")
     ap.add_argument("baseline")
     ap.add_argument("candidate")
     args = ap.parse_args()
@@ -148,8 +483,11 @@ def main():
     allow = Allowlist(args.expected)
     diffs = []
 
-    def record(kind, subject, detail=None, severity="runtime"):
-        rule = allow.match(kind, subject)
+    def record(kind, subject, detail=None, severity="runtime", expected_reason=None):
+        if expected_reason is not None:
+            rule = {"reason": expected_reason, "line": None}
+        else:
+            rule = allow.match(kind, subject)
         diffs.append({
             "kind": kind, "subject": subject, "detail": detail, "severity": severity,
             "status": "EXPECTED" if rule else "UNEXPECTED",
@@ -220,6 +558,13 @@ def main():
             module, coord = row.split("\t")
             sev = "test" if coord.endswith(":test") else "runtime"
             record(kind, f"{module}|{coord}", severity=sev)
+
+    # 4. Published POMs, when the comparison refs are given (T12).
+    if args.repo and args.baseline_ref and args.candidate_ref:
+        compare_poms(args.repo, args.baseline_ref, args.candidate_ref, record)
+
+    # 5. LICENSE-binary and NOTICE-binary consistency (T15).
+    compare_license(b_dist, c_dist, record)
 
     unexpected = [d for d in diffs if d["status"] == "UNEXPECTED"]
     summary = {

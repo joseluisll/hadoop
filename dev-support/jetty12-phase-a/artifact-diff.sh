@@ -71,6 +71,8 @@ mkdir -p "${OUT}"
 set +e
 python3 -I "${HARNESS_DIR}/lib/artifact_diff.py" \
   --expected "${HARNESS_DIR}/expected-differences.txt" --out "${OUT}" \
+  --repo "${REPO_DIR}" --baseline-ref "$(ref_for_side "${B_SIDE}")" \
+  --candidate-ref "$(ref_for_side "${C_SIDE}")" \
   "$(results_dir "${B_SIDE}")" "$(results_dir "${C_SIDE}")"
 rc=$?
 # What the changed classes mean for code built against the old ones.

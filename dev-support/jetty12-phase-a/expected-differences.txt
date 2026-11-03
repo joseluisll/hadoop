@@ -111,3 +111,37 @@ jar-entry-changed share/hadoop/(common/hadoop-common-[^/]+|client/hadoop-client-
 jar-entry-changed share/hadoop/common/sources/hadoop-common-[^/]+-sources\.jar!org/apache/hadoop/http/HttpServer2\.java  # HADOOP-20016; announced: HADOOP-20016 JIRA
 jar-entry-changed share/hadoop/(common/hadoop-common-[^/]+-tests|client/hadoop-client-minicluster-[^/]+)\.jar!org/apache/hadoop/(fs/FSMainOperationsBaseTest(\$[0-9]+)?|fs/viewfs/(ViewFileSystemTestSetup|ViewFsTestSetup)|http/TestAuthenticationSessionCookie(\$[A-Za-z0-9]+)?)\.class  # HADOOP-20016: SLF4J instead of Jetty's Log; announced: HADOOP-20016 JIRA
 jar-entry-changed share/hadoop/common/sources/hadoop-common-[^/]+-test-sources\.jar!org/apache/hadoop/(fs/FSMainOperationsBaseTest|fs/viewfs/(ViewFileSystemTestSetup|ViewFsTestSetup)|http/TestAuthenticationSessionCookie)\.java  # HADOOP-20016; announced: HADOOP-20016 JIRA
+
+# --- T12: the published POMs declare the same change. lib/artifact_diff.py
+# compares the POMs of every published artifact (R90): dependencies with their
+# scope, optional flag and exclusions, the managed versions and the parent.
+# The subjects are <module>|<group:artifact[:type[:classifier]]>.
+# HADOOP-19970 replaces the servlet API in the POMs as well as in the
+# distribution, and its transitive dependencies change with it.
+pom-dependency-removed [^|]+\|jakarta\.servlet:jakarta\.servlet-api  # HADOOP-19970; announced: HADOOP-19970 release note
+pom-dependency-added [^|]+\|org\.eclipse\.jetty\.toolchain:jetty-servlet-api  # HADOOP-19970; announced: HADOOP-19970 release note
+pom-managed-removed [^|]+\|jakarta\.servlet:jakarta\.servlet-api  # HADOOP-19970; announced: HADOOP-19970 release note
+pom-managed-added [^|]+\|org\.eclipse\.jetty\.toolchain:jetty-servlet-api  # HADOOP-19970; announced: HADOOP-19970 release note
+pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-servlet  # HADOOP-19970; announced: HADOOP-19970 release note
+pom-dependency-changed [^|]+\|org\.apache\.hadoop:hadoop-minicluster  # HADOOP-19970: transitive servlet API replaced; announced: HADOOP-19970 release note
+pom-dependency-changed [^|]+\|org\.apache\.hadoop:hadoop-yarn-server-nodemanager  # HADOOP-19970: transitive servlet API replaced; announced: HADOOP-19970 release note
+pom-dependency-changed [^|]+\|org\.apache\.hadoop:hadoop-yarn-server-web-proxy  # HADOOP-19970: transitive servlet API replaced; announced: HADOOP-19970 release note
+pom-dependency-changed [^|]+\|org\.eclipse\.jetty:jetty-server  # HADOOP-19970: transitive servlet API replaced; announced: HADOOP-19970 release note
+pom-dependency-changed [^|]+\|org\.glassfish\.jersey\.test-framework:jersey-test-framework-core  # HADOOP-19970: transitive servlet API removed; announced: HADOOP-19970 release note
+# HADOOP-20014 moves the Jersey test container from Jetty to the JDK HTTP server.
+pom-dependency-removed [^|]+\|org\.glassfish\.jersey\.test-framework\.providers:jersey-test-framework-provider-jetty  # HADOOP-20014; announced: HADOOP-20014 JIRA
+pom-dependency-added [^|]+\|org\.glassfish\.jersey\.test-framework\.providers:jersey-test-framework-provider-jdk-http  # HADOOP-20014; announced: HADOOP-20014 JIRA
+pom-managed-removed [^|]+\|org\.glassfish\.jersey\.test-framework\.providers:jersey-test-framework-provider-jetty  # HADOOP-20014; announced: HADOOP-20014 JIRA
+pom-managed-added [^|]+\|org\.glassfish\.jersey\.test-framework\.providers:jersey-test-framework-provider-jdk-http  # HADOOP-20014; announced: HADOOP-20014 JIRA
+pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-util  # HADOOP-20014: declared directly for the JDK HTTP test container; announced: HADOOP-20014 JIRA
+pom-dependency-changed [^|]+\|org\.apache\.hadoop:hadoop-yarn-server-applicationhistoryservice  # HADOOP-20014: transitive test container replaced; announced: HADOOP-20014 JIRA
+# HADOOP-20016/20015 declare jetty-http and jetty-webapp where they are imported.
+pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-http  # HADOOP-20016; announced: HADOOP-20016 JIRA
+pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-webapp  # HADOOP-20016; announced: HADOOP-20016 JIRA
+pom-managed-added [^|]+\|org\.eclipse\.jetty:jetty-http  # HADOOP-20016; announced: HADOOP-20016 JIRA
+# HADOOP-20012 removes third-party Jetty and the old servlet API from the
+# catalog webapp and the timelineservice-hbase tests.
+pom-dependency-removed [^|]+\|org\.apache\.solr:solr-core  # HADOOP-20012; announced: HADOOP-20012 JIRA
+pom-dependency-changed [^|]+\|org\.apache\.solr:solr-test-framework  # HADOOP-20012; announced: HADOOP-20012 JIRA
+pom-dependency-changed [^|]+\|org\.apache\.hbase:hbase-server  # HADOOP-20012; announced: HADOOP-20012 JIRA
+pom-dependency-changed [^|]+\|org\.apache\.hbase:hbase-server::tests  # HADOOP-20012; announced: HADOOP-20012 JIRA

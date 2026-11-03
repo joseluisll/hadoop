@@ -47,7 +47,17 @@ the report lists the accepted changes nobody was told about.
      (`hadoop`/`hdfs`/`yarn`/`mapred classpath --glob`, tools, timeline
      reader, shaded client, minicluster) and the jar each class is first
      loaded from;
-   - every module's resolved dependencies, all scopes (`dependency:list`).
+   - every module's resolved dependencies, all scopes (`dependency:list`);
+   - every published POM's declared dependencies with their scope,
+     `optional` flag and exclusions, its managed versions and its parent,
+     read from git for both refs (`pom-dependency-*`, `pom-managed-*`,
+     `pom-parent-changed`, `pom-unparseable`, R90). The dependency-reduced POMs the shaded
+     clients publish are generated at build time and are not compared;
+   - `LICENSE-binary` and `NOTICE-binary`: every third-party jar in the
+     distribution is listed and every listed coordinate exists, and a jar new
+     on the candidate that ships its own `META-INF/NOTICE*` is named in
+     `NOTICE-binary` (R91). A mismatch on the candidate only fails the run; a
+     mismatch on both sides is listed as pre-existing.
 2. **API compatibility** (`lib/api_compat.py`, run by `artifact-diff.sh`):
    every class that changes, read from the class files (no JVM): the classes
    the launchers load from another jar or with other bytes (what the daemons
@@ -62,6 +72,12 @@ the report lists the accepted changes nobody was told about.
    name; class files for a newer Java than `--max-class-version` (61, Java
    17). Relocated packages (`org.apache.hadoop.shaded.*`) and
    `@InterfaceAudience.Private` classes are listed but do not fail.
+   Where a third-party jar is replaced (a jar removed on the candidate whose
+   packages another added jar provides), it also lists the public types the
+   added jar has and the removed one did not, and the public members added to
+   types both have, in `api-compat.json`/`.md` and summarised in Impact on
+   users as API code built against Hadoop may start to use (R92); the list
+   does not change the verdict.
    Allowlist: `expected-api-differences.txt`. Behaviour changes inside a
    method are left to checks 3 and 4.
 3. **End to end, in five architectures** (`e2e/run.sh`): real daemons
@@ -82,7 +98,11 @@ the report lists the accepted changes nobody was told about.
    listed per daemon and accepted only by a `classonly <daemon>:<class>` rule
    (R87), and an unexpected one fails the end-to-end check only when
    `CLASSONLY_FAIL=true` (the default, `false`, lists it as "would fail"
-   without changing the verdict). All daemon and container logs
+   without changing the verdict). A servlet probe (R93) runs an HttpServer2
+   on the side's classpath and records what a servlet sees at run time; the
+   scenarios also send raw HTTP/1.0 requests (R94). MapReduce container JVMs
+   log their class loads (R95), collected and compared per container type.
+   All daemon and container logs
    are scanned for class loading, linkage and JAX-RS provider errors. Line
    numbers in Java stack frames are dropped before comparing, so an error
    page that prints a stack trace does not differ just because a jar in it
@@ -177,7 +197,7 @@ first; the standby does not load request classes on one side only (R86).
 | Scenario | What it does |
 |---|---|
 | `00-cli-common` | `hadoop` CLI, credential provider, local file system; loads the javax.annotation, servlet, JAX-RS, Jersey and Jetty classes through all four launchers and records the jar each comes from |
-| `10-web-common` | on every daemon instance's web server: `/jmx` (query, get, callback, bad query, no user), `/conf` (XML, JSON), `/stacks`, `/logLevel` get/set, `/logs/` listing and traversal attempt, `/prom`, static content, 404s, `/isActive`, `HEAD`/`OPTIONS`/`TRACE`/`POST`, security headers; under TLS the closed HTTP port and the 401 without credentials |
+| `10-web-common` | on every daemon instance's web server: `/jmx` (query, get, callback, bad query, no user), `/conf` (XML, JSON), `/stacks`, `/logLevel` get/set, `/logs/` listing and traversal attempt, `/prom`, static content, 404s, `/isActive`, `HEAD`/`OPTIONS`/`TRACE`/`POST`, security headers; under TLS the closed HTTP port and the 401 without credentials; also starts the servlet probe (R93) and sends raw HTTP/1.0 requests to it and to Hadoop's own servlets (R94) |
 | `20-hdfs` | file system shell, ACLs, xattrs, snapshots, quotas, storage and EC policies, cache directives, fsck, image fetch, `oiv`, `oev`, `saveNamespace`, balancer, mover, disk balancer; WebHDFS REST (about 45 operations, two-step create/append through the datanode, errors); WebHDFS client; namenode, datanode, SNN, JN web UIs and servlets |
 | `30-hdfs-services` | RBF mount table and RPC/WebHDFS through the router; HttpFS REST and client; KMS keys over CLI and REST, EEK generate/decrypt; encryption zone read over RPC, WebHDFS and HttpFS; NFS gateway |
 | `40-yarn` | YARN CLI, distributed shell, RM REST in JSON and XML, application submit and kill through REST, RM UI, node manager, timeline v1 entity round trip, application history, web proxy, YARN router, shared cache manager, timeline reader, YARN services API (create, flex, stop, destroy) |
@@ -231,6 +251,10 @@ first; the standby does not load request classes on one side only (R86).
 - **MapReduce on YARN federation**: with both sub-clusters on one host, the
   AMRMProxy address a job needs is ambiguous; YARN federation is exercised
   with distributed shell, which finds its home RM through the node manager.
+- **Distributed shell application master class loading**: its Java options are
+  set in `Client.java` without a configuration hook the harness can use
+  (`-Xlog` would have to be added to the client's command line), so only the
+  MapReduce application master and its tasks log their class loads (R95).
 
 Run, but compared on neither side, because they fail on both (see known
 issues below). A PASS says nothing about them:
@@ -525,8 +549,10 @@ It matches each rule the way its comparison does and prints the rules that
 matched nothing anywhere (the ones a run would report as unused) and the
 rules that matched in only some directories, which is how a pattern limited
 to `[a-z]+` missed the numbered daemons (`nn1`, `rm1`, `router2`, ...) in
-ha-run-3, mixed-run-4 and federated-run-5. It exits 1 when a rule matched
-nothing. In CI, download the reports first:
+ha-run-3, mixed-run-4 and federated-run-5. A rule whose kind none of the
+directories recorded data for (`pom-*`, `license-*`, `notice-*`) is printed as
+"not replayable" and does not fail. It exits 1 when a rule that could have
+matched did not. In CI, download the reports first:
 
 ```
 gh run download <run id> -p 'report-*' -D ~/reports

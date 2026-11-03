@@ -125,6 +125,30 @@ RULE_FILES = {
     "expected-downstream-differences.txt": downstream_matches,
     "expected-unit-differences.txt": unit_matches,
 }
+# Kinds a comparison added after these reports were written (T12's pom-*, T15's
+# license-*). A report without them cannot say whether the rule would match, so
+# replay lists it as not replayable instead of as a rule that matched nothing.
+# Existing kinds replay exactly as before: a rule whose kind is present in a
+# report but matched nothing still fails.
+NEW_KINDS = ("pom-", "license-", "notice-")
+
+
+def recorded_kinds(compare_dirs):
+    """Every difference kind the comparisons in these directories recorded."""
+    kinds = set()
+    for d in compare_dirs:
+        for path in glob.glob(os.path.join(d, "*.json")):
+            try:
+                data = load(path)
+            except (OSError, ValueError):
+                continue
+            for x in (data or {}).get("differences", []):
+                if isinstance(x, dict) and "kind" in x:
+                    kinds.add(x["kind"])
+            for f in (data or {}).get("findings", []):
+                if isinstance(f, dict) and "kind" in f:
+                    kinds.add(f["kind"])
+    return kinds
 
 
 def replay(harness_dir, compare_dirs):
@@ -154,18 +178,26 @@ def main(argv):
         print(f"no such compare directory: {', '.join(missing)}", file=sys.stderr)
         return 2
     harness_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    present = recorded_kinds(compare_dirs)
     failed = False
     for name, rules in replay(harness_dir, compare_dirs).items():
         nowhere = [r for r in rules if not r["dirs"]]
         partial = [r for r in rules if r["dirs"] and len(r["dirs"]) < len(compare_dirs)]
-        print(f"{name}: {len(rules)} rule(s), {len(nowhere)} matched nothing, "
+        not_replayable = [r for r in nowhere if r["kind"].startswith(NEW_KINDS)
+                          and r["kind"] not in present]
+        unmatched = [r for r in nowhere if r not in not_replayable]
+        print(f"{name}: {len(rules)} rule(s), {len(unmatched)} matched nothing, "
+              f"{len(not_replayable)} not replayable, "
               f"{len(partial)} matched in some directories only")
-        for r in nowhere:
+        for r in unmatched:
             print(f"  line {r['line']}: {r['kind']} {r['pattern']}  (matched nothing)")
+        for r in not_replayable:
+            print(f"  line {r['line']}: {r['kind']} {r['pattern']}  "
+                  f"(not replayable (no data in these reports))")
         for r in partial:
             print(f"  line {r['line']}: {r['kind']} {r['pattern']}  "
                   f"(matched in {', '.join(r['dirs'])})")
-        failed = failed or bool(nowhere)
+        failed = failed or bool(unmatched)
     return 1 if failed else 0
 
 

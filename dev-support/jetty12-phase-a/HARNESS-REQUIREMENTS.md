@@ -79,6 +79,30 @@ response"); each group names the files it comes from.
 - **R13.** `artifact-diff.sh <side> <side>` compares a build with itself and
   must report no difference; in CI every fresh build runs it, and the build
   job fails if it does not pass.
+- **R90.** For every `pom.xml` in the tree outside the harness, both sides'
+  declared dependencies with their scope (default `compile`), `optional`
+  flag, type/classifier and exclusions, their managed versions resolved from
+  the same POM's properties and their parent are compared, read from git
+  (`git show <ref>:<path>`) so no build is needed and the comparison runs
+  wherever `artifact-diff.sh` runs: `pom-dependency-added`, `-removed`,
+  `-changed` (scope, optional or exclusions), `pom-managed-added`, `-removed`,
+  `-changed` (old and new version) and `pom-parent-changed`; a POM that does not parse is `pom-unparseable`
+  (subject: its path). The subject is
+  `module|group:artifact[:type[:classifier]]`; an UNEXPECTED difference fails
+  check 1. The dependency-reduced POMs the shaded clients
+  (`hadoop-client-api`, `-runtime`, `-minicluster`) publish are generated at
+  build time and are not in git, so they are not compared. *Formerly T12.*
+- **R91.** `LICENSE-binary` and `NOTICE-binary` are checked against each
+  side's distribution: every third-party jar (not `org.apache.hadoop`) under
+  `share/` is listed in the distribution's `LICENSE-binary` or
+  `NOTICE-binary`, and every listed coordinate has a jar
+  (`license-jar-missing`, `license-entry-stale`); a jar new on the candidate
+  that ships its own `META-INF/NOTICE*` is named in `NOTICE-binary` by
+  artifactId or project name (`notice-missing`). A jar is identified by its
+  `META-INF/maven/*/*/pom.properties` when present, else by file name. A
+  mismatch on the candidate only is a difference that fails check 1 unless a
+  rule accepts it; one present on both sides is listed as pre-existing.
+  *Formerly T15.*
 
 ### Check 2: API compatibility (`lib/api_compat.py`, `lib/classfile.py`)
 
@@ -109,6 +133,13 @@ response"); each group names the files it comes from.
   is reported once with its locations.
 - **R21.** Behaviour changes inside a method are out of scope for this check;
   checks 3 and 4 cover them.
+- **R92.** Where a third-party jar is replaced (a jar removed on the candidate
+  whose packages another added jar provides), the public types the added jar
+  has and the removed one did not, and the public members added to types both
+  have, are listed in `api-compat.json` and `api-compat.md` and summarised in
+  Impact on users, as API that code built against Hadoop may start to use and
+  that fails where only the older jar is present. The list does not change the
+  verdict. *Formerly T23.*
 
 ### Check 3: end to end, five architectures (`e2e/run.sh`, `e2e/cluster.sh`, `e2e/lib/*`, `lib/compare_e2e.py`)
 
@@ -183,6 +214,22 @@ response"); each group names the files it comes from.
   numbers of 10 digits or more, timestamps, identity hashes, delegation
   tokens, `elapsedTime`, the side name in paths, IPv4 addresses, this host's
   name and the line numbers of Java stack frames.
+- **R93.** A servlet behaviour probe (`e2e/lib/ServletProbe.java`) runs as a
+  single source file on each side's Hadoop classpath, starts an `HttpServer2`
+  on 127.0.0.1 and answers as JSON: the servlet versions
+  (`getMajorVersion`/`getMinorVersion`,
+  `getEffectiveMajorVersion`/`getEffectiveMinorVersion`), the jar
+  `HttpServlet` came from (file name only), `getHttpServletMapping()` (match
+  value, pattern, servlet name, mapping match), `isPushSupported()`, whether
+  `newPushBuilder()` is null, and the forward and include mapping attributes
+  after a `RequestDispatcher` call. Every Servlet 4.0 call goes through
+  reflection, so the source compiles and runs against 3.1 and 4.0 and reports
+  "absent" when a class or method is missing. A scenario starts it, records
+  its answers as observations, and sends raw requests to it over HTTP/1.0 and
+  HTTP/1.1. *Formerly T22.*
+- **R94.** The same four default answers (`PUT`, `OPTIONS`, `TRACE`, `HEAD`)
+  are sent with `probe.py raw` over HTTP/1.0 to Hadoop's own servlets on
+  every web server the scenario already probes. *Formerly T19.*
 
 #### Comparison (`lib/compare_e2e.py`)
 
@@ -208,6 +255,14 @@ response"); each group names the files it comes from.
   Impact on users gives their count per side. Each is matched against a
   `classonly` rule (R87); an unexpected one fails the run only with
   `CLASSONLY_FAIL=true`. *Formerly T3.*
+- **R95.** MapReduce container JVMs log the classes they load too
+  (`-Xlog:class+load` in `yarn.app.mapreduce.am.command-opts`,
+  `mapreduce.map.java.opts` and `mapreduce.reduce.java.opts`, into the
+  container's own log directory); after the scenarios the logs are collected
+  per container type (`mr-am`, `map`, `reduce`) and compared as a daemon
+  (R38), one table per type merging every container of that type. The
+  distributed shell application master is not collected: its Java options are
+  set in `Client.java` without a configuration hook. *Formerly T14.*
 - **R39.** All daemon logs, `.out` files, container logs and scenario logs
   are scanned for class-loading, linkage and JAX-RS provider errors
   (`NoClassDefFoundError`, `ClassNotFoundException`, `NoSuchMethodError`,
@@ -666,7 +721,7 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   sees only its effects, in 4 scenarios for 14 artifacts. Compare, for every
   published artifact, the declared dependencies with their scope, `optional`
   flag and exclusions, the managed versions and the parent, as differences of
-  their own kind (`pom-*`) with their own rules.
+  their own kind (`pom-*`) with their own rules. Done as R90 (T12).
   *Source: requirements analysis; `lib/artifact_diff.py` `VOLATILE_ENTRY`.*
 - **T13. Downstream artifacts the tickets touch.** R48 has none of the
   modules HADOOP-20015 and HADOOP-20016 change as Maven dependencies. Add
@@ -681,14 +736,14 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   the YARN application classpath, which HADOOP-20013 and HADOOP-19970 change.
   Add `-Xlog:class+load` to their Java options, collect the logs with the
   container logs, and compare by container type with `classjar` rules.
-  *Source: requirements analysis; `e2e/lib/conf.sh`.*
+  Done as R95 (T14). *Source: requirements analysis; `e2e/lib/conf.sh`.*
 - **T15. LICENSE and NOTICE consistency.** HADOOP-19970 and HADOOP-20013 add
   and remove third-party jars; check 1 only reports that `LICENSE-binary`
   changed. On each side, check that every third-party jar in the distribution
   is listed in `LICENSE-binary` (and `NOTICE-binary` where its license needs
   it) and that no jar is listed that the distribution no longer has; a
   mismatch on the candidate only fails the run. This is an ASF release
-  requirement. *Source: requirements analysis.*
+  requirement. Done as R91 (T15). *Source: requirements analysis.*
 - **T17. Differences attributed to one ticket.** The tickets merge into trunk
   one at a time and every intermediate trunk state ships, but the harness runs
   only their combination: a rule's ticket is only what its text says, and an
@@ -712,7 +767,7 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   unsupported method, OPTIONS and HEAD over HTTP/1.0 to every servlet with
   `probe.py raw` (part of T1). The HTTP/2 difference between servlet API
   4.0.4 and 4.0.9 cannot be reached on Jetty 9.4 and belongs to phase B.
-  *Source: requirements analysis.*
+  Done as R94 (T19). *Source: requirements analysis.*
 - **T20. Tests that exist only on the candidate.** R45 counts a failure as a
   regression only when the test passed or was flaky on the baseline, so a
   test the patch adds is never compared: if it fails on the candidate, the
@@ -746,7 +801,7 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   `RequestDispatcher` call. It answers, for HADOOP-19970, whether Jetty 9.4
   behaves differently with the 4.0 API on the classpath, and becomes the
   baseline for phase B, when Jetty 12's ee8 environment changes these
-  answers. *Source: the Servlet 4.0 classes of T3.*
+  answers. Done as R93 (T22). *Source: the Servlet 4.0 classes of T3.*
 - **T23. API made available by a replaced jar.** R18 counts additions but
   does not list them. The new servlet API jar adds Servlet 4.0 types
   (`HttpServletMapping`, `MappingMatch`, `PushBuilder`, `GenericFilter`,
@@ -758,7 +813,7 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   List the public types and members a replaced third-party jar adds in
   Impact on users, as API that code built against Hadoop may start to depend
   on; the HADOOP-19970 release note says the packages are unchanged, not that
-  4.0 types become available. *Source: the Servlet 4.0 classes of T3.*
+  4.0 types become available. Done as R92 (T23). *Source: the Servlet 4.0 classes of T3.*
 - **T24. Reason of the job-counter rule.** The `obsfield` rule
   `mapreduce-am:am-job-counters/body/json/jobCounters/counterGroup` gives
   "(MAPREDUCE-7548 under Kerberos)" as its reason, but it also accepts the

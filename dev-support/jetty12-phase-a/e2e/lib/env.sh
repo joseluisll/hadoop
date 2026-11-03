@@ -47,6 +47,8 @@ SECURE=false
 # daemon from another run makes start-up fail loudly instead of mixing runs.
 # Architectures with several instances of a daemon shift these.
 P_NN_RPC=9000
+# T22's servlet probe: an HttpServer2 on 127.0.0.1, outside the daemons' ports.
+P_PROBE_HTTP=18080
 P_NN_HTTP=9870
 P_NN_HTTPS=9871
 P_DN_HTTP=9864
@@ -160,6 +162,16 @@ http() {
   shift 2
   python3 -I "${PROBE}" http --obs "${OBS}" --component "${COMPONENT}" \
     --id "${id}" --url "${url}" "$@"
+}
+
+# raw <id> <url> <request> [probe options]: send a request byte for byte and
+# record the observation (R31); request takes the Python escapes (\\r\\n) and
+# {host}, as probe.py raw does. T19 uses it for HTTP/1.0 without a Host header.
+raw() {
+  local id=$1 url=$2 request=$3
+  shift 3
+  python3 -I "${PROBE}" raw --obs "${OBS}" --component "${COMPONENT}" \
+    --id "${id}" --url "${url}" --request "${request}" "$@"
 }
 
 # cli <id> [--merge-stderr] [--expect-rc N] [--shape S] [--expect-regex R]...

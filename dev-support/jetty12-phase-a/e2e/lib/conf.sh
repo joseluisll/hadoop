@@ -103,6 +103,14 @@ base_yarn() {
     "$@"
 }
 
+# classload_opt <container type>: -Xlog option for that container type's JVM.
+# <LOG_DIR> is ApplicationConstants.LOG_DIR_EXPANSION_VAR: YARN's container
+# launcher replaces it with the container's own log directory (R95). The
+# format is the daemons' (e2e/cluster.sh), so e2e/lib/classload.py reads both.
+classload_opt() {
+  echo "-Xlog:class+load=info:file=<LOG_DIR>/classload-$1.log::filecount=0"
+}
+
 base_mapred() {
   site "${HADOOP_CONF_DIR}/mapred-site.xml" \
     "mapreduce.framework.name=yarn" \
@@ -114,11 +122,11 @@ base_mapred() {
     "mapreduce.jobhistory.webapp.address=${HOST}:${P_JHS_HTTP}" \
     "mapreduce.jobhistory.admin.address=${HOST}:${P_JHS_ADMIN}" \
     "yarn.app.mapreduce.am.resource.mb=512" \
-    "yarn.app.mapreduce.am.command-opts=-Xmx384m" \
+    "yarn.app.mapreduce.am.command-opts=-Xmx384m $(classload_opt mr-am)" \
     "mapreduce.map.memory.mb=256" \
     "mapreduce.reduce.memory.mb=256" \
-    "mapreduce.map.java.opts=-Xmx200m" \
-    "mapreduce.reduce.java.opts=-Xmx200m" \
+    "mapreduce.map.java.opts=-Xmx200m $(classload_opt map)" \
+    "mapreduce.reduce.java.opts=-Xmx200m $(classload_opt reduce)" \
     "$@"
 }
 

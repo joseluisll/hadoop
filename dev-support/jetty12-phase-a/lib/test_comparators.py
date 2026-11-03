@@ -27,9 +27,11 @@ directory; no build, cluster or Hadoop repository is touched.
 
 import json
 import os
+import struct
 import subprocess
 import sys
 import tempfile
+import zipfile
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 E2E = os.path.join(HERE, "compare_e2e.py")
@@ -39,6 +41,8 @@ DOWNSTREAM = os.path.join(HERE, "compare_downstream.py")
 ANCESTRY = os.path.join(HERE, "ancestry.py")
 REPORT = os.path.join(HERE, "report.py")
 ATTRIBUTION = os.path.join(HERE, "attribution.py")
+ARTIFACT = os.path.join(HERE, "artifact_diff.py")
+API_COMPAT = os.path.join(HERE, "api_compat.py")
 
 
 def run(script, *args, cwd=None, env=None):
@@ -163,6 +167,88 @@ def downstream(tmp, case, baseline, candidate, verdict, rc):
             os.path.join(base, "baseline"), os.path.join(base, "candidate"))
     result = read_result(case, os.path.join(out, "downstream-compare.json"), r)
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
+
+
+def artifact_diff(tmp, case, baseline, candidate, verdict, rc, rules="",
+                  repo=None, baseline_ref=None, candidate_ref=None):
+    base = os.path.join(tmp, "artifact", case)
+    for side, dist in (("baseline", baseline), ("candidate", candidate)):
+        results = os.path.join(base, side)
+        os.makedirs(os.path.join(results, "build"), exist_ok=True)
+        os.makedirs(os.path.join(results, "classpath"), exist_ok=True)
+        write_text(os.path.join(results, "build", "dist-path.txt"), dist + "\n")
+        write_text(os.path.join(results, "build", "dependencies.tsv"), "")
+    expected = os.path.join(base, "expected.txt")
+    write_text(expected, rules)
+    out = os.path.join(base, "out")
+    args = ["--expected", expected, "--out", out]
+    if repo:
+        args += ["--repo", repo, "--baseline-ref", baseline_ref,
+                 "--candidate-ref", candidate_ref]
+    args += [os.path.join(base, "baseline"), os.path.join(base, "candidate")]
+    r = run(ARTIFACT, *args)
+    result = read_result(case, os.path.join(out, "artifact-diff.json"), r)
+    expect(case, (result["summary"]["unexpected"] == 0, r.returncode),
+           (verdict == "PASS", rc))
+    return result
+
+
+def class_bytes(name, methods):
+    """A minimal valid class file: one public class with public methods."""
+    cp = []
+
+    def utf(s):
+        cp.append((1, s.encode()))
+        return len(cp)
+
+    def cls(s):
+        i = utf(s)
+        cp.append((7, i))
+        return len(cp)
+
+    this_i = cls(name)
+    super_i = cls("java/lang/Object")
+    code_i = utf("Code")
+    entries = [(0x0001, utf(m), utf("()V")) for m in methods]
+    out = struct.pack(">IHHH", 0xCAFEBABE, 0, 52, len(cp) + 1)
+    for tag, data in cp:
+        if tag == 1:
+            out += struct.pack(">BH", 1, len(data)) + data
+        elif tag == 7:
+            out += struct.pack(">BH", 7, data)
+    out += struct.pack(">HHHH", 0x0001, this_i, super_i, 0)
+    out += struct.pack(">H", 0)   # fields
+    out += struct.pack(">H", len(entries))
+    for flags, mn, md in entries:
+        out += struct.pack(">HHHH", flags, mn, md, 1)
+        out += struct.pack(">HI", code_i, 0)   # empty Code attribute
+    out += struct.pack(">H", 0)   # class attributes
+    return out
+
+
+def api_compat(tmp, case, baseline_jars, candidate_jars, verdict, rc, rules="",
+               added=None):
+    base = os.path.join(tmp, "api", case)
+    for side, jars in (("baseline", baseline_jars), ("candidate", candidate_jars)):
+        results = os.path.join(base, side)
+        dist = os.path.join(results, "dist")
+        os.makedirs(os.path.join(dist, "share", "lib"), exist_ok=True)
+        os.makedirs(os.path.join(results, "build"), exist_ok=True)
+        for jar, classes in jars.items():
+            with zipfile.ZipFile(os.path.join(dist, "share", "lib", jar), "w") as z:
+                for cls, data in classes.items():
+                    z.writestr(cls + ".class", data)
+        write_text(os.path.join(results, "build", "dist-path.txt"), dist + "\n")
+    expected = os.path.join(base, "expected.txt")
+    write_text(expected, rules)
+    out = os.path.join(base, "out")
+    r = run(API_COMPAT, "--expected", expected, "--out", out,
+            os.path.join(base, "baseline"), os.path.join(base, "candidate"))
+    result = read_result(case, os.path.join(out, "api-compat.json"), r)
+    expect(case, (result["verdict"], r.returncode), (verdict, rc))
+    if added is not None:
+        expect(f"{case}: added_api", result.get("added_api"), added)
+    return result
 
 
 def git_env():
@@ -340,6 +426,17 @@ def main():
             [observation("comp", "one")], [observation("comp", "one")], "FAIL", 1,
             classload={"baseline": {"nn": {"org.example.Foo": "lib/jetty-foo.jar"}},
                        "candidate": {"nn": {"org.example.Foo": "lib/jetty-bar.jar"}}})
+        # T14: container types are collected as daemons (R95); a class from a
+        # different jar fails unless a classjar rule accepts it.
+        e2e(tmp, "e2e a container type's class from another jar without a rule FAILs",
+            [observation("comp", "one")], [observation("comp", "one")], "FAIL", 1,
+            classload={"baseline": {"map": {"org.example.Foo": "lib/jetty-foo.jar"}},
+                       "candidate": {"map": {"org.example.Foo": "lib/jetty-bar.jar"}}})
+        e2e(tmp, "e2e a container type's class from another jar with a rule PASSes",
+            [observation("comp", "one")], [observation("comp", "one")], "PASS", 0,
+            classload={"baseline": {"map": {"org.example.Foo": "lib/jetty-foo.jar"}},
+                       "candidate": {"map": {"org.example.Foo": "lib/jetty-bar.jar"}}},
+            rules="classjar map:org\\.example\\.Foo  # expected\n")
         e2e(tmp, "e2e a new log error on the candidate FAILs",
             [observation("comp", "one")], [observation("comp", "one")], "FAIL", 1,
             logscan={"baseline": {}, "candidate": {"nn": {"NoClassDefFoundError: Foo": 1}}})
@@ -411,6 +508,191 @@ def main():
         downstream(tmp, "downstream an unmatched difference FAILs",
                    "simple/hadoop-common\tg:a:jar:1.0:compile\n",
                    "simple/hadoop-common\tg:a:jar:2.0:compile\n", "FAIL", 1)
+
+        # T12: POMs between two git refs. The distributions are empty, so only
+        # the POM comparison contributes differences.
+        poms = new_repo(tmp, "poms")
+        dist = os.path.join(tmp, "artifact", "dist")
+        os.makedirs(dist)
+        pom = (
+            '<?xml version="1.0"?>\n'
+            '<project xmlns="http://maven.apache.org/POM/4.0.0">\n'
+            '  <groupId>org.example</groupId>\n'
+            '  <artifactId>parent</artifactId>\n'
+            '  <version>1.0</version>\n'
+            '  <dependencies>\n'
+            '    <dependency><groupId>org.example</groupId>'
+            '<artifactId>dep</artifactId><version>1.0</version></dependency>\n'
+            '  </dependencies>\n'
+            '  <dependencyManagement><dependencies>\n'
+            '    <dependency><groupId>org.example</groupId>'
+            '<artifactId>managed</artifactId><version>1.0</version></dependency>\n'
+            '  </dependencies></dependencyManagement>\n'
+            '</project>\n'
+        )
+        commit(poms, "pom.xml", pom, "base")
+        base = rev(poms)
+        artifact_diff(tmp, "artifact T12 self-compare reports nothing",
+                      dist, dist, "PASS", 0, repo=poms, baseline_ref=base,
+                      candidate_ref=base)
+        commit(poms, "pom.xml", pom.replace(
+            "<artifactId>dep</artifactId><version>1.0</version>",
+            "<artifactId>dep</artifactId><version>1.0</version>"
+            "<scope>provided</scope>"), "scope")
+        candidate = rev(poms)
+        artifact_diff(tmp, "artifact T12 a dependency change FAILs",
+                      dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
+                      candidate_ref=candidate)
+        artifact_diff(tmp, "artifact T12 a dependency change with a rule PASSes",
+                      dist, dist, "PASS", 0,
+                      rules="pom-dependency-changed .*\\|org\\.example:dep  # expected\n",
+                      repo=poms, baseline_ref=base, candidate_ref=candidate)
+        commit(poms, "pom.xml", pom.replace(
+            "<version>1.0</version></dependency>\n  </dependencies>\n"
+            "  <dependencyManagement>",
+            "<version>1.0</version></dependency>\n"
+            "    <dependency><groupId>org.example</groupId>"
+            "<artifactId>new</artifactId><version>1.0</version></dependency>\n"
+            "  </dependencies>\n  <dependencyManagement>"), "added")
+        candidate = rev(poms)
+        artifact_diff(tmp, "artifact T12 an added dependency FAILs",
+                      dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
+                      candidate_ref=candidate)
+        artifact_diff(tmp, "artifact T12 an added dependency with a rule PASSes",
+                      dist, dist, "PASS", 0,
+                      rules="pom-dependency-added .*\\|org\\.example:new  # expected\n",
+                      repo=poms, baseline_ref=base, candidate_ref=candidate)
+        commit(poms, "pom.xml", pom.replace(
+            "<artifactId>managed</artifactId><version>1.0</version>",
+            "<artifactId>managed</artifactId><version>2.0</version>"), "managed")
+        candidate = rev(poms)
+        artifact_diff(tmp, "artifact T12 a managed version change FAILs",
+                      dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
+                      candidate_ref=candidate)
+        artifact_diff(tmp, "artifact T12 a managed version change with a rule PASSes",
+                      dist, dist, "PASS", 0,
+                      rules="pom-managed-changed .*\\|org\\.example:managed  # expected\n",
+                      repo=poms, baseline_ref=base, candidate_ref=candidate)
+        commit(poms, "pom.xml", pom.replace(
+            "</project>",
+            "<parent><groupId>org.example</groupId><artifactId>p</artifactId>"
+            "<version>2.0</version></parent></project>"), "parent")
+        candidate = rev(poms)
+        artifact_diff(tmp, "artifact T12 a parent change FAILs",
+                      dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
+                      candidate_ref=candidate)
+        artifact_diff(tmp, "artifact T12 a parent change with a rule PASSes",
+                      dist, dist, "PASS", 0,
+                      rules="pom-parent-changed .*\\|parent  # expected\n",
+                      repo=poms, baseline_ref=base, candidate_ref=candidate)
+        commit(poms, "pom.xml", pom.replace(
+            "    <dependency><groupId>org.example</groupId>"
+            "<artifactId>dep</artifactId><version>1.0</version></dependency>\n", ""),
+            "removed")
+        candidate = rev(poms)
+        artifact_diff(tmp, "artifact T12 a removed dependency FAILs",
+                      dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
+                      candidate_ref=candidate)
+        artifact_diff(tmp, "artifact T12 a removed dependency with a rule PASSes",
+                      dist, dist, "PASS", 0,
+                      rules="pom-dependency-removed .*\\|org\\.example:dep  # expected\n",
+                      repo=poms, baseline_ref=base, candidate_ref=candidate)
+        commit(poms, "pom.xml", pom.replace("</project>", ""), "unparseable")
+        candidate = rev(poms)
+        artifact_diff(tmp, "artifact T12 a POM that cannot be parsed FAILs",
+                      dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
+                      candidate_ref=candidate)
+        commit(poms, "pom.xml", pom.replace(
+            "<artifactId>dep</artifactId><version>1.0</version></dependency>",
+            "<artifactId>dep</artifactId><version>1.0</version>"
+            "<optional>true</optional></dependency>"), "optional")
+        candidate = rev(poms)
+        artifact_diff(tmp, "artifact T12 an optional change FAILs",
+                      dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
+                      candidate_ref=candidate)
+        artifact_diff(tmp, "artifact T12 an optional change with a rule PASSes",
+                      dist, dist, "PASS", 0,
+                      rules="pom-dependency-changed .*\\|org\\.example:dep  # expected\n",
+                      repo=poms, baseline_ref=base, candidate_ref=candidate)
+        commit(poms, "pom.xml", pom.replace(
+            "<artifactId>dep</artifactId><version>1.0</version></dependency>",
+            "<artifactId>dep</artifactId><version>1.0</version><exclusions>"
+            "<exclusion><groupId>org.example</groupId>"
+            "<artifactId>excluded</artifactId></exclusion></exclusions></dependency>"),
+            "exclusion")
+        candidate = rev(poms)
+        artifact_diff(tmp, "artifact T12 an exclusion change FAILs",
+                      dist, dist, "FAIL", 1, repo=poms, baseline_ref=base,
+                      candidate_ref=candidate)
+        artifact_diff(tmp, "artifact T12 an exclusion change with a rule PASSes",
+                      dist, dist, "PASS", 0,
+                      rules="pom-dependency-changed .*\\|org\\.example:dep  # expected\n",
+                      repo=poms, baseline_ref=base, candidate_ref=candidate)
+
+        # T15: LICENSE-binary and NOTICE-binary consistency.
+        def dist_with(name, jars, lic, notice="", jar_notices=None):
+            d = os.path.join(tmp, "artifact", "dist-" + name)
+            os.makedirs(os.path.join(d, "share", "lib"), exist_ok=True)
+            for jar in jars:
+                path = os.path.join(d, "share", "lib", jar)
+                if jar_notices and jar in jar_notices:
+                    with zipfile.ZipFile(path, "w") as z:
+                        z.writestr("META-INF/NOTICE.txt", jar_notices[jar])
+                else:
+                    write_text(path, "")
+            write_text(os.path.join(d, "LICENSE-binary"), lic)
+            write_text(os.path.join(d, "NOTICE-binary"), notice)
+            return d
+        b = dist_with("b", ["foo.jar"], "foo.jar\n")
+        c = dist_with("c", ["foo.jar", "bar.jar"], "foo.jar\n")
+        artifact_diff(tmp, "artifact T15 a candidate-only missing jar FAILs",
+                      b, c, "FAIL", 1)
+        artifact_diff(tmp, "artifact T15 a candidate-only missing jar with a rule PASSes",
+                      b, c, "PASS", 0,
+                      rules="license-jar-missing bar\\.jar  # expected\n"
+                            "dist-file-added share/lib/bar\\.jar  # the jar is new\n")
+        b2 = dist_with("b2", ["foo.jar"], "foo.jar\n")
+        c2 = dist_with("c2", ["foo.jar"], "foo.jar\nbar.jar\n")
+        artifact_diff(tmp, "artifact T15 a candidate-only stale entry FAILs",
+                      b2, c2, "FAIL", 1)
+        artifact_diff(tmp, "artifact T15 a candidate-only stale entry with a rule PASSes",
+                      b2, c2, "PASS", 0,
+                      rules="license-entry-stale bar\\.jar  # expected\n"
+                            "dist-file-changed LICENSE-binary  # the entry was added\n")
+        b3 = dist_with("b3", ["foo.jar"], "")
+        c3 = dist_with("c3", ["foo.jar"], "")
+        artifact_diff(tmp, "artifact T15 a mismatch on both sides does not fail",
+                      b3, c3, "PASS", 0)
+        # A new candidate jar that ships its own META-INF/NOTICE must be
+        # named in NOTICE-binary by artifactId or project name.
+        b4 = dist_with("b4", ["foo.jar"], "foo.jar\n")
+        c4 = dist_with("c4", ["foo.jar", "widget.jar"], "foo.jar\nwidget.jar\n",
+                       jar_notices={"widget.jar": "Widget Project\n"})
+        artifact_diff(tmp, "artifact T15 a new jar's NOTICE not in NOTICE-binary FAILs",
+                      b4, c4, "FAIL", 1)
+        artifact_diff(tmp, "artifact T15 a new jar's NOTICE not in NOTICE-binary with a rule PASSes",
+                      b4, c4, "PASS", 0,
+                      rules="notice-missing widget\\.jar  # expected\n"
+                            "dist-file-added share/lib/widget\\.jar  # the jar is new\n"
+                            "dist-file-changed LICENSE-binary  # the entry was added\n")
+        c5 = dist_with("c5", ["foo.jar", "widget.jar"], "foo.jar\nwidget.jar\n",
+                       notice="Widget Project\n",
+                       jar_notices={"widget.jar": "Widget Project\n"})
+        artifact_diff(tmp, "artifact T15 a new jar's NOTICE named in NOTICE-binary PASSes",
+                      b4, c5, "PASS", 0,
+                      rules="dist-file-added share/lib/widget\\.jar  # the jar is new\n"
+                            "dist-file-changed LICENSE-binary  # the entry was added\n"
+                            "dist-file-changed NOTICE-binary  # the entry was added\n")
+
+        # T23: a replaced third-party jar's added public types and members are
+        # listed, and the verdict does not change.
+        old = {"old-1.0.jar": {"A": class_bytes("A", ["m"])}}
+        new = {"old-2.0.jar": {"A": class_bytes("A", ["m", "n"]),
+                               "B": class_bytes("B", ["m"])}}
+        result = api_compat(tmp, "api T23 added types and members are listed",
+                            old, new, "PASS", 0)
+        expect("api T23 added types", result["added_api"][0]["types"], ["B"])
+        expect("api T23 added members", result["added_api"][0]["members"], ["A#n()V"])
 
         repo = new_repo(tmp, "contains")
         commit(repo, "a.txt", "a\n", "one")

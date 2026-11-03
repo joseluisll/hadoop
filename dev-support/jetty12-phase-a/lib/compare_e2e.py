@@ -366,7 +366,12 @@ def write_markdown(path, result, blocking):
             for r in bf:
                 f.write(f"| `{r['key']}` | {(r['detail'] or '').replace('|', '/')} |\n")
             f.write("\n")
-        f.write("### Classes loaded by each daemon\n\n| Daemon | Baseline | Candidate | "
+        f.write("### Classes loaded by each daemon and container type\n\n"
+                "MapReduce container JVMs log their class loads too (R95): each container "
+                "type (`mr-am`, `map`, `reduce`) is merged from every container of that "
+                "type and compared as a daemon. The distributed shell AM is not collected: "
+                "its Java options are set in `Client.java` without a configuration hook.\n\n"
+                "| Daemon or container type | Baseline | Candidate | "
                 "Baseline only | Candidate only | Different jar |\n|---|---|---|---|---|---|\n")
         for d, r in sorted(result["classload"].items()):
             f.write(f"| {d} | {r['baseline_classes']} | {r['candidate_classes']} | "

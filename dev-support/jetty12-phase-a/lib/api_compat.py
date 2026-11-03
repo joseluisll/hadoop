@@ -284,6 +284,24 @@ def additions(old, new):
         sum(1 for k in new.fields.keys() - old.fields.keys() if visibility(new.fields[k][0]))
 
 
+def added_public_api(old_classes, new_classes):
+    """T23: public types only in the new jar, and public members added to
+    types both jars have. These are API code built against the old jar may
+    start to use and that fails where only the old jar is present."""
+    types = sorted(c for c in new_classes.keys() - old_classes.keys()
+                   if new_classes[c].visible)
+    members = []
+    for cls in sorted(old_classes.keys() & new_classes.keys()):
+        old, new = old_classes[cls], new_classes[cls]
+        for key in sorted(new.methods.keys() - old.methods.keys()):
+            if visibility(new.methods[key]):
+                members.append(f"{cls}#{key}")
+        for key in sorted(new.fields.keys() - old.fields.keys()):
+            if visibility(new.fields[key][0]):
+                members.append(f"{cls}#{key}")
+    return types, members
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--expected", required=True)
@@ -335,6 +353,32 @@ def main():
             for cls in cb.keys() & added_classes[new].keys():
                 if cb[cls] != added_classes[new][cls]:
                     pairs[(old, new, cls)].add("replaced jar")
+
+    # T23: what a replaced third-party jar makes available that the old one
+    # did not. Listed in the report; it does not change the verdict.
+    api_additions = []
+    seen_api = set()
+    for (old, new), where in sorted(jar_pairs.items()):
+        if "replaced" not in where or "third-party" not in audience(new):
+            continue
+        key = (os.path.basename(old), os.path.basename(new))
+        if key in seen_api:
+            continue
+        seen_api.add(key)
+
+        def infos(jars, rel):
+            out = {}
+            for c in jars.classes(rel):
+                try:
+                    out[c] = cf.parse(jars.read(rel, c))
+                except (ValueError, TypeError):
+                    pass
+            return out
+
+        types, members = added_public_api(infos(jb, old), infos(jc, new))
+        if types or members:
+            api_additions.append({"old": key[0], "new": key[1],
+                                  "types": types, "members": members})
 
     allow = Allowlist(a.expected)
     findings, seen = [], {}
@@ -410,6 +454,7 @@ def main():
                     "unexpected": len(unexpected),
                     "public_members_added": dict(added_members)},
         "findings": findings, "jars": jar_facts, "unused_rules": unused,
+        "added_api": api_additions,
     }
     os.makedirs(a.out, exist_ok=True)
     with open(os.path.join(a.out, "api-compat.json"), "w", encoding="utf-8") as f:
@@ -472,6 +517,18 @@ def write_md(path, r, max_version):
             subject = f["subject"].replace("|", "\\|")
             lines.append(f"| {f['kind']} | `{subject}` | {f['detail']} | {f['scope']} |")
         lines += ["", "</details>\n"]
+    if r.get("added_api"):
+        lines += ["### API a replaced jar makes available\n",
+                  "Public types only in the added jar and public members added to types both "
+                  "jars have. Code built against Hadoop may start to use them and fail where "
+                  "only the older jar is present.\n",
+                  "| Old jar | New jar | Added types | Added members |",
+                  "|---|---|---|---|"]
+        for a in r["added_api"]:
+            types = ", ".join(f"`{t}`" for t in a["types"]) or ""
+            members = ", ".join(f"`{m}`" for m in a["members"]) or ""
+            lines.append(f"| {a['old']} | {a['new']} | {types} | {members} |")
+        lines.append("")
     if r["jars"]:
         lines += ["<details><summary>Jar pairs compared</summary>\n",
                   "| Old jar | New jar | Module name | Class-file version | Seen as |",
