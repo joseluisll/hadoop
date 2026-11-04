@@ -21,7 +21,9 @@ Usage: attribution.py [--rules DIR] <dir with one sub-directory per tree>
 Each tree directory holds what attribution.sh wrote for it: artifact-diff.json,
 api-compat.json and downstream-compare.json. In a ticket-<n> tree every rule
 whose reason starts with the branch's ticket must have matched at least once;
-in any tree nothing may be UNEXPECTED. The branches and their order come from
+in a prefix tree and in ticket-1 nothing may be UNEXPECTED, while in a
+ticket-<n> tree from n=2 an UNEXPECTED difference is an interaction between
+tickets and is listed as information (T48). The branches and their order come from
 PR_ORDER in compare_plan.py; the expected tree list is built from them, so a
 tree whose job produced no results is a problem and fails the run (T47).
 Writes attribution.json and attribution.md in the given directory and exits 1
@@ -92,13 +94,26 @@ def unused(comparison, data):
 
 def check_tree(name, path, rules_dir):
     problems = []
+    interactions = []
     data = {}
+    # A ticket tree from the second ticket on applies one ticket without its
+    # merge predecessors, a state that never ships: an UNEXPECTED difference
+    # there is an interaction between tickets, not a failure (T48). ticket-1
+    # is the first ticket alone, which is also prefix-1, and every prefix tree
+    # is a shippable state, so both still fail on UNEXPECTED.
+    single_ticket = False
+    if name.startswith("ticket-"):
+        try:
+            single_ticket = int(name.split("-", 1)[1]) >= 2
+        except ValueError:
+            pass
     for comparison, filename, _ in COMPARISONS:
         data[comparison] = load(os.path.join(path, filename))
         if data[comparison] is None:
             problems.append(f"missing {filename}")
         for d in unexpected(comparison, data[comparison]):
-            problems.append(f"{comparison}: UNEXPECTED {d.get('kind')} {d.get('subject')}")
+            item = f"{comparison}: UNEXPECTED {d.get('kind')} {d.get('subject')}"
+            (interactions if single_ticket else problems).append(item)
     ticket = None
     if name.startswith("ticket-"):
         try:
@@ -121,7 +136,8 @@ def check_tree(name, path, rules_dir):
     elif not name.startswith("prefix-"):
         problems.append(f"unknown tree name {name}")
     return {"tree": name, "ticket": ticket,
-            "verdict": "FAIL" if problems else "PASS", "problems": problems}
+            "verdict": "FAIL" if problems else "PASS", "problems": problems,
+            "interactions": interactions}
 
 
 def markdown(result):
@@ -140,6 +156,12 @@ def markdown(result):
         for p in t["problems"]:
             out.append(f"- {p}")
         if t["problems"]:
+            out.append("")
+        if t.get("interactions"):
+            out.append("Interactions (the ticket alone, without its merge predecessors):")
+            out.append("")
+            for i in t["interactions"]:
+                out.append(f"- {i}")
             out.append("")
     return "\n".join(out)
 

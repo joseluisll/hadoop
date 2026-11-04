@@ -61,7 +61,10 @@ the report lists the accepted changes nobody was told about.
      distribution is listed and every listed coordinate exists, and a jar new
      on the candidate that ships its own `META-INF/NOTICE*` is named in
      `NOTICE-binary` (R91). A mismatch on the candidate only fails the run; a
-     mismatch on both sides is listed as pre-existing.
+     mismatch on both sides is listed as pre-existing. The check only sees
+     jars shipped as files, so an artifact bundled in a shaded
+     `hadoop-client-*` jar shows as stale; T50 closes that, and until then
+     the two HADOOP-20014 entries have a rule.
 2. **API compatibility** (`lib/api_compat.py`, run by `artifact-diff.sh`):
    every class that changes, read from the class files (no JVM): the classes
    the launchers load from another jar or with other bytes (what the daemons
@@ -337,6 +340,15 @@ These are not caused by phase A; the harness records them, and they show as
   registered. Phase A changes no JSON provider jar on the router's
   classpath, and the CI runs of `federated` fail the same way on the
   baseline.
+- No JIRA yet: the YARN router's `/ws/v1/cluster/apps` listing and its RPC
+  `getApplications` omit an application submitted directly to a sub-cluster's
+  resource manager (`jetty12-direct-sc1` in `federated`, on both sides), so
+  the five checks of R88 keep failing on both sides (T49). The listing code
+  queries every active sub-cluster, so the omission is not identified from
+  the code;
+  the reads by id fail because the router finds an application's home
+  sub-cluster only through the federation state store, which only a
+  submission through the router records.
 - HADOOP-20018: when the ZKFC cannot bind its RPC port, it exits with a
   NullPointerException (`this.rpcServer` is null in
   `ZKFailoverController`) that hides the BindException behind it. Each ZKFC
@@ -429,7 +441,10 @@ branch (or tag) name:
 
 - `jetty12-phase-a-<arch>-run-aa-*`: the baseline against itself (both
   sides build `PREPARATION`). Every difference it reports is noise the
-  harness must mask or allow.
+  harness must mask or allow. The report adds a gate line,
+  `Harness check: **PASS**` when every check passes and `**FAIL**` naming the
+  checks that did not; no normal run of a batch on this baseline is read
+  until it passes (T45).
 - `jetty12-phase-a-<arch>-run-broken-<case>-<n>`: the candidate's
   distribution is broken on purpose before it is compared or run
   (`ci/break_candidate.py`). The overall verdict is FAIL, and the report adds
@@ -519,9 +534,11 @@ builds only its candidate, and both reuse a saved build of the same code
 a baseline that a normal run saved is not built again. A final job downloads
 every tree's results and runs `lib/attribution.py`, which writes
 `attribution.json` and `attribution.md` and fails when a ticket's rule matched
-nothing in its own tree, a difference is UNEXPECTED, or a tree of `PR_ORDER`
-has no results (`missing tree <name>`), so a failed tree job cannot shrink
-the report silently (T47).
+nothing in its own tree, a difference is UNEXPECTED in a prefix tree or in
+`ticket-1`, or a tree of `PR_ORDER` has no results (`missing tree <name>`), so
+a failed tree job cannot shrink the report silently (T47). In a `ticket-<n>`
+tree from n=2 an UNEXPECTED difference is an interaction between tickets, not
+a failure: it is listed under its own heading as information (T48).
 
 ### On one machine
 
@@ -578,7 +595,7 @@ dev-support/jetty12-phase-a/replay.sh ~/reports/report-*
 | `BASELINE_REF` / `CANDIDATE_REF` | `origin/PREPARATION` / `origin/feat/HARNESS` | the two trees |
 | `ANCESTRY_CHECK` | `true` | `compare.sh` stops when the candidate lacks a baseline commit's change (`lib/ancestry.py`) |
 | `PLAN_CHECK` | `true` | `compare.sh` stops when the candidate is not the baseline plus `PR_BRANCHES` (`lib/compare_plan.py`) |
-| `CLASSONLY_FAIL` | `false` | whether an unexpected one-side class fails the end-to-end check (R87); with `false` it is listed as "would fail" without changing the verdict; in CI the Compare step of `tmpl_jetty12_phase_a.yml` sets it |
+| `CLASSONLY_FAIL` | `false` | whether an unexpected one-side class fails the end-to-end check (R87); with `false` it is listed as "would fail" without changing the verdict; in CI the Compare step of `tmpl_jetty12_phase_a.yml` sets it. It stays `false` until an A/A run reports zero unexpected one-side classes (T46) |
 | `PR_BRANCHES` | none | the branches merged into trunk, in merge order, comma-separated (e.g. `origin/HADOOP-20012-upstream,...,origin/jetty-phase-a`); the plan check runs only when set. The workflow sets it for every run; a run whose two sides are one commit skips the check |
 | `MAVEN_MIRROR_URL` | none | mirror of Maven Central, e.g. `https://maven-central.storage-download.googleapis.com/maven2` when the build host is rate-limited |
 | `MVN_EXTRA_ARGS` | none | added to every Maven call |

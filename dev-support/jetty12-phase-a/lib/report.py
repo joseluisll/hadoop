@@ -119,6 +119,14 @@ def main(results):
     check = None
     if broken:
         check = "PASS" if caught(verdicts) else "FAIL"
+    # A self-comparison (R68) is a gate: a normal run of a batch on this
+    # baseline is not read until it passes.
+    self_compare = commit(results, "baseline") == commit(results, "candidate") != "not built"
+    aa_check = None
+    aa_failed = []
+    if self_compare:
+        aa_failed = [n for n, v in verdicts if v != "PASS"]
+        aa_check = "PASS" if not aa_failed else "FAIL"
     # The two trees are what they claim: the comparison below is of the patch.
     out = ["# Jetty 12 phase A: no functional change\n",
            f"- Baseline: `{commit(results, 'baseline')}`",
@@ -129,6 +137,11 @@ def main(results):
         out.append(f"Harness check: **{check}**: the artifacts and every end-to-end "
                    "architecture must FAIL on the broken candidate, and the tree checks "
                    "must not.\n")
+    if aa_check:
+        detail = "" if not aa_failed else (
+            ": " + ", ".join(f"*{n}*" for n in aa_failed) + " did not pass")
+        out.append(f"Harness check: **{aa_check}**{detail}. No normal run of a batch "
+                   "on this baseline is read until this run passes.\n")
     if pre_failed:
         out.append("**The run stopped before comparing**: "
                    + " and ".join(f"*{n}*" for n in pre_failed)

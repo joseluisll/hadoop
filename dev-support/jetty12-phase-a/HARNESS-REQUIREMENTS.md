@@ -119,6 +119,8 @@ response"); each group names the files it comes from.
   `META-INF/maven/*/*/pom.properties` when present, else by file name. A
   mismatch on the candidate only is a difference that fails check 1 unless a
   rule accepts it; one present on both sides is listed as pre-existing.
+  The check only sees jars shipped as files, so an artifact bundled in a
+  shaded `hadoop-client-*` jar shows as stale; T50 (TO-BE) closes that.
   *Formerly T15.*
 
 ### Check 2: API compatibility (`lib/api_compat.py`, `lib/classfile.py`)
@@ -294,9 +296,11 @@ response"); each group names the files it comes from.
   side name and the per-run application id, container id and filecache number
   are masked, so the same `job.jar` under two application ids is not a move.
   A different jar name or another directory under the distribution still is.
-  That a class may move between two jars both sides ship (for example
-  `jakarta.activation-api` and `jakarta.activation` in `mixed`) is not
-  accepted; that is T44's second part, open.
+  Extension T44, second part (done): a class both sides can load from two
+  jars they both ship is accepted by a `classjar` rule limited to
+  `javax.activation.` (mixed-run-9: `jakarta.activation-api-1.2.1` and
+  `jakarta.activation-1.2.2` ship on both sides, and classpath order decides
+  which one loads); the comparison itself is unchanged.
 - **R95.** MapReduce container JVMs log the classes they load too
   (`-Xlog:class+load` in `yarn.app.mapreduce.am.command-opts`,
   `mapreduce.map.java.opts` and `mapreduce.reduce.java.opts`, into the
@@ -437,6 +441,11 @@ response"); each group names the files it comes from.
 - **R63.** Every rule names the ticket that causes the difference, and
   patterns are kept narrow: limited to the entries the patch is meant to
   change.
+
+  Extension T48 (done): the `jetty-servlet` and `jetty-webapp` POM rules are
+  tagged HADOOP-20015, which declares those dependencies where they are
+  imported (commits `3c6f7bc10ad` and `812b223abd8`); the attribution run
+  showed each rule unused in its former ticket's own tree.
 - **R64.** A rule for a user-visible difference (an API finding, a
   downstream dependency or duplicate, a change in a shaded client or a lib
   jar) says where users are told: `announced: <where>`. A value starting with
@@ -448,13 +457,19 @@ response"); each group names the files it comes from.
   meant for before it is committed (`replay.sh`, R80).
 - **R67.** Rules for pre-existing, non-deterministic behaviour seen on both
   sides (YARN-12030 timeline JSON writer, `Vary` on static files, job counters
-  read mid-run) name the issue and say it is pre-existing.
+  read mid-run) name the issue, or say that no issue is filed, and say it is
+  pre-existing.
 
 ### Harness self-checks
 
 - **R68.** A run whose two sides are the same commit (in CI, a branch named
   `jetty12-phase-a-<arch>-run-aa-*`) compares the baseline with itself; every
   difference it reports is noise the harness must mask or allow.
+
+  Extension T45 (done): `lib/report.py` writes a gate line for such a run,
+  `Harness check: **PASS**` when every check's verdict is PASS and
+  `**FAIL**` naming the checks that did not pass otherwise, with the sentence
+  that no normal run of a batch on this baseline is read until it passes.
 - **R69.** A run named `jetty12-phase-a-<arch>-run-broken-<case>-<n>`
   breaks the candidate's distribution on purpose (`ci/break_candidate.py`:
   `annotation`, the default, removes `jakarta.annotation-api`; `jetty`
@@ -635,6 +650,10 @@ response"); each group names the files it comes from.
   Replay (R80) matches `classonly` rules, including in old reports, through
   `classload-compare-<arch>.json` when `one_side_classes` is absent.
   *Formerly T10 with T3.*
+
+  Extension T46 (decided): `CLASSONLY_FAIL` stays `false` until an A/A run
+  reports zero unexpected one-side classes; the A/A run of 2026-11-03
+  (`simple-run-aa-9`) had 10.
 - **R88.** In `federated`, the scenario submits a distributed-shell
   application to sub-cluster sc1's resource manager directly, through the
   sub-cluster's own client configuration (its `yarn.resourcemanager.address`
@@ -683,13 +702,29 @@ response"); each group names the files it comes from.
   A tree whose job failed (the first CI run's `prefix-5`, "No space left on
   device") can no longer shrink the report silently.
 
+  Extension T48 (done): a `ticket-<n>` tree from n=2 applies one ticket
+  without its merge predecessors, a state that never ships, so an UNEXPECTED
+  difference there is an interaction: it is listed under its own heading in
+  `attribution.json` and `attribution.md` as information and does not fail
+  the tree. `ticket-1` (also `prefix-1`) and every `prefix-<n>` tree are
+  shippable states and still fail on UNEXPECTED. The unused-rule and
+  missing-tree problems are unchanged. The case that prompted it: `ticket-6`
+  (HADOOP-19970 alone) reported a `pom-dependency-changed` on
+  `hadoop-yarn-common` whose `jersey-test-framework-provider-jetty` exclusion
+  only disappears once HADOOP-20014 is under it.
+
 ## TO-BE: identified improvements
 
 Identified during the runs and reviews up to 2026-11-03. T7, T21 and T24 are
 done in the rule files; T3, T8, T9, T10, T11, T12, T14, T15, T17, T19, T20,
-T22, T23 and T25 are done as requirements (each entry says which), and T39,
-T40, T41, T42, T43, T44's first part and T47 are done as extensions of the
-requirements listed above. The rest are open; each says where it came from.
+T22, T23 and T25 are done as requirements (each entry says which); T39, T40,
+T41, T42, T43, T44's first and second parts, T45, T47 and T48 are done as
+extensions of the requirements listed above; T46 is decided (the switch stays
+off) and T49 is decided (R88 stays and a YARN issue is to be filed). What is left:
+T50; the YARN issue for T49; a fresh batch to confirm these fixes, including
+the HADOOP-19970 `mapping.match` probe value, which waits for that batch's
+recorded probe values and may need a release-note sentence. Each entry says
+where it came from.
 
 - **T1. Raw-request scenarios.** `probe.py raw` (R31) is not used by any
   scenario yet. Add raw requests to `10-web-common` against every web server:
@@ -907,8 +942,9 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   *Source: ha-run-5; `hdfs-default.xml`.*
 
 The next items are the runs review's T44 to T49 on 2026-11-03
-(`2026-11-03-2138-Harness-Runs-Review.md`, G3 to G10). T44's first part and
-T47 are done as extensions of R38/R95 and R89 (above); the rest are open.
+(`2026-11-03-2138-Harness-Runs-Review.md`, G3 to G10), plus T50 from the 2026-11-03 phase 2 work. T44's first and second
+parts, T45, T47 and T48 are done as extensions of the requirements above; T46
+and T49 are decided; T50 is open.
 
 - **T44, second part. A class in two shipped jars.** T44's first part masks
   the per-run ids in the class-load comparison (R38). The second part is
@@ -916,40 +952,58 @@ T47 are done as extensions of R38/R95 and R89 (above); the rest are open.
   `mixed-run-9` has 30 moves of three classes on ten daemons from
   `jakarta.activation-api-1.2.1.jar` to `jakarta.activation-1.2.2.jar`, with
   no `dist-file-*` difference for either jar, and classpath order decides.
-  Treat such a class as not a difference. Needs the owner's decision
-  (adding a rule was rejected; the owner decides whether the comparison
-  changes). *Source: G4; mixed-run-9.*
+  Done as an extension of R38: a `classjar` rule limited to
+  `javax.activation.` accepts them; the comparison itself is unchanged.
+  *Source: G4; mixed-run-9.*
 
 - **T45. Make the A/A run a gate.** An A/A run that reports any blocking
   difference is a harness failure: require `PASS` (or at least zero blocking
   entries) before a normal batch is read, and list the blocking entries that
-  made it fail. Extends R68. Needs the owner's decision because it changes
-  acceptance. *Source: G3, G9; simple-run-aa-9 FAIL.*
+  made it fail. Done as an extension of R68: `lib/report.py` writes the gate
+  line. *Source: G3, G9; simple-run-aa-9 FAIL.*
 
 - **T46. A noise budget before `CLASSONLY_FAIL`.** Keep the switch off until
   an A/A run reports zero unexpected one-side classes, or mask the classes
   that differ between two runs of one build (record them from an A/A run) and
-  fail only on classes not in that set. Extends R87 and the T3 extension.
-  Needs the owner's decision. *Source: G9; 10 one-side classes in
-  simple-run-aa-9.*
+  fail only on classes not in that set. Decided: the switch stays off until
+  an A/A run reports zero unexpected one-side classes (simple-run-aa-9 had
+  10); no code change. Extends R87 and the T3 extension. *Source: G9; 10
+  one-side classes in simple-run-aa-9.*
 
 - **T48. Correct the attribution rules.** Retag `expected-differences.txt`
   lines 125 and 140 to HADOOP-20015, and add a rule for ticket-6's
   `pom-dependency-changed ...hadoop-yarn-common|...jersey-test-framework-provider-jetty`
   (or decide that a ticket tree without its merge predecessors is not a
-  shippable state and do not fail on such interactions). Changes rules:
-  needs the owner's decision (R65) and a replay (R80). *Source: G10;
-  attribution ticket-5, ticket-6.*
+  shippable state and do not fail on such interactions). Done, both parts:
+  the two rules are tagged HADOOP-20015 (R63's extension) and a `ticket-<n>`
+  tree from n=2 lists an UNEXPECTED difference as an interaction (R89's
+  extension). *Source: G10; attribution ticket-5, ticket-6.*
 
 - **T49. Record the federated direct reads without an expectation until the
   router listing is understood.** `dshell-direct-sc1` runs on both sides but
-  the router's `/apps` listing omits it, on both sides. Record
-  `router-apps-direct`, `router-app-list-direct` and
-  `app-on-one-subcluster-direct` as comparisons, not expectations, and file a
-  YARN issue for the listing; `app-on-one-subcluster-direct` can use the
-  sub-cluster's own listing meanwhile. Extends R88. Needs the owner's
-  decision (R88's listing expectations would be amended). *Source: G7;
-  federated-run-10.*
+  the router's `/apps` listing omits it, on both sides. Decided: R88's
+  expectations stay as written, so the five checks keep failing on both
+  sides, and a YARN issue is to be filed for the listing. Finding, from reading the
+  code: the listing paths aggregate every active sub-cluster
+  (`FederationInterceptorREST.getApps`,
+  `hadoop-yarn-server-router/.../webapp/FederationInterceptorREST.java:783-846`,
+  and `FederationClientInterceptor.getApplications`,
+  `.../clientrm/FederationClientInterceptor.java:790-818`), so a directly
+  submitted application should appear; the reads by id fail because the
+  router finds an application's home sub-cluster only through the federation
+  state store (`getHomeSubClusterInfoByAppId`,
+  `FederationInterceptorREST.java:3424-3446`), which only a submission
+  through the router records. Why the listing omits it is not identified from
+  the code. *Source: G7; federated-run-10.*
+
+- **T50. Count the artifacts bundled in the shaded clients.** The LICENSE
+  check (R91) only sees jars shipped as files, so an artifact bundled in a
+  shaded `hadoop-client-*` jar shows as `license-entry-stale`. Count those
+  artifacts as shipped, from the dependency data the harness already collects
+  or from the jars' `META-INF/maven/**/pom.properties`, so the two
+  HADOOP-20014 entries and the pre-existing bundled entries stop showing as
+  stale; then the rule added for them goes. *Source: G8; the 2026-11-03
+  batch.*
 
 Withdrawn after review: "extract the text of XML error bodies". The probe
 already extracts it (R29); the 17 error responses of secure-run-9 with an
@@ -970,7 +1024,11 @@ lost (G1), class-load logs were read as errors (G2), a container's per-run
 JSON types (G5). The fixes are T42, T43, T44's first part and T39, done as
 extensions of R82, R39, R38/R95 and R93 (above), with T40, T41 and T47.
 The next work is a fresh batch (step 2a) with those fixes, then step 2 in
-the order that closes HADOOP-19970 first.
+the order that closes HADOOP-19970 first. What is left after this round:
+T50 (the LICENSE check's blind spot); the YARN issue for T49's router
+listing; a fresh batch to confirm T39 to T48; and the HADOOP-19970
+`mapping.match` probe value, which waits for that batch's recorded values
+and may need a release-note sentence.
 
 ### Step 0: requirements and decisions (document only)
 
@@ -1046,7 +1104,9 @@ next batch must show these gone; read from it:
   has a rule, the owner sets `CLASSONLY_FAIL: "true"` in the template's
   Compare step: the failing part of T3.
 - R88: in `federated`, `router-apps-direct`, `router-app-list-direct` and
-  `app-on-one-subcluster-direct` pass on both sides.
+  `app-on-one-subcluster-direct` keep failing on both sides until the router
+  listing is understood (T49); the reads by id are compared without an
+  expectation.
 - R89 and T47: every expected tree's verdict, and whether the baseline was
   reused instead of built (the tree jobs' logs). `ticket-6` is HADOOP-19970
   alone: every HADOOP-19970 rule must match there, which proves the rules

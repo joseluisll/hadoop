@@ -70,6 +70,11 @@ def read_json(path):
         return json.load(f)
 
 
+def read_text(path):
+    with open(path, encoding="utf-8") as f:
+        return f.read()
+
+
 def read_result(case, path, r):
     """The JSON a comparator wrote, or an assertion naming the case and the
     comparator's stderr when it crashed without writing one. A crash used to
@@ -306,18 +311,23 @@ def plan(repo, case, baseline, candidate, branches, verdict, rc):
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
 
 
-def report(tmp, case, checks, overall, rc, broken=False):
+def report(tmp, case, checks, overall, rc, broken=False, same_commit=False):
     results = os.path.join(tmp, "report", case)
     cmp_dir = os.path.join(results, "compare")
     os.makedirs(cmp_dir)
     if broken:
         write_text(os.path.join(results, "candidate", "build", "broken.txt"), "case test\n")
+    if same_commit:
+        for side in ("baseline", "candidate"):
+            write_text(os.path.join(results, side, "build", "commit-subject.txt"),
+                       "the same commit\n")
     for name, verdict in checks.items():
         write_json(os.path.join(cmp_dir, name), {"verdict": verdict})
     r = run(REPORT, results)
     lines = [line for line in r.stdout.splitlines() if line.startswith("overall: ")]
     assert lines, f"{case}: no 'overall:' line in stdout; stderr:\n{r.stderr.strip()}"
     expect(case, (lines[0].split()[1], r.returncode), (overall, rc))
+    return read_text(os.path.join(cmp_dir, "report.md"))
 
 
 RULE_FILES = ("expected-differences.txt", "expected-api-differences.txt",
@@ -910,6 +920,25 @@ def main():
                {**caught, "ancestry.json": "FAIL"}, "FAIL", 1, broken=True)
         report(tmp, "report a broken candidate nothing catches exits 1",
                all_pass, "PASS", 1, broken=True)
+        # T45: a self-comparison (R68) is a gate on the baseline.
+        text = report(tmp, "report a self-comparison that passes writes PASS",
+                      all_pass, "PASS", 0, same_commit=True)
+        expect("report a self-comparison that passes writes PASS: line",
+               "Harness check: **PASS**" in text, True)
+        text = report(tmp, "report a self-comparison with a FAIL check writes FAIL",
+                      {**all_pass, "artifact-diff.json": "FAIL"}, "FAIL", 1,
+                      same_commit=True)
+        expect("report a self-comparison with a FAIL check names it",
+               "Harness check: **FAIL**: *Artifacts and dependencies* did not pass" in text,
+               True)
+        text = report(tmp, "report a normal run writes no self-comparison line",
+                      all_pass, "PASS", 0)
+        expect("report a normal run writes no self-comparison line",
+               "Harness check" in text, False)
+        text = report(tmp, "report a broken candidate keeps its own line",
+                      caught, "FAIL", 0, broken=True)
+        expect("report a broken candidate keeps its own line",
+               "Harness check: **PASS**: the artifacts" in text, True)
 
         # T17: a ticket's rule must match in its own tree; nothing may be
         # UNEXPECTED in any tree.
@@ -937,6 +966,45 @@ def main():
                              "PASS", 0, rules={"expected-differences.txt": rule})
         expect("attribution all trees matched: no problems",
                [p for t in result["trees"] for p in t["problems"]], [])
+        # T48: a ticket tree from the second ticket on applies one ticket
+        # without its merge predecessors, a state that never ships, so an
+        # UNEXPECTED difference there is an interaction and does not fail it.
+        # ticket-1 is also prefix-1, and every prefix tree is shippable.
+        interaction = {"artifact-diff.json": artifact_json(
+                           unexpected=1,
+                           diffs=[{"kind": "pom-dependency-changed",
+                                   "subject": "a|org.example:x",
+                                   "status": "UNEXPECTED"}]),
+                       "api-compat.json": api_json(),
+                       "downstream-compare.json": downstream_json()}
+        own_rule = {"expected-differences.txt":
+                    "dist-file-added org/example/.*  # HADOOP-20014 changes this\n"}
+        result = attribution(tmp, "attribution an UNEXPECTED difference in ticket-2 "
+                             "is an interaction",
+                             {**{t: matched_tree() for t in ALL_TREES},
+                              "ticket-2": interaction}, "PASS", 0, rules=own_rule)
+        tree = [t for t in result["trees"] if t["tree"] == "ticket-2"][0]
+        expect("attribution an UNEXPECTED difference in ticket-2 is an interaction: "
+               "listed", tree["interactions"],
+               ["artifact-diff: UNEXPECTED pom-dependency-changed a|org.example:x"])
+        expect("attribution an UNEXPECTED difference in ticket-2 is an interaction: "
+               "no problems", tree["problems"], [])
+        attribution(tmp, "attribution an UNEXPECTED difference in ticket-1 FAILs",
+                    {**{t: matched_tree() for t in ALL_TREES},
+                     "ticket-1": interaction}, "FAIL", 1,
+                    contains="UNEXPECTED pom-dependency-changed a|org.example:x")
+        attribution(tmp, "attribution an UNEXPECTED difference in prefix-2 FAILs",
+                    {**{t: matched_tree() for t in ALL_TREES},
+                     "prefix-2": interaction}, "FAIL", 1,
+                    contains="UNEXPECTED pom-dependency-changed a|org.example:x")
+        attribution(tmp, "attribution an unused own-ticket rule in ticket-2 FAILs",
+                    {**{t: matched_tree() for t in ALL_TREES},
+                     "ticket-2": {"artifact-diff.json": artifact_json(
+                         unused=["line 1: dist-file-added org/example/.*"]),
+                         "api-compat.json": api_json(),
+                         "downstream-compare.json": downstream_json()}},
+                    "FAIL", 1, rules=own_rule,
+                    contains="HADOOP-20014 rule unused in its own tree")
         # T47: a tree whose job failed leaves no directory; it is expected from
         # PR_ORDER, named, and fails the run.
         missing = [t for t in ALL_TREES if t != "prefix-3"]

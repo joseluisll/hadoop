@@ -269,9 +269,10 @@ on any difference that no rule accepts. See `README.md` and
   was lost in the two scenarios that run `set --`, class-load log lines were
   read as errors, a container's per-run `job.jar` path counted as a class
   move, and the servlet probe compared only JSON types. T42, T43, T44's
-  first part, T39, T40, T41 and T47 fix them; the next batch must show them
-  gone. The previous batch (launched 2026-11-01 23:27, candidate `bc5d054a`)
-  was all PASS, but it predates R84-R89 and the checks that now fail.
+  first and second parts, T39, T40, T41, T45, T47 and T48 fix them; the next
+  batch must show them gone. The previous batch (launched 2026-11-01 23:27,
+  candidate `bc5d054a`) was all PASS, but it predates R84-R89 and the checks
+  that now fail.
 - **Now proven when the run gets that far:** the candidate's ancestry against
   the baseline and its change against the PR branches are checked before
   anything is compared, and the run stops when either check fails (R78 to R80
@@ -285,7 +286,10 @@ on any difference that no rule accepts. See `README.md` and
   and attribution runs, which check artifacts, API and downstream resolution
   for each PR branch alone and for each prefix of the merge order. The
   attribution run's `ticket-6` tree is HADOOP-19970 alone, which shows which
-  accepted differences are its own. The first attribution run listed 9 trees
+  accepted differences are its own; a ticket tree from the second ticket on
+  lists an UNEXPECTED difference as an interaction rather than failing, and
+  the two POM rules HADOOP-20015 adds are tagged to it (T48). The first
+  attribution run listed 9 trees
   because `prefix-5`'s job failed on its runner ("No space left on device");
   T47 now names a missing tree and fails on it, and the tree jobs free the
   runner's preinstalled toolchains.
@@ -310,8 +314,8 @@ HADOOP-19970 can merge when all of these hold:
    - all five architectures pass on the candidate, with the A/A and
      broken-candidate runs green;
    - the attribution run passes: in `ticket-6` (HADOOP-19970 alone) every
-     HADOOP-19970 rule matches and nothing is unexpected, and every prefix
-     tree passes;
+     HADOOP-19970 rule matches and any UNEXPECTED difference is listed as an
+     interaction (T48), and every prefix tree passes;
    - the detection gaps that bear on what HADOOP-19970 changes are closed
      (implemented as R90-R95; the 2026-11-03 batch is the first to exercise
      them): published POMs (T12), LICENSE and NOTICE consistency (T15), the
@@ -333,8 +337,8 @@ HADOOP-19970 can merge when all of these hold:
    the five architectures, the A/A and two broken-candidate runs, and
    `jetty12-phase-a-attribution-run-1`. The first batch ran on 2026-11-03 and
    failed on harness defects (T42, T43, T44's first part, T39), now fixed;
-   run a fresh batch and settle what it shows. Turn on `CLASSONLY_FAIL` once
-   no unexpected one-side class is left.
+   run a fresh batch and settle what it shows. Turn on `CLASSONLY_FAIL` only
+   when an A/A run reports zero unexpected one-side classes (T46).
 2. **Repeat Yetus on #8891, #8893 and #8894**, whose last run could not apply
    the patch, so that all five stage 1 PRs show only `test4tests` or trunk's
    SpotBugs. Then ask for review of #8890 first, as pjfanning asked.

@@ -71,6 +71,12 @@ class-(removed|added) client-minicluster:org\.apache\.hadoop\.shaded\.org\.glass
 dep-removed hadoop-client-modules/hadoop-client-minicluster\|org\.eclipse\.jetty:jetty-continuation:jar:[^:]+:compile  # HADOOP-20014: came with jersey-container-jetty-http; announced: HADOOP-20014 JIRA
 jar-entry-removed share/hadoop/client/hadoop-client-minicluster-[^/]+\.jar!org/apache/hadoop/shaded/org/eclipse/jetty/continuation/.*  # HADOOP-20014: came with jersey-container-jetty-http; announced: HADOOP-20014 JIRA
 class-removed client-minicluster:org\.apache\.hadoop\.shaded\.org\.eclipse\.jetty\.continuation\..*  # HADOOP-20014: came with jersey-container-jetty-http; announced: HADOOP-20014 JIRA
+# HADOOP-20014 lists the JDK HTTP test container in LICENSE-binary. It is
+# bundled in the shaded hadoop-client-minicluster jar, not shipped as a file,
+# and the LICENSE check only sees jars shipped as files (T50), so it reports
+# the entry as stale. The same blind spot is why 150 pre-existing bundled
+# entries show as stale on both sides.
+license-entry-stale org\.glassfish\.jersey\.(containers:jersey-container-jdk-http|test-framework\.providers:jersey-test-framework-provider-jdk-http):2\.46  # HADOOP-20014: bundled in hadoop-client-minicluster, which the LICENSE check cannot see into (T50); announced: HADOOP-20014 JIRA
 
 # --- HADOOP-20015: TestRollingLevelDBTimelineStore logs through SLF4J instead
 # of Jetty's Log. Test sources only.
@@ -122,7 +128,6 @@ pom-dependency-removed [^|]+\|jakarta\.servlet:jakarta\.servlet-api  # HADOOP-19
 pom-dependency-added [^|]+\|org\.eclipse\.jetty\.toolchain:jetty-servlet-api  # HADOOP-19970; announced: HADOOP-19970 release note
 pom-managed-removed [^|]+\|jakarta\.servlet:jakarta\.servlet-api  # HADOOP-19970; announced: HADOOP-19970 release note
 pom-managed-added [^|]+\|org\.eclipse\.jetty\.toolchain:jetty-servlet-api  # HADOOP-19970; announced: HADOOP-19970 release note
-pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-servlet  # HADOOP-19970; announced: HADOOP-19970 release note
 pom-dependency-changed [^|]+\|org\.apache\.hadoop:hadoop-minicluster  # HADOOP-19970: transitive servlet API replaced; announced: HADOOP-19970 release note
 pom-dependency-changed [^|]+\|org\.apache\.hadoop:hadoop-yarn-server-nodemanager  # HADOOP-19970: transitive servlet API replaced; announced: HADOOP-19970 release note
 pom-dependency-changed [^|]+\|org\.apache\.hadoop:hadoop-yarn-server-web-proxy  # HADOOP-19970: transitive servlet API replaced; announced: HADOOP-19970 release note
@@ -135,10 +140,14 @@ pom-managed-removed [^|]+\|org\.glassfish\.jersey\.test-framework\.providers:jer
 pom-managed-added [^|]+\|org\.glassfish\.jersey\.test-framework\.providers:jersey-test-framework-provider-jdk-http  # HADOOP-20014; announced: HADOOP-20014 JIRA
 pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-util  # HADOOP-20014: declared directly for the JDK HTTP test container; announced: HADOOP-20014 JIRA
 pom-dependency-changed [^|]+\|org\.apache\.hadoop:hadoop-yarn-server-applicationhistoryservice  # HADOOP-20014: transitive test container replaced; announced: HADOOP-20014 JIRA
-# HADOOP-20016/20015 declare jetty-http and jetty-webapp where they are imported.
+# HADOOP-20016 declares jetty-http where it is imported.
 pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-http  # HADOOP-20016; announced: HADOOP-20016 JIRA
-pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-webapp  # HADOOP-20016; announced: HADOOP-20016 JIRA
 pom-managed-added [^|]+\|org\.eclipse\.jetty:jetty-http  # HADOOP-20016; announced: HADOOP-20016 JIRA
+# HADOOP-20015 declares jetty-servlet and jetty-webapp where they are imported
+# (yarn-common, RM, AHS, router); they were already resolved there transitively
+# with the same version and scope, so no other difference is expected.
+pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-servlet  # HADOOP-20015; announced: HADOOP-20015 JIRA
+pom-dependency-added [^|]+\|org\.eclipse\.jetty:jetty-webapp  # HADOOP-20015; announced: HADOOP-20015 JIRA
 # HADOOP-20012 removes third-party Jetty and the old servlet API from the
 # catalog webapp and the timelineservice-hbase tests.
 pom-dependency-removed [^|]+\|org\.apache\.solr:solr-core  # HADOOP-20012; announced: HADOOP-20012 JIRA
