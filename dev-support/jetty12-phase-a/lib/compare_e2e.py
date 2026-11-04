@@ -106,48 +106,58 @@ def normalize(value):
     return value
 
 
-def first_difference(a, b, path=""):
-    """A short human-readable pointer to where two JSON values differ."""
+# A DIFF's detail names at most this many differing paths, then a count.
+MAX_DIFF_PATHS = 10
+
+
+def _differences(a, b, path=""):
+    """Every differing path as (path, 'path: a vs b')."""
     if type(a) is not type(b):
-        return f"{path or '/'}: {json.dumps(a)[:120]} vs {json.dumps(b)[:120]}"
+        p = path or "/"
+        return [(p, f"{p}: {json.dumps(a)[:120]} vs {json.dumps(b)[:120]}")]
     if isinstance(a, dict):
+        out = []
         for k in sorted(set(a) | set(b)):
+            p = f"{path}/{k}"
             if k not in a:
-                return f"{path}/{k}: only on candidate"
-            if k not in b:
-                return f"{path}/{k}: only on baseline"
-            d = first_difference(a[k], b[k], f"{path}/{k}")
-            if d:
-                return d
-        return None
+                out.append((p, f"{p}: only on candidate"))
+            elif k not in b:
+                out.append((p, f"{p}: only on baseline"))
+            else:
+                out += _differences(a[k], b[k], p)
+        return out
     if isinstance(a, list):
         if len(a) != len(b):
-            return f"{path}: {len(a)} vs {len(b)} items"
-        for i, (x, y) in enumerate(zip(a, b)):
-            d = first_difference(x, y, f"{path}[{i}]")
-            if d:
-                return d
-        return None
-    return None if a == b else f"{path or '/'}: {json.dumps(a)[:120]} vs {json.dumps(b)[:120]}"
+            p = path or "/"
+            return [(p, f"{p}: {len(a)} vs {len(b)} items")]
+        return [d for i, (x, y) in enumerate(zip(a, b))
+                for d in _differences(x, y, f"{path}[{i}]")]
+    if a == b:
+        return []
+    p = path or "/"
+    return [(p, f"{p}: {json.dumps(a)[:120]} vs {json.dumps(b)[:120]}")]
+
+
+def first_difference(a, b, path=""):
+    """Every differing path with both sides' values, joined with '; '.
+
+    A DIFF's detail names all the fields that differ, not just the first, so
+    the report says what changed without a second lookup. At most
+    MAX_DIFF_PATHS paths, then a count of the rest.
+    """
+    diffs = [d for _, d in _differences(a, b, path)]
+    shown = "; ".join(diffs[:MAX_DIFF_PATHS])
+    if len(diffs) > MAX_DIFF_PATHS:
+        shown += f"; ... and {len(diffs) - MAX_DIFF_PATHS} more"
+    return shown or None
 
 
 def differing_paths(a, b, path=""):
     """Every JSON path at which two values differ (not just the first)."""
-    if type(a) is not type(b):
-        return [path or "/"]
-    if isinstance(a, dict):
-        return [p for k in sorted(set(a) | set(b))
-                for p in ([f"{path}/{k}"] if k not in a or k not in b
-                          else differing_paths(a[k], b[k], f"{path}/{k}"))]
-    if isinstance(a, list):
-        if len(a) != len(b):
-            return [path or "/"]
-        return [p for i, (x, y) in enumerate(zip(a, b))
-                for p in differing_paths(x, y, f"{path}[{i}]")]
-    return [] if a == b else [path or "/"]
+    return [p for p, _ in _differences(a, b, path)]
 
 
-def log_errors(allow, baseline, candidate):
+def log_errors(allow, baseline, candidate, arch):
     """Errors in the candidate's logs that the baseline has not, or far less often."""
     lb = load_json(os.path.join(baseline, "logscan.json"))
     lc = load_json(os.path.join(candidate, "logscan.json"))
@@ -156,7 +166,7 @@ def log_errors(allow, baseline, candidate):
         for msg, n in msgs.items():
             nb = lb.get(src, {}).get(msg, 0)
             if nb == 0 or n > max(2 * nb, nb + 5):
-                rule = allow.match("logscan", f"{src}:{msg}")
+                rule = allow.match("logscan", f"{src}:{msg}", arch)
                 out.append({"source": src, "message": msg, "count": n, "baseline_count": nb,
                             "expected": bool(rule), "reason": rule and rule["reason"]})
     return out
@@ -184,7 +194,8 @@ def main():
         return not_run(a, "the baseline's daemons did not all start: " + aborted["baseline"])
     if aborted:
         return not_run(a, "the candidate's daemons did not all start: " + aborted["candidate"],
-                       verdict="FAIL", errors=log_errors(allow, a.baseline, a.candidate))
+                       verdict="FAIL",
+                       errors=log_errors(allow, a.baseline, a.candidate, a.arch))
     # e2e/run.sh creates the file before the scenarios run, so a file with no
     # non-blank line compared nothing either.
     absent = [side for side, p in paths.items() if not has_observations(p)]
@@ -209,13 +220,14 @@ def main():
             cls, detail = "FIXED", "; ".join(rb["problems"])
         else:
             cls, detail = "BOTH_FAIL", "; ".join(rc["problems"])
-        rule = allow.match("obs", key) if cls in ("DIFF", "REGRESSION", "MISSING") else None
+        rule = allow.match("obs", key, a.arch) \
+            if cls in ("DIFF", "REGRESSION", "MISSING") else None
         fields = []
         if rule is None and cls == "DIFF":
-            rule = allow.match("obsdiff", key)
+            rule = allow.match("obsdiff", key, a.arch)
         if rule is None and cls == "DIFF":
             fields = differing_paths(rb["obs"], rc["obs"])
-            matched = [allow.match("obsfield", key + p) for p in fields]
+            matched = [allow.match("obsfield", key + p, a.arch) for p in fields]
             rule = matched[0] if fields and all(matched) else None
         # The differing fields are written down so a replay (lib/replay.py) can
         # try an obsfield rule against this report without the runs.
@@ -228,13 +240,13 @@ def main():
     jar_moves = []
     for daemon, r in cl.items():
         for cls_name, (jb, jc) in r["different_jar"].items():
-            rule = allow.match("classjar", f"{daemon}:{cls_name}")
+            rule = allow.match("classjar", f"{daemon}:{cls_name}", a.arch)
             jar_moves.append({"daemon": daemon, "class": cls_name, "baseline": jb,
                               "candidate": jc, "expected": bool(rule),
                               "reason": rule and rule["reason"]})
 
     # Errors in logs that only the candidate has, or has far more often.
-    new_errors = log_errors(allow, a.baseline, a.candidate)
+    new_errors = log_errors(allow, a.baseline, a.candidate, a.arch)
 
     # T3: match every class loaded on one side only against a classonly rule.
     # With the switch off, unexpected ones are listed and counted but do not
@@ -244,7 +256,7 @@ def main():
     for d, r in sorted(cl.items()):
         for side in ("baseline", "candidate"):
             for c in r[f"only_{side}"]:
-                rule = allow.match("classonly", f"{d}:{c}")
+                rule = allow.match("classonly", f"{d}:{c}", a.arch)
                 one_side.append({"daemon": d, "side": side, "class": c,
                                  "expected": bool(rule),
                                  "reason": rule and rule["reason"]})
@@ -281,8 +293,7 @@ def main():
         # how many a rule accepts and how many would fail with CLASSONLY_FAIL.
         "one_side_classes": one_side,
         "classonly_fail": classonly_fail,
-        "unused_rules": [f"line {r['line']}: {r['kind']} {r['pattern']}"
-                         for r in allow.rules if r["hits"] == 0],
+        "unused_rules": allow.unused(a.arch),
     }
     result["arch"] = a.arch
     with open(os.path.join(a.out, f"e2e-compare-{a.arch}.json"), "w", encoding="utf-8") as f:

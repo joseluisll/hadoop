@@ -293,6 +293,16 @@ on any difference that no rule accepts. See `README.md` and
   because `prefix-5`'s job failed on its runner ("No space left on device");
   T47 now names a missing tree and fails on it, and the tree jobs free the
   runner's preinstalled toolchains.
+- **Changed in the 2026-11-04 round** (T26, T27, T37, T50, T51, T52, T53,
+  T54): the probe reports a missing `getHttpServletMapping()` as `"absent"`
+  and no longer records `isPushSupported()`; a DIFF's detail names every
+  differing field with both values; the A/A gate also fails on unexpected
+  one-side classes; rules may be limited to architectures with `@arch=`;
+  the LICENSE check counts artifacts bundled in the shaded client jars; a
+  duplicate's detail names the copy that loads and what it lacks; and
+  `downstream-deps.sh` compiles and runs a small program per project
+  (`smoke.tsv`). T55 is recorded in the documents and T56 is decided (an A/A
+  and a broken-static run for every architecture with the next batch).
 
 Its own "phase A" means 20012 to 20016 with 19970, and its "phase B" means the
 Jetty upgrade, HADOOP-19972. Neither is the branch `jetty-phase-b`, which is
@@ -329,6 +339,14 @@ HADOOP-19970 can merge when all of these hold:
    become available (from T23), and every accepted user-visible difference of
    its own whose rule says `announced: HADOOP-19970 release note`, checked by
    hand (T18).
+
+   Draft sentence for the owner (not final): *The servlet API on the
+   classpath becomes `org.eclipse.jetty.toolchain:jetty-servlet-api` 4.0.9
+   (the `javax.servlet` namespace, the Servlet 4.0 API) instead of
+   `javax.servlet:javax.servlet-api` 3.1.0. The Jetty 9.4 container still
+   reports Servlet 3.1. Code that calls the Servlet 4.0 methods now finds
+   them; on Jetty 9.4 `getHttpServletMapping()` returns a mapping with empty
+   values and `newPushBuilder()` returns null.*
 5. **A committer approves the PR.**
 
 ### Course of action

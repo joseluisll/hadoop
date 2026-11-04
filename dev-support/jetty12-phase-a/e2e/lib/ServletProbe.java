@@ -97,8 +97,6 @@ public class ServletProbe {
         + ",\"http_servlet_jar\":" + quote(jarName(HttpServlet.class))
         + ",\"mapping\":" + mappingJson(reflect(req, HttpServletRequest.class,
             "getHttpServletMapping"))
-        + ",\"push_supported\":" + jsonValue(reflect(req, HttpServletRequest.class,
-            "isPushSupported"))
         + ",\"new_push_builder\":" + pushBuilderJson(req) + "}";
   }
 
@@ -115,6 +113,11 @@ public class ServletProbe {
   private static String mappingJson(Object mapping) {
     if (mapping == null) {
       return "null";
+    }
+    if ("absent".equals(mapping)) {
+      // reflect() reports a missing getHttpServletMapping() as this sentinel;
+      // reflecting on the String would report every field as an error.
+      return "\"absent\"";
     }
     Class<?> iface;
     try {

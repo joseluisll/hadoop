@@ -28,6 +28,7 @@ and the tree checks did not fail, which would stop the comparison before it
 could catch anything.
 """
 
+import glob
 import json
 import os
 import sys
@@ -79,6 +80,21 @@ def harness_check(results):
     return notes
 
 
+def unexpected_one_side(cmp_dir):
+    """(arch, daemon, side, class) for every unexpected one-side class in the
+    end-to-end comparisons (T54). A self-comparison must have none: they are
+    noise the run would otherwise carry into the batch."""
+    out = []
+    for path in sorted(glob.glob(os.path.join(cmp_dir, "e2e-compare-*.json"))):
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        arch = d.get("arch") or os.path.basename(path)[len("e2e-compare-"):-len(".json")]
+        for x in d.get("one_side_classes", []):
+            if not x.get("expected"):
+                out.append((arch, x["daemon"], x["side"], x["class"]))
+    return out
+
+
 def caught(verdicts):
     """Whether a deliberately broken candidate was caught: the artifact
     diff and every end-to-end architecture FAIL, and no tree check FAILs."""
@@ -124,9 +140,13 @@ def main(results):
     self_compare = commit(results, "baseline") == commit(results, "candidate") != "not built"
     aa_check = None
     aa_failed = []
+    aa_one_side = []
     if self_compare:
         aa_failed = [n for n, v in verdicts if v != "PASS"]
-        aa_check = "PASS" if not aa_failed else "FAIL"
+        # T54: an unexpected one-side class is noise even with CLASSONLY_FAIL
+        # off, so the gate fails on it too.
+        aa_one_side = unexpected_one_side(cmp_dir)
+        aa_check = "PASS" if not aa_failed and not aa_one_side else "FAIL"
     # The two trees are what they claim: the comparison below is of the patch.
     out = ["# Jetty 12 phase A: no functional change\n",
            f"- Baseline: `{commit(results, 'baseline')}`",
@@ -138,8 +158,16 @@ def main(results):
                    "architecture must FAIL on the broken candidate, and the tree checks "
                    "must not.\n")
     if aa_check:
-        detail = "" if not aa_failed else (
-            ": " + ", ".join(f"*{n}*" for n in aa_failed) + " did not pass")
+        aa_parts = []
+        if aa_failed:
+            aa_parts.append(", ".join(f"*{n}*" for n in aa_failed) + " did not pass")
+        if aa_one_side:
+            shown = "; ".join(f"{a}: {d} {s} only `{c}`"
+                              for a, d, s, c in aa_one_side[:20])
+            if len(aa_one_side) > 20:
+                shown += f"; ... and {len(aa_one_side) - 20} more"
+            aa_parts.append(f"{len(aa_one_side)} unexpected one-side class(es): {shown}")
+        detail = ": " + "; ".join(aa_parts) if aa_parts else ""
         out.append(f"Harness check: **{aa_check}**{detail}. No normal run of a batch "
                    "on this baseline is read until this run passes.\n")
     if pre_failed:

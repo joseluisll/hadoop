@@ -61,10 +61,10 @@ the report lists the accepted changes nobody was told about.
      distribution is listed and every listed coordinate exists, and a jar new
      on the candidate that ships its own `META-INF/NOTICE*` is named in
      `NOTICE-binary` (R91). A mismatch on the candidate only fails the run; a
-     mismatch on both sides is listed as pre-existing. The check only sees
-     jars shipped as files, so an artifact bundled in a shaded
-     `hadoop-client-*` jar shows as stale; T50 closes that, and until then
-     the two HADOOP-20014 entries have a rule.
+     mismatch on both sides is listed as pre-existing. An artifact bundled in
+     a shaded `hadoop-client-*` jar counts as shipped, read from its
+     `META-INF/maven/*/*/pom.properties` (T50), so it no longer shows as
+     stale.
 2. **API compatibility** (`lib/api_compat.py`, run by `artifact-diff.sh`):
    every class that changes, read from the class files (no JVM): the classes
    the launchers load from another jar or with other bytes (what the daemons
@@ -111,7 +111,11 @@ the report lists the accepted changes nobody was told about.
    application ids is not a move (T44). A servlet probe (R93) runs an
    HttpServer2 on the side's classpath and records what a servlet sees at run
    time, by value: its JSON answers keep their values (with the usual masks),
-   so a difference shows what each side answered. The
+   so a difference shows what each side answered, and a DIFF's detail names
+   every differing field with both values (T52). A missing
+   `getHttpServletMapping()` is reported as `"absent"` (T51);
+   `isPushSupported()` is not in the Servlet 4.0 API and is not recorded
+   (T53). The
    scenarios also send raw HTTP/1.0 requests (R94). MapReduce container JVMs
    log their class loads (R95), collected and compared per container type.
    All daemon and container logs
@@ -140,7 +144,13 @@ the report lists the accepted changes nobody was told about.
    classes that more than one jar provides (`lib/downstream_classes.py`):
    a new set of such jars (`downstream-dup-added`) means a downstream
    project now gets two copies of the same classes and classpath order
-   decides which one loads. Allowlist:
+   decides which one loads. The detail names the copy that loads (the first
+   in classpath order) and, when the jars are on disk, what public classes or
+   members it lacks that another copy has (T27). It also compiles and runs
+   `lib/DownstreamSmoke.java` against each project's classpath, recording in
+   `smoke.tsv` whether an `HttpServer2`, a `MiniDFSCluster` and
+   `MiniYARNCluster`, and a JerseyTest start and answer (T26); a step that
+   works on the baseline and not on the candidate fails the check. Allowlist:
    `expected-downstream-differences.txt`. It runs with the `client` unit
    suite (the `simple` workflow) and in `run-all.sh`; the report has the
    section only when it ran.
@@ -396,6 +406,15 @@ These are not caused by phase A; the harness records them, and they show as
   tokens of secondary sub-clusters) is not on the timeout path, the same code
   passed in federated-run-5 and -6, and 50 local runs on each side passed
   (0/50 and 0/50). A failure of this test only is not a phase A regression.
+- No JIRA yet: `TestFederationInterceptor#testRecoverWithoutAMRMProxyHA` (node
+  manager, `federated` unit suite) passed on the baseline and failed on the
+  candidate in federated-run-11. Its flaky history in that run's
+  `unit-compare.md` reads 3 baseline and 2 candidate failures in 5 earlier
+  runs, so it fails on either side. The only candidate change to
+  `FederationInterceptor.java` replaces Jetty's `ConcurrentHashSet` with
+  `ConcurrentHashMap.newKeySet()`, which is not on this test's path. A
+  failure of this test only is not a phase A regression; check 4 still fails
+  the run on any other regression.
 
 ## Running it
 
@@ -443,8 +462,9 @@ branch (or tag) name:
   sides build `PREPARATION`). Every difference it reports is noise the
   harness must mask or allow. The report adds a gate line,
   `Harness check: **PASS**` when every check passes and `**FAIL**` naming the
-  checks that did not; no normal run of a batch on this baseline is read
-  until it passes (T45).
+  checks that did not, and also naming any unexpected one-side class even
+  with `CLASSONLY_FAIL` off (T54); no normal run of a batch on this baseline
+  is read until it passes (T45).
 - `jetty12-phase-a-<arch>-run-broken-<case>-<n>`: the candidate's
   distribution is broken on purpose before it is compared or run
   (`ci/break_candidate.py`). The overall verdict is FAIL, and the report adds
@@ -582,7 +602,9 @@ to `[a-z]+` missed the numbered daemons (`nn1`, `rm1`, `router2`, ...) in
 ha-run-3, mixed-run-4 and federated-run-5. A rule whose kind none of the
 directories recorded data for (`pom-*`, `license-*`, `notice-*`) is printed as
 "not replayable" and does not fail. It exits 1 when a rule that could have
-matched did not. In CI, download the reports first:
+matched did not. A rule may end with `@arch=<arch>[,<arch>...]` after its
+reason: it then applies only in those architectures, and is not reported as
+unused in the others (T37). In CI, download the reports first:
 
 ```
 gh run download <run id> -p 'report-*' -D ~/reports

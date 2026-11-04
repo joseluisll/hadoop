@@ -396,6 +396,45 @@ def _third_party_jars(dist):
     return jars
 
 
+def _jar_bundled_artifacts(path):
+    """{coordinate: file name} for the artifacts a shaded jar bundles.
+
+    A shaded jar keeps each bundled artifact's
+    META-INF/maven/<groupId>/<artifactId>/pom.properties, so an artifact
+    shipped inside it is as shipped as a jar file for the LICENSE check (T50).
+    Hadoop's own artifacts are left out, as _third_party_jars() leaves out
+    Hadoop's jars."""
+    out = {}
+    try:
+        with zipfile.ZipFile(path) as z:
+            for n in z.namelist():
+                if not (n.startswith("META-INF/maven/") and n.endswith("/pom.properties")):
+                    continue
+                props = {}
+                for line in z.read(n).decode("utf-8", "replace").splitlines():
+                    if "=" in line and not line.lstrip().startswith("#"):
+                        k, v = line.split("=", 1)
+                        props[k.strip()] = v.strip()
+                g, a, v = props.get("groupId"), props.get("artifactId"), props.get("version")
+                if g and a and v and not f"{g}:{a}:{v}".startswith("org.apache.hadoop:"):
+                    out[f"{g}:{a}:{v}"] = f"{a}-{v}.jar"
+    except (zipfile.BadZipFile, OSError):
+        pass
+    return out
+
+
+def _bundled_artifacts(dist):
+    """{coordinate: file name} for artifacts bundled in the shaded client jars."""
+    out = {}
+    client = os.path.join(dist, "share", "hadoop", "client")
+    if not os.path.isdir(client):
+        return out
+    for name in sorted(os.listdir(client)):
+        if name.startswith("hadoop-client-") and name.endswith(".jar"):
+            out.update(_jar_bundled_artifacts(os.path.join(client, name)))
+    return out
+
+
 def _license_entries(path):
     """Jar-like lines of a LICENSE-binary or NOTICE-binary file."""
     try:
@@ -434,19 +473,22 @@ def _jar_listed(coord, name, entries):
 
 
 def _license_mismatches(dist):
-    """(jars missing a licence entry, entries with no jar) for one side."""
-    jars = _third_party_jars(dist)
+    """(jars missing a licence entry, entries with no jar) for one side.
+
+    A jar shipped as a file and an artifact bundled in a shaded client jar
+    both count as shipped (T50)."""
+    shipped = {coord: os.path.basename(full)
+               for coord, full in _third_party_jars(dist).items()}
+    shipped.update(_bundled_artifacts(dist))
     lic = _license_entries(os.path.join(dist, "LICENSE-binary"))
     notice = _license_entries(os.path.join(dist, "NOTICE-binary"))
     missing = set()
-    for coord, full in jars.items():
-        name = os.path.basename(full)
+    for coord, name in shipped.items():
         if not _jar_listed(coord, name, lic) and not _jar_listed(coord, name, notice):
             missing.add(coord)
     stale = set()
     for e in lic | notice:
-        if not any(_jar_listed(coord, os.path.basename(full), {e})
-                   for coord, full in jars.items()):
+        if not any(_jar_listed(coord, name, {e}) for coord, name in shipped.items()):
             stale.add(e)
     return missing, stale
 

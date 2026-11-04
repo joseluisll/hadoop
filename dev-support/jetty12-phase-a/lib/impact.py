@@ -189,6 +189,17 @@ def main(cmp_dir):
             if fresh:
                 rows.append(f"- Projects that had no duplicate classes in these packages and now have "
                             f"them ({len(fresh)}): " + ", ".join(f"`{p}`" for p in fresh))
+        # T27: a duplicate whose classpath winner lacks API another copy has.
+        gaps = collections.defaultdict(set)
+        for d in ds["differences"]:
+            detail = d.get("detail") or ""
+            if "winner lacks" in detail:
+                severity = "implementor" if "implementor: winner lacks" in detail else "breaking"
+                gaps[severity].add(d["subject"].split("|")[0])
+        for severity in sorted(gaps):
+            rows.append(f"- Downstream projects whose classpath winner lacks API another copy "
+                        f"has ({severity}): "
+                        + ", ".join(f"`{p}`" for p in sorted(gaps[severity])))
     out += (rows or ["- No difference, or downstream projects were not resolved."]) + [""]
 
     # 4. Accepted but never announced.

@@ -33,6 +33,10 @@ whole subject):
   downstream-dup-removed / -added   <project>|<package>|<group:artifact,...>
                                     a set of jars providing the same classes
                                     (which copy loads depends on classpath order)
+  downstream-smoke-regression       <project>|<step>   a step that succeeds on
+                                    the baseline and fails on the candidate
+  downstream-smoke-changed          <project>|<step>   any other change in a
+                                    step's answer (T26)
 
 Writes DIR/downstream-compare.json and .md; nothing when neither side has
 results (the run did not resolve them). Exits 1 on an unexpected difference
@@ -66,8 +70,10 @@ def read(path):
 
 
 def read_duplicates(path):
-    """{project|package|jars: number of classes}, or None for a side that has no
-    duplicates.tsv (run before downstream-deps.sh recorded classpaths)."""
+    """{project|package|jars: (classes, winner, gap, severity)}, or None for a
+    side that has no duplicates.tsv (run before downstream-deps.sh recorded
+    classpaths). A report written before T27 has four columns: no winner or
+    gap."""
     f = os.path.join(path, "duplicates.tsv")
     if not os.path.exists(f):
         return None
@@ -75,9 +81,48 @@ def read_duplicates(path):
     with open(f, encoding="utf-8") as fh:
         for line in fh:
             if line.strip():
-                project, package, jars, count = line.rstrip("\n").split("\t")
-                out[f"{project}|{package}|{jars}"] = int(count)
+                parts = line.rstrip("\n").split("\t")
+                project, package, jars, count = parts[:4]
+                winner = parts[4] if len(parts) > 4 else ""
+                gap = parts[5] if len(parts) > 5 else ""
+                severity = parts[6] if len(parts) > 6 else ""
+                out[f"{project}|{package}|{jars}"] = (int(count), winner, gap, severity)
     return out
+
+
+def read_smoke(path):
+    """{project|step: (ok, version, jar, detail)}, or None for a side that has
+    no smoke.tsv (run before downstream-deps.sh ran the smoke steps)."""
+    f = os.path.join(path, "smoke.tsv")
+    if not os.path.exists(f):
+        return None
+    out = {}
+    with open(f, encoding="utf-8") as fh:
+        for line in fh:
+            if line.strip():
+                parts = line.rstrip("\n").split("\t")
+                scenario, artifact, step, ok = parts[:4]
+                version = parts[4] if len(parts) > 4 else ""
+                jar = parts[5] if len(parts) > 5 else ""
+                detail = parts[6] if len(parts) > 6 else ""
+                out[f"{scenario}/{artifact}|{step}"] = (ok, version, jar, detail)
+    return out
+
+
+def smoke_values(entry):
+    """'<ok> <version> <jar> <detail>' for a smoke step's answer."""
+    return " ".join(x for x in entry if x)
+
+
+def dup_detail(entry):
+    """'<n> classes; loads from <winner>; <severity>: <gap>' for a duplicate set."""
+    count, winner, gap, severity = entry
+    text = f"{count} classes"
+    if winner:
+        text += f"; loads from {winner}"
+    if gap:
+        text += f"; {severity}: {gap}"
+    return text
 
 
 def main():
@@ -118,9 +163,24 @@ def main():
     db, dc = read_duplicates(a.baseline), read_duplicates(a.candidate)
     if db is not None and dc is not None:
         for key in sorted(db.keys() - dc.keys()):
-            record("downstream-dup-removed", key, f"{db[key]} classes")
+            record("downstream-dup-removed", key, dup_detail(db[key]))
         for key in sorted(dc.keys() - db.keys()):
-            record("downstream-dup-added", key, f"{dc[key]} classes")
+            record("downstream-dup-added", key, dup_detail(dc[key]))
+    # T26: a step that succeeds on the baseline and fails on the candidate is
+    # a regression; any other change is a difference a rule may accept.
+    sb, sc = read_smoke(a.baseline), read_smoke(a.candidate)
+    if sb is not None and sc is not None:
+        for key in sorted(sb.keys() | sc.keys()):
+            if key not in sc:
+                record("downstream-smoke-changed", key, "only on baseline")
+            elif key not in sb:
+                record("downstream-smoke-changed", key, "only on candidate")
+            elif sb[key][0] == "ok" and sc[key][0] != "ok":
+                record("downstream-smoke-regression", key,
+                       f"{smoke_values(sb[key])} -> {smoke_values(sc[key])}")
+            elif sb[key] != sc[key]:
+                record("downstream-smoke-changed", key,
+                       f"{smoke_values(sb[key])} -> {smoke_values(sc[key])}")
     unexpected = [d for d in diffs if d["status"] == "UNEXPECTED"]
     result = {
         "verdict": "FAIL" if unexpected else "PASS",
@@ -130,6 +190,8 @@ def main():
             "duplicates": None if db is None or dc is None else
             {"baseline": len(db), "candidate": len(dc),
              "by_scenario": duplicate_summary(db, dc)},
+            "smoke": None if sb is None or sc is None else
+            {"baseline": len(sb), "candidate": len(sc)},
             "differences": len(diffs), "unexpected": len(unexpected),
         },
     }
@@ -176,6 +238,14 @@ def write(out, result, diffs, unused):
             for scenario, (pb, pc, kb, kc) in dup["by_scenario"].items():
                 f.write(f"| {scenario} | {pb} / {pc} | {kb} / {kc} |\n")
             f.write("\n")
+        smoke = s.get("smoke")
+        if smoke is None:
+            f.write("Compile-and-run smoke steps: not recorded on both sides.\n\n")
+        else:
+            f.write(f"Compile-and-run smoke steps (T26): baseline {smoke['baseline']}, "
+                    f"candidate {smoke['candidate']}. A step that succeeds on the baseline "
+                    "and fails on the candidate is a regression; a changed value is a "
+                    "difference a rule may accept.\n\n")
         if unused:
             f.write("Allowlist rules that matched nothing (expected change did not "
                     "happen; check why):\n\n")

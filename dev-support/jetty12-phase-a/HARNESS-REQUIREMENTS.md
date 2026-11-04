@@ -119,9 +119,13 @@ response"); each group names the files it comes from.
   `META-INF/maven/*/*/pom.properties` when present, else by file name. A
   mismatch on the candidate only is a difference that fails check 1 unless a
   rule accepts it; one present on both sides is listed as pre-existing.
-  The check only sees jars shipped as files, so an artifact bundled in a
-  shaded `hadoop-client-*` jar shows as stale; T50 (TO-BE) closes that.
   *Formerly T15.*
+
+  Extension T50 (done): an artifact bundled in a shaded
+  `share/hadoop/client/hadoop-client-*.jar` counts as shipped, read from the
+  bundled `META-INF/maven/<groupId>/<artifactId>/pom.properties` (Hadoop's
+  own artifacts are left out), so it no longer shows as stale and an
+  unlisted one is missing.
 
 ### Check 2: API compatibility (`lib/api_compat.py`, `lib/classfile.py`)
 
@@ -247,7 +251,7 @@ response"); each group names the files it comes from.
   (`getMajorVersion`/`getMinorVersion`,
   `getEffectiveMajorVersion`/`getEffectiveMinorVersion`), the jar
   `HttpServlet` came from (file name only), `getHttpServletMapping()` (match
-  value, pattern, servlet name, mapping match), `isPushSupported()`, whether
+  value, pattern, servlet name, mapping match), whether
   `newPushBuilder()` is null, and the forward and include mapping attributes
   after a `RequestDispatcher` call. Every Servlet 4.0 call goes through
   reflection, so the source compiles and runs against 3.1 and 4.0 and reports
@@ -261,6 +265,14 @@ response"); each group names the files it comes from.
   each value's type. A DIFF therefore shows both sides' values in its
   detail (`/body/json/mapping/match: "EXACT" vs null`) instead of
   `"str" vs "null"`.
+
+  Extension T51 (done): `mappingJson()` returns `"absent"` when
+  `getHttpServletMapping()` is missing, instead of reflecting on the
+  `"absent"` sentinel and reporting every field as
+  `error:IllegalArgumentException`.
+  Extension T53 (done): `isPushSupported()` is not in the Servlet 4.0 API
+  (it was dropped from the final spec), so the field was `"absent"` on both
+  sides in every run and is no longer recorded; `newPushBuilder()` stays.
 - **R94.** The same four default answers (`PUT`, `OPTIONS`, `TRACE`, `HEAD`)
   are sent with `probe.py raw` over HTTP/1.0 to Hadoop's own servlets on
   every web server the scenario already probes. *Formerly T19.*
@@ -281,6 +293,11 @@ response"); each group names the files it comes from.
   candidate do not fail the run and are not listed under the blocking
   headings: FIXED and a candidate-only MISSING are only counted in the
   classification, and BOTH_FAIL is also listed under a heading of its own.
+
+  Extension T52 (done): a DIFF's detail names every differing path with both
+  sides' values (`path: a vs b`, joined with `; `), at most 10 paths and
+  `; ... and N more` after that, instead of only the first. `fields` is
+  unchanged.
 - **R38.** Every daemon JVM logs the classes it loads (`-Xlog:class+load`).
   JDK classes and classes generated at run time are left out. A class loaded
   on both sides from a jar with another artifact name or in another directory
@@ -390,9 +407,25 @@ response"); each group names the files it comes from.
   or a removed one (`downstream-dup-removed`) is a difference, because Maven
   mediates versions of one coordinate only and classpath order then decides
   which copy loads.
+
+  Extension T27 (done): for each duplicate set, `lib/downstream_classes.py`
+  records the jar that comes first in the project's classpath order (the copy
+  that loads) and, when the jars are on disk, what public classes or members
+  it lacks that another copy has, using check 2's class-file comparison. The
+  winner and gap are in the `downstream-dup-added`/`-removed` detail, and
+  Impact on users lists the project as a `breaking` or `implementor` impact.
 - **R52.** The check runs with the `client` suite (the `simple` workflow)
   and in `run-all.sh`. When neither side has results the report has no
   downstream section; when only one side has them the check fails.
+
+  Extension T26 (done): `downstream-deps.sh` compiles
+  `lib/DownstreamSmoke.java` and runs, per project, the steps its classpath
+  supports (an `HttpServer2` with a filter and a servlet, a `MiniDFSCluster`
+  and `MiniYARNCluster`, a JerseyTest on the shaded client jars), with a
+  timeout per step, writing `results/<side>/downstream/smoke.tsv`.
+  `compare_downstream.py` fails on a `downstream-smoke-regression` (ok on the
+  baseline, not on the candidate) and reports a `downstream-smoke-changed`
+  difference otherwise.
 
 ### Report (`compare.sh`, `lib/report.py`, `lib/impact.py`)
 
@@ -402,7 +435,10 @@ response"); each group names the files it comes from.
   check; the supporting JSON sits next to it.
 - **R54.** The overall verdict is **PASS** when every check passes,
   **INCOMPLETE** when every check passes or is NOT RUN, and **FAIL**
-  otherwise; `compare.sh` exits 0 only on PASS.
+  otherwise. `compare.sh` exits 0 on PASS, and also on a broken-candidate
+  run whose harness check passes (R69): there the overall verdict is FAIL by
+  design, and the exit code reports whether the harness caught the breakage
+  (`lib/report.py`).
 - **R55.** The report names both commits, says when a build was reused and
   from which commit, and says when the run is a harness check (baseline
   against itself, or a deliberately broken candidate with the list of
@@ -415,6 +451,10 @@ response"); each group names the files it comes from.
   of its own.
 - **R57.** Impact on users lists the projects that had no duplicate classes
   and now have them.
+
+  Extension T27 (done): it also lists the projects whose classpath winner
+  lacks public classes or members another copy has, as a `breaking` or
+  `implementor` impact.
 - **R58.** Impact on users lists the accepted user-visible differences
   whose rule has no `announced:` (API findings, downstream differences, and
   changes in the shaded client jars and the lib directories), grouped by rule
@@ -432,7 +472,16 @@ response"); each group names the files it comes from.
 - **R61.** A rule is `<kind> <regex>  # reason`; the regex must match the
   whole subject, and a `#` starts the reason only when it is preceded by
   whitespace and followed by whitespace or the end of the line, so a regex
-  may contain `#`.
+  may contain `#`. A rule may end with `@arch=<arch>[,<arch>...]` after its
+  reason (`simple`, `secure`, `ha`, `mixed`, `federated`): it then applies
+  only in those architectures, does not match elsewhere, and is not reported
+  as unused there (R59). A rule without the suffix applies everywhere.
+
+  Extension T37 (done): `lib/allowlist.py` parses the suffix and takes the
+  run's architecture in `match()` and `unused()`; `lib/compare_e2e.py` passes
+  `--arch`, and `lib/replay.py` uses each directory's architecture (from its
+  report or its name). The timeline-server rules are tagged
+  `@arch=simple,secure` and the job-counter rule `@arch=simple,secure,ha`.
 - **R62.** End-to-end rule kinds: `obs` (excuses a DIFF, a REGRESSION or a
   MISSING), `obsdiff` (a DIFF only), `obsfield` (a DIFF when every differing
   JSON path matches a rule), `classjar` (`<daemon>:<class>`), `classonly`
@@ -470,6 +519,11 @@ response"); each group names the files it comes from.
   `Harness check: **PASS**` when every check's verdict is PASS and
   `**FAIL**` naming the checks that did not pass otherwise, with the sentence
   that no normal run of a batch on this baseline is read until it passes.
+
+  Extension T54 (done): the gate also FAILs when an end-to-end comparison
+  has an unexpected one-side class, even with `CLASSONLY_FAIL` off, and names
+  them (daemon, side, class; at most 20, then a count). `Overall:` and the
+  exit code do not change.
 - **R69.** A run named `jetty12-phase-a-<arch>-run-broken-<case>-<n>`
   breaks the candidate's distribution on purpose (`ci/break_candidate.py`:
   `annotation`, the default, removes `jakarta.annotation-api`; `jetty`
@@ -543,8 +597,9 @@ response"); each group names the files it comes from.
 - **R77.** What is not exercised end to end, and what fails on both sides
   because of known issues (MAPREDUCE-7548, YARN-12024, YARN-12025, YARN-12030,
   HADOOP-20018, the SLS configuration bug, the RBF router id, the
-  `TestFederationInterceptor#testSubClusterTimeOut` race), is documented
-  in `README.md`; a PASS says nothing about those observations.
+  `TestFederationInterceptor#testSubClusterTimeOut` race, the
+  `TestFederationInterceptor#testRecoverWithoutAMRMProxyHA` flake), is
+  documented in `README.md`; a PASS says nothing about those observations.
 - **R78.** `compare.sh` first checks that the candidate contains the
   baseline's commits (`lib/ancestry.py`): every baseline commit's change to a
   file outside the harness and `.github/` must be in the candidate's tree.
@@ -715,16 +770,18 @@ response"); each group names the files it comes from.
 
 ## TO-BE: identified improvements
 
-Identified during the runs and reviews up to 2026-11-03. T7, T21 and T24 are
+Identified during the runs and reviews up to 2026-11-04. T7, T21 and T24 are
 done in the rule files; T3, T8, T9, T10, T11, T12, T14, T15, T17, T19, T20,
-T22, T23 and T25 are done as requirements (each entry says which); T39, T40,
-T41, T42, T43, T44's first and second parts, T45, T47 and T48 are done as
-extensions of the requirements listed above; T46 is decided (the switch stays
-off) and T49 is decided (R88 stays and a YARN issue is to be filed). What is left:
-T50; the YARN issue for T49; a fresh batch to confirm these fixes, including
-the HADOOP-19970 `mapping.match` probe value, which waits for that batch's
-recorded probe values and may need a release-note sentence. Each entry says
-where it came from.
+T22, T23 and T25 are done as requirements (each entry says which); T26, T27,
+T37, T39, T40, T41, T42, T43, T44's first and second parts, T45, T47, T48,
+T50, T51, T52, T53 and T54 are done as extensions of the requirements listed
+above; T46 is decided (the switch stays off), T49 is decided (R88 stays and a
+YARN issue is to be filed), T55 is done (documents) and T56 is decided (an
+A/A and a broken-static run for every architecture with the next batch). What
+is left: the YARN issue for T49; a fresh batch to confirm these fixes,
+including the HADOOP-19970 `mapping.match` probe value, which waits for that
+batch's recorded probe values and may need a release-note sentence. Each
+entry says where it came from.
 
 - **T1. Raw-request scenarios.** `probe.py raw` (R31) is not used by any
   scenario yet. Add raw requests to `10-web-common` against every web server:
@@ -942,9 +999,11 @@ HADOOP-20012 to HADOOP-20016 and HADOOP-19970 change (2026-11-01).
   *Source: ha-run-5; `hdfs-default.xml`.*
 
 The next items are the runs review's T44 to T49 on 2026-11-03
-(`2026-11-03-2138-Harness-Runs-Review.md`, G3 to G10), plus T50 from the 2026-11-03 phase 2 work. T44's first and second
-parts, T45, T47 and T48 are done as extensions of the requirements above; T46
-and T49 are decided; T50 is open.
+(`2026-11-03-2138-Harness-Runs-Review.md`, G3 to G10), plus T50 from the
+2026-11-03 phase 2 work and T51 to T56 from the 2026-11-04 reviews. T44's
+first and second parts, T45, T47, T48, T50, T51, T52, T53 and T54 are done as
+extensions of the requirements above; T46, T49 and T56 are decided; T55 is
+done (documents).
 
 - **T44, second part. A class in two shipped jars.** T44's first part masks
   the per-run ids in the class-load comparison (R38). The second part is
@@ -1002,8 +1061,23 @@ and T49 are decided; T50 is open.
   artifacts as shipped, from the dependency data the harness already collects
   or from the jars' `META-INF/maven/**/pom.properties`, so the two
   HADOOP-20014 entries and the pre-existing bundled entries stop showing as
-  stale; then the rule added for them goes. *Source: G8; the 2026-11-03
-  batch.*
+  stale; then the rule added for them goes. Done as an extension of R91:
+  `_bundled_artifacts()` reads the bundled `pom.properties`; the
+  HADOOP-20014 `license-entry-stale` rule stays until a batch shows it
+  unused. *Source: G8; the 2026-11-03 batch.*
+
+- **T55. The federated unit flake.** `TestFederationInterceptor#testRecoverWithoutAMRMProxyHA`
+  passed on the baseline and failed on the candidate in federated-run-11; its
+  flaky history reads 3 baseline and 2 candidate failures in 5 earlier runs,
+  and the only candidate change to `FederationInterceptor.java` replaces
+  Jetty's `ConcurrentHashSet` with `ConcurrentHashMap.newKeySet()`. Done
+  (documents): README's known issues and R77 name it, as
+  `TestFederationInterceptor#testSubClusterTimeOut` is; check 4 still fails
+  the run on any other regression. *Source: G9; federated-run-11.*
+
+- **T56. A/A and broken-static runs for every architecture.** Decided: run an
+  A/A and a broken-static run for every architecture with the next batch; no
+  code change. *Source: G9; the 2026-11-04 batch.*
 
 Withdrawn after review: "extract the text of XML error bodies". The probe
 already extracts it (R29); the 17 error responses of secure-run-9 with an
@@ -1024,9 +1098,11 @@ lost (G1), class-load logs were read as errors (G2), a container's per-run
 JSON types (G5). The fixes are T42, T43, T44's first part and T39, done as
 extensions of R82, R39, R38/R95 and R93 (above), with T40, T41 and T47.
 The next work is a fresh batch (step 2a) with those fixes, then step 2 in
-the order that closes HADOOP-19970 first. What is left after this round:
-T50 (the LICENSE check's blind spot); the YARN issue for T49's router
-listing; a fresh batch to confirm T39 to T48; and the HADOOP-19970
+the order that closes HADOOP-19970 first. The 2026-11-04 round implemented
+T26, T27, T37, T50, T51, T52, T53 and T54, recorded T55 and decided T56.
+What is left after this round: the YARN issue for T49's router listing; a
+fresh batch to confirm T26, T27, T37 and T39 to T56, including an A/A and a
+broken-static run for every architecture (T56); and the HADOOP-19970
 `mapping.match` probe value, which waits for that batch's recorded values
 and may need a release-note sentence.
 

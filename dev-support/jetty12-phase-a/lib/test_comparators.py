@@ -40,6 +40,7 @@ E2E = os.path.join(HERE, "compare_e2e.py")
 UNIT = os.path.join(HERE, "compare_unit.py")
 PLAN = os.path.join(HERE, "compare_plan.py")
 DOWNSTREAM = os.path.join(HERE, "compare_downstream.py")
+DOWNSTREAM_CLASSES = os.path.join(HERE, "downstream_classes.py")
 ANCESTRY = os.path.join(HERE, "ancestry.py")
 REPORT = os.path.join(HERE, "report.py")
 ATTRIBUTION = os.path.join(HERE, "attribution.py")
@@ -98,7 +99,7 @@ def observation(component, ident, ok=True, **view):
 
 
 def e2e(tmp, case, baseline, candidate, verdict, rc, rules="", aborted=None,
-        classload=None, logscan=None, env=None):
+        classload=None, logscan=None, env=None, arch="simple"):
     base = os.path.join(tmp, "e2e", case)
     for side, lines in (("baseline", baseline), ("candidate", candidate)):
         os.makedirs(os.path.join(base, side))
@@ -115,9 +116,9 @@ def e2e(tmp, case, baseline, candidate, verdict, rc, rules="", aborted=None,
     expected = os.path.join(base, "expected.txt")
     write_text(expected, rules)
     out = os.path.join(base, "out")
-    r = run(E2E, "--expected", expected, "--out", out, "--arch", "simple",
+    r = run(E2E, "--expected", expected, "--out", out, "--arch", arch,
             os.path.join(base, "baseline"), os.path.join(base, "candidate"), env=env)
-    result = read_result(case, os.path.join(out, "e2e-compare-simple.json"), r)
+    result = read_result(case, os.path.join(out, f"e2e-compare-{arch}.json"), r)
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
     return result
 
@@ -164,17 +165,40 @@ def unit(tmp, case, baseline, candidate, verdict, rc, baseline_exit=0, candidate
     return result
 
 
-def downstream(tmp, case, baseline, candidate, verdict, rc):
+def downstream(tmp, case, baseline, candidate, verdict, rc, smoke=None, rules=""):
     base = os.path.join(tmp, "downstream", case)
     for side, deps in (("baseline", baseline), ("candidate", candidate)):
         write_text(os.path.join(base, side, "dependencies.tsv"), deps)
+        if smoke and side in smoke:
+            write_text(os.path.join(base, side, "smoke.tsv"), smoke[side])
     expected = os.path.join(base, "expected.txt")
-    write_text(expected, "")
+    write_text(expected, rules)
     out = os.path.join(base, "out")
     r = run(DOWNSTREAM, "--expected", expected, "--out", out,
             os.path.join(base, "baseline"), os.path.join(base, "candidate"))
     result = read_result(case, os.path.join(out, "downstream-compare.json"), r)
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
+
+
+def downstream_classes(tmp, case, jars, repo=None):
+    """Run downstream_classes.py on a synthetic project classpath. jars is a
+    list of (group, artifact, version, {class: [methods]}) in classpath order."""
+    repo = repo or os.path.join(tmp, "m2", case)
+    project = os.path.join(tmp, "projects", case)
+    cp = []
+    for group, artifact, version, classes in jars:
+        path = os.path.join(repo, "cached", *group.split("."), artifact, version,
+                            f"{artifact}-{version}.jar")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with zipfile.ZipFile(path, "w") as z:
+            for cls, methods in classes.items():
+                z.writestr(cls + ".class", class_bytes(cls, methods))
+        cp.append(path)
+    write_text(os.path.join(project, "plain", "hadoop-common", "target", "jetty12-cp.txt"),
+               os.pathsep.join(cp))
+    r = run(DOWNSTREAM_CLASSES, project, repo)
+    assert r.returncode == 0, r.stderr
+    return [line.split("\t") for line in r.stdout.splitlines() if line.strip()]
 
 
 def artifact_diff(tmp, case, baseline, candidate, verdict, rc, rules="",
@@ -311,7 +335,7 @@ def plan(repo, case, baseline, candidate, branches, verdict, rc):
     expect(case, (result["verdict"], r.returncode), (verdict, rc))
 
 
-def report(tmp, case, checks, overall, rc, broken=False, same_commit=False):
+def report(tmp, case, checks, overall, rc, broken=False, same_commit=False, extra=None):
     results = os.path.join(tmp, "report", case)
     cmp_dir = os.path.join(results, "compare")
     os.makedirs(cmp_dir)
@@ -322,7 +346,8 @@ def report(tmp, case, checks, overall, rc, broken=False, same_commit=False):
             write_text(os.path.join(results, side, "build", "commit-subject.txt"),
                        "the same commit\n")
     for name, verdict in checks.items():
-        write_json(os.path.join(cmp_dir, name), {"verdict": verdict})
+        write_json(os.path.join(cmp_dir, name),
+                   {"verdict": verdict, **(extra or {}).get(name, {})})
     r = run(REPORT, results)
     lines = [line for line in r.stdout.splitlines() if line.startswith("overall: ")]
     assert lines, f"{case}: no 'overall:' line in stdout; stderr:\n{r.stderr.strip()}"
@@ -406,6 +431,22 @@ def main():
         detail = [r["detail"] for r in result["rows"] if r["key"] == "probe:probe-base"][0]
         expect("e2e a JSON value difference shows both values: detail",
                ('"EXACT"' in detail, "null" in detail), (True, True))
+        # T52: the detail names every differing field with both values.
+        result = e2e(tmp, "e2e a DIFF names every differing field",
+                     [observation("comp", "one", a=1, b=2, c=3)],
+                     [observation("comp", "one", a=10, b=20, c=30)], "FAIL", 1)
+        detail = [r["detail"] for r in result["rows"] if r["key"] == "comp:one"][0]
+        expect("e2e a DIFF names every differing field: detail",
+               ("/a: 1 vs 10" in detail, "/b: 2 vs 20" in detail,
+                "/c: 3 vs 30" in detail), (True, True, True))
+        many = {f"k{i}": i for i in range(12)}
+        result = e2e(tmp, "e2e a DIFF with twelve fields names ten and counts two",
+                     [observation("comp", "one", **many)],
+                     [observation("comp", "one", **{k: v + 100 for k, v in many.items()})],
+                     "FAIL", 1)
+        detail = [r["detail"] for r in result["rows"] if r["key"] == "comp:one"][0]
+        expect("e2e a DIFF with twelve fields names ten and counts two",
+               (detail.count(" vs "), detail.endswith("; ... and 2 more")), (10, True))
 
         # Allowlist: a DIFF the rules excuse PASSes, a REGRESSION never does,
         # an obsfield rule must match every differing field and a rule's regex
@@ -435,6 +476,18 @@ def main():
             [observation("comp", "one", status=200)],
             [observation("comp", "one", status=500)], "FAIL", 1,
             rules="obs comp:on  # matches only the prefix\n")
+        # T37: a rule limited to some architectures applies only there, and is
+        # not reported as unused elsewhere.
+        result = e2e(tmp, "e2e an @arch rule does not match in another architecture",
+                     [observation("comp", "one", status=200)],
+                     [observation("comp", "one", status=500)], "FAIL", 1,
+                     rules="obs comp:one  # expected @arch=secure\n")
+        expect("e2e an @arch rule is not unused in another architecture",
+               result["unused_rules"], [])
+        e2e(tmp, "e2e an @arch rule matches in its architecture",
+            [observation("comp", "one", status=200)],
+            [observation("comp", "one", status=500)], "PASS", 0,
+            rules="obs comp:one  # expected @arch=secure\n", arch="secure")
 
         # E2E blocking checks: each one on its own fails the comparison.
         e2e(tmp, "e2e an observation only on the baseline FAILs",
@@ -551,6 +604,55 @@ def main():
         downstream(tmp, "downstream an unmatched difference FAILs",
                    "simple/hadoop-common\tg:a:jar:1.0:compile\n",
                    "simple/hadoop-common\tg:a:jar:2.0:compile\n", "FAIL", 1)
+        # T26: a smoke step ok on the baseline and failing on the candidate
+        # FAILs; a changed servlet version is a difference a rule accepts.
+        deps = "simple/hadoop-common\tg:a:jar:1.0:compile\n"
+        downstream(tmp, "downstream a smoke regression FAILs", deps, deps, "FAIL", 1,
+                   smoke={"baseline": "plain\thadoop-common\thttpserver2\tok\t3.1\t"
+                                      "javax.servlet-api-3.1.0.jar\t\n",
+                          "candidate": "plain\thadoop-common\thttpserver2\tfail\t\t\tboom\n"})
+        downstream(tmp, "downstream a smoke change with a rule PASSes", deps, deps, "PASS", 0,
+                   smoke={"baseline": "plain\thadoop-common\thttpserver2\tok\t3.1\t"
+                                      "javax.servlet-api-3.1.0.jar\t\n",
+                          "candidate": "plain\thadoop-common\thttpserver2\tok\t4.0\t"
+                                       "jetty-servlet-api-4.0.9.jar\t\n"},
+                   rules="downstream-smoke-changed plain/hadoop-common\\|httpserver2  # expected\n")
+
+        # T27: the duplicate's winner is the first jar in classpath order, and
+        # a winner missing a public method of another copy is reported.
+        rows = downstream_classes(tmp, "t27", [
+            ("g", "a", "1", {"C": ["m"]}),
+            ("g", "b", "1", {"C": ["m", "n"]}),
+        ])
+        expect("downstream_classes T27 the winner is the first jar in classpath order",
+               rows[0][4], "g:a:1")
+        expect("downstream_classes T27 a winner missing a public method is reported",
+               ("winner lacks" in rows[0][5], rows[0][6]), (True, "breaking"))
+        # The same on the two real servlet jars, when they are on this machine.
+        javax = ("/home/jllopez/.m2/repository/javax/servlet/javax.servlet-api/3.1.0/"
+                 "javax.servlet-api-3.1.0.jar")
+        jetty = ("/home/jllopez/.m2/repository/org/eclipse/jetty/toolchain/"
+                 "jetty-servlet-api/4.0.9/jetty-servlet-api-4.0.9.jar")
+        if os.path.exists(javax) and os.path.exists(jetty):
+            repo = os.path.join(tmp, "m2", "t27-real")
+            cp = []
+            for jar in (javax, jetty):
+                dest = os.path.join(repo, "cached",
+                                    os.path.relpath(jar, "/home/jllopez/.m2/repository"))
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                os.symlink(jar, dest)
+                cp.append(dest)
+            project = os.path.join(tmp, "projects", "t27-real")
+            write_text(os.path.join(project, "plain", "hadoop-common", "target",
+                                    "jetty12-cp.txt"), os.pathsep.join(cp))
+            r = run(DOWNSTREAM_CLASSES, project, repo)
+            assert r.returncode == 0, r.stderr
+            http = [line.split("\t") for line in r.stdout.splitlines()
+                    if line.split("\t")[1] == "javax.servlet.http"]
+            expect("downstream_classes T27 the real 3.1.0 jar wins over 4.0.9",
+                   http[0][4], "javax.servlet:javax.servlet-api:3.1.0")
+            expect("downstream_classes T27 the real winner lacks 4.0.9 members",
+                   "winner lacks" in http[0][5], True)
 
         # T12: POMs between two git refs. The distributions are empty, so only
         # the POM comparison contributes differences.
@@ -780,6 +882,34 @@ def main():
                             "dist-file-changed LICENSE-binary  # the entry was added\n"
                             "dist-file-changed NOTICE-binary  # the entry was added\n")
 
+        # T50: an artifact bundled in a shaded client jar counts as shipped.
+        def bundled_dist(name, lic):
+            d = os.path.join(tmp, "artifact", "dist-" + name)
+            client = os.path.join(d, "share", "hadoop", "client")
+            os.makedirs(client)
+            with zipfile.ZipFile(os.path.join(client, "hadoop-client-x.jar"), "w") as z:
+                # The shaded jar's own coordinate is Hadoop's, so it is skipped
+                # as a jar file; the bundled ones are what the check must see.
+                z.writestr("META-INF/maven/org.apache.hadoop/hadoop-client-x/pom.properties",
+                           "groupId=org.apache.hadoop\nartifactId=hadoop-client-x\nversion=1\n")
+                z.writestr("META-INF/maven/g/a/pom.properties",
+                           "groupId=g\nartifactId=a\nversion=1\n")
+                z.writestr("META-INF/maven/g/b/pom.properties",
+                           "groupId=g\nartifactId=b\nversion=1\n")
+            write_text(os.path.join(d, "LICENSE-binary"), lic)
+            write_text(os.path.join(d, "NOTICE-binary"), "")
+            return d
+        b50 = bundled_dist("b50", "g:a:1\n")
+        c50 = bundled_dist("c50", "g:a:1\n")
+        result = artifact_diff(tmp, "artifact T50 a bundled artifact is not stale",
+                               b50, c50, "PASS", 0)
+        expect("artifact T50 a bundled artifact is not stale: no stale entry",
+               [x["subject"] for x in result["differences"]
+                if x["kind"] == "license-entry-stale"], [])
+        expect("artifact T50 an unlisted bundled artifact is missing",
+               [x["subject"] for x in result["differences"]
+                if x["kind"] == "license-jar-missing"], ["g:b:1"])
+
         # T23: a replaced third-party jar's added public types and members are
         # listed, and the verdict does not change.
         old = {"old-1.0.jar": {"A": class_bytes("A", ["m"])}}
@@ -931,6 +1061,23 @@ def main():
         expect("report a self-comparison with a FAIL check names it",
                "Harness check: **FAIL**: *Artifacts and dependencies* did not pass" in text,
                True)
+        # T54: the gate also fails on an unexpected one-side class, even with
+        # CLASSONLY_FAIL off, and names it.
+        text = report(tmp, "report a self-comparison with an unexpected one-side class FAILs",
+                      all_pass, "PASS", 0, same_commit=True,
+                      extra={"e2e-compare-simple.json": {"one_side_classes": [
+                          {"daemon": "nn", "side": "candidate",
+                           "class": "org.example.Foo", "expected": False, "reason": None}]}})
+        expect("report a self-comparison with an unexpected one-side class FAILs: line",
+               ("Harness check: **FAIL**" in text, "org.example.Foo" in text), (True, True))
+        text = report(tmp, "report a self-comparison with only expected one-side classes PASSes",
+                      all_pass, "PASS", 0, same_commit=True,
+                      extra={"e2e-compare-simple.json": {"one_side_classes": [
+                          {"daemon": "nn", "side": "candidate",
+                           "class": "org.example.Foo", "expected": True,
+                           "reason": "expected"}]}})
+        expect("report a self-comparison with only expected one-side classes PASSes: line",
+               "Harness check: **PASS**" in text, True)
         text = report(tmp, "report a normal run writes no self-comparison line",
                       all_pass, "PASS", 0)
         expect("report a normal run writes no self-comparison line",

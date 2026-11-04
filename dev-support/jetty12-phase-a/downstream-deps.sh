@@ -38,6 +38,9 @@
 # classes under another coordinate, both jars end up on the classpath. So each
 # project also records its classpath, and lib/downstream_classes.py writes the
 # classes more than one jar provides to results/<side>/downstream/duplicates.tsv.
+# It then compiles lib/DownstreamSmoke.java and runs, per project, the steps
+# its classpath supports (an HttpServer2, a MiniDFSCluster and MiniYARNCluster,
+# a JerseyTest), writing results/<side>/downstream/smoke.tsv (T26).
 # Needs the side's artifacts installed (build.sh <side> install, or restored
 # from a saved build) and Maven Central for the third-party ones.
 
@@ -141,3 +144,67 @@ log "$(wc -l < "${OUT}/dependencies.tsv") resolved dependencies in ${OUT}/depend
 python3 -I "${HARNESS_DIR}/lib/downstream_classes.py" "${PROJ}" "${M2_REPO:-${WORKDIR}/m2}" \
   > "${OUT}/duplicates.tsv"
 log "$(wc -l < "${OUT}/duplicates.tsv") packages with classes from more than one jar in ${OUT}/duplicates.tsv"
+
+# T26: compile and run one small program against each project's classpath.
+# The one source names every step, so it is compiled against the union of the
+# projects' classpaths (which has all of them) and run against each project's
+# own; a step whose classes are absent is not started.
+SMOKE="${OUT}/smoke.tsv"
+: > "${SMOKE}"
+SMOKE_CLASSES="${OUT}/smoke-classes"
+rm -rf "${SMOKE_CLASSES}"
+mkdir -p "${SMOKE_CLASSES}"
+ALL_CP=""
+while IFS= read -r cpfile; do
+  ALL_CP+=$(cat "${cpfile}")":"
+done < <(find "${PROJ}" -name jetty12-cp.txt | sort)
+if [[ -n "${ALL_CP}" ]]; then
+  javac -d "${SMOKE_CLASSES}" -cp "${ALL_CP}" "${HARNESS_DIR}/lib/DownstreamSmoke.java" \
+    > "${OUT}/smoke-javac.log" 2>&1 \
+    || log "smoke: javac failed; see ${OUT}/smoke-javac.log"
+fi
+
+smoke() {
+  local project=$1 cp=$2 scenario=${1%%/*} artifact=${1#*/}
+  local webapps="${OUT}/smoke-webapps"
+  mkdir -p "${webapps}/webapps/smoke"
+  local steps step out ok version jar detail
+  steps=$(python3 -I - "${cp}" <<'EOF'
+import sys
+import zipfile
+cp = sys.argv[1]
+want = {
+    "httpserver2": ["org/apache/hadoop/http/HttpServer2.class"],
+    "minicluster": ["org/apache/hadoop/hdfs/MiniDFSCluster.class",
+                    "org/apache/hadoop/yarn/server/MiniYARNCluster.class"],
+    "jerseytest": ["org/apache/hadoop/shaded/org/glassfish/jersey/test/JerseyTest.class",
+                   "org/apache/hadoop/shaded/javax/ws/rs/GET.class"],
+}
+names = set()
+for jar in cp.split(":"):
+    try:
+        with zipfile.ZipFile(jar) as z:
+            names |= set(z.namelist())
+    except (OSError, zipfile.BadZipFile):
+        continue
+found = [step for step, entries in want.items() if all(e in names for e in entries)]
+print(" ".join(s for s in ("httpserver2", "minicluster", "jerseytest") if s in found))
+EOF
+)
+  for step in ${steps}; do
+    out=$(timeout 300 java -cp "${SMOKE_CLASSES}:${webapps}:${cp}" DownstreamSmoke "${step}" \
+      2>> "${OUT}/smoke-${scenario}-${artifact}-${step}.log") || true
+    IFS=$'\t' read -r ok version jar detail <<< "${out}"
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "${scenario}" "${artifact}" "${step}" \
+      "${ok:-fail}" "${version:-}" "${jar:-}" "${detail:-no output}" >> "${SMOKE}"
+  done
+}
+
+if [[ -f "${SMOKE_CLASSES}/DownstreamSmoke.class" ]]; then
+  while IFS= read -r cpfile; do
+    project=$(dirname "$(dirname "${cpfile}")")
+    project=${project#"${PROJ}/"}
+    smoke "${project}" "$(cat "${cpfile}")"
+  done < <(find "${PROJ}" -name jetty12-cp.txt | sort)
+fi
+log "$(wc -l < "${SMOKE}") smoke steps in ${SMOKE}"

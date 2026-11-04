@@ -32,6 +32,7 @@ when a rule matched nothing anywhere.
 import glob
 import json
 import os
+import re
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -45,7 +46,24 @@ def load(path):
         return json.load(f)
 
 
-def e2e_matches(allow, compare_dir):
+ARCH_NAMES = ("simple", "secure", "ha", "mixed", "federated")
+
+
+def arch_of(compare_dir):
+    """The architecture a compare directory belongs to: the e2e report's
+    'arch', else the name ('jetty12-phase-a-secure-run-13-...', 'report-ha')."""
+    for path in sorted(glob.glob(os.path.join(compare_dir, "e2e-compare-*.json"))):
+        d = load(path)
+        if d and d.get("arch"):
+            return d["arch"]
+    name = os.path.basename(os.path.normpath(compare_dir))
+    for arch in ARCH_NAMES:
+        if re.search(r"(^|[-_])" + arch + r"([-_]|$)", name):
+            return arch
+    return None
+
+
+def e2e_matches(allow, compare_dir, arch):
     """Match every end-to-end rule the comparison would, in its order
     (lib/compare_e2e.py): 'obs' excuses a DIFF, a REGRESSION or a MISSING;
     'obsdiff' a DIFF; 'obsfield' a DIFF when every differing field matches; a
@@ -57,11 +75,11 @@ def e2e_matches(allow, compare_dir):
             continue  # NOT RUN: nothing was compared
         for r in d["rows"]:
             if r["class"] in ("DIFF", "REGRESSION", "MISSING"):
-                if allow.match("obs", r["key"]):
+                if allow.match("obs", r["key"], arch):
                     continue
             if r["class"] != "DIFF":
                 continue
-            if allow.match("obsdiff", r["key"]):
+            if allow.match("obsdiff", r["key"], arch):
                 continue
             # Reports written before the comparison recorded 'fields' name the
             # first differing path in 'detail' ('<component>:<id>/headers/vary: ...').
@@ -69,9 +87,9 @@ def e2e_matches(allow, compare_dir):
             if fields is None:
                 fields = [r["detail"].split(":", 1)[0]] if r.get("detail") else []
             for p in fields:
-                allow.match("obsfield", r["key"] + p)
+                allow.match("obsfield", r["key"] + p, arch)
         for m in d.get("class_jar_moves", []):
-            allow.match("classjar", f"{m['daemon']}:{m['class']}")
+            allow.match("classjar", f"{m['daemon']}:{m['class']}", arch)
         # A report written before 'one_side_classes' was recorded has the same
         # lists in classload-compare-<arch>.json (only_baseline/only_candidate).
         one = d.get("one_side_classes")
@@ -82,18 +100,18 @@ def e2e_matches(allow, compare_dir):
                    for side in ("baseline", "candidate")
                    for c in r.get(f"only_{side}", [])]
         for x in one:
-            allow.match("classonly", f"{x['daemon']}:{x['class']}")
+            allow.match("classonly", f"{x['daemon']}:{x['class']}", arch)
         for e in d.get("new_log_errors", []):
-            allow.match("logscan", f"{e['source']}:{e['message']}")
+            allow.match("logscan", f"{e['source']}:{e['message']}", arch)
 
 
-def artifact_matches(allow, compare_dir):
+def artifact_matches(allow, compare_dir, arch):
     d = load(os.path.join(compare_dir, "artifact-diff.json"))
     for x in (d or {}).get("differences", []):
         allow.match(x["kind"], x["subject"])
 
 
-def api_matches(allow, compare_dir):
+def api_matches(allow, compare_dir, arch):
     """An API finding is matched when it blocks: its status is not INFO."""
     d = load(os.path.join(compare_dir, "api-compat.json"))
     for f in (d or {}).get("findings", []):
@@ -101,13 +119,13 @@ def api_matches(allow, compare_dir):
             allow.match(f["kind"], f["subject"])
 
 
-def downstream_matches(allow, compare_dir):
+def downstream_matches(allow, compare_dir, arch):
     d = load(os.path.join(compare_dir, "downstream-compare.json"))
     for x in (d or {}).get("differences", []):
         allow.match(x["kind"], x["subject"])
 
 
-def unit_matches(allow, compare_dir):
+def unit_matches(allow, compare_dir, arch):
     """Only a failing test that exists only on the candidate can be accepted."""
     d = load(os.path.join(compare_dir, "unit-compare.json"))
     for x in (d or {}).get("candidate_only", []):
@@ -152,19 +170,28 @@ def recorded_kinds(compare_dirs):
 
 
 def replay(harness_dir, compare_dirs):
-    """{rule file: {line: [directories the rule matched in]}}."""
+    """{rule file: [{line, kind, pattern, archs, dirs, applicable}]}, where
+    'dirs' are the directories the rule matched in and 'applicable' those of
+    its architectures (T37: a rule limited to some architectures is only
+    replayed, and only unused, there)."""
     result = {}
     for name, matches in RULE_FILES.items():
         allow = Allowlist(os.path.join(harness_dir, name))
         seen = {r["line"]: [] for r in allow.rules}
+        applicable = {r["line"]: [] for r in allow.rules}
         for d in compare_dirs:
+            arch = arch_of(d)
             allow.reset()
-            matches(allow, d)
+            matches(allow, d, arch)
             for r in allow.rules:
+                if r["archs"] and arch not in r["archs"]:
+                    continue
+                applicable[r["line"]].append(os.path.basename(os.path.normpath(d)))
                 if r["hits"]:
                     seen[r["line"]].append(os.path.basename(os.path.normpath(d)))
         result[name] = [{"line": r["line"], "kind": r["kind"], "pattern": r["pattern"],
-                         "dirs": seen[r["line"]]} for r in allow.rules]
+                         "archs": r["archs"], "dirs": seen[r["line"]],
+                         "applicable": applicable[r["line"]]} for r in allow.rules]
     return result
 
 
@@ -181,10 +208,12 @@ def main(argv):
     present = recorded_kinds(compare_dirs)
     failed = False
     for name, rules in replay(harness_dir, compare_dirs).items():
-        nowhere = [r for r in rules if not r["dirs"]]
-        partial = [r for r in rules if r["dirs"] and len(r["dirs"]) < len(compare_dirs)]
-        not_replayable = [r for r in nowhere if r["kind"].startswith(NEW_KINDS)
-                          and r["kind"] not in present]
+        nowhere = [r for r in rules if r["applicable"] and not r["dirs"]]
+        partial = [r for r in rules
+                   if r["dirs"] and len(r["dirs"]) < len(r["applicable"])]
+        not_replayable = [r for r in rules if not r["applicable"] or (
+            not r["dirs"] and r["kind"].startswith(NEW_KINDS)
+            and r["kind"] not in present)]
         unmatched = [r for r in nowhere if r not in not_replayable]
         print(f"{name}: {len(rules)} rule(s), {len(unmatched)} matched nothing, "
               f"{len(not_replayable)} not replayable, "
@@ -192,8 +221,10 @@ def main(argv):
         for r in unmatched:
             print(f"  line {r['line']}: {r['kind']} {r['pattern']}  (matched nothing)")
         for r in not_replayable:
+            why = "no directory of its architecture" if not r["applicable"] \
+                else "no data in these reports"
             print(f"  line {r['line']}: {r['kind']} {r['pattern']}  "
-                  f"(not replayable (no data in these reports))")
+                  f"(not replayable ({why}))")
         for r in partial:
             print(f"  line {r['line']}: {r['kind']} {r['pattern']}  "
                   f"(matched in {', '.join(r['dirs'])})")
