@@ -15,8 +15,9 @@
 # Jetty 12 migration plan (HADOOP-19912)
 
 All status in this document was read from JIRA, GitHub and the fork on
-2026-11-02 (the PRs, Yetus and Build) and 2026-11-01 (the rest), against
-trunk at `57f78d283ae`. It is a snapshot: JIRA and the PRs
+2026-11-04 (the PRs, Yetus and Build) and 2026-11-01 (the rest), against
+trunk at `57f78d283ae` (the 11-04 rebuilds of 20015, 20016 and 19972 are
+based on `3bf3610bebcc`). It is a snapshot: JIRA and the PRs
 are the source of truth. PR numbers are `apache/hadoop` PRs.
 
 **Where it stands:** none of the 17 subtasks is resolved, nothing is merged,
@@ -25,6 +26,8 @@ The next bottleneck is review, starting with HADOOP-20012. Stages 1 and 2 have
 no red result left that the patches cause: what remains is `test4tests` on
 pom-only changes, trunk's SpotBugs debt, Yetus runs to repeat, and
 HADOOP-19970's `TestJettyClasspath`, which passes once HADOOP-20014 merges.
+The 2026-11-04 rescope of HADOOP-20015 and HADOOP-20016 still needs its first
+Yetus and Build on the new heads.
 See [HADOOP-19970: what it needs to merge](#hadoop-19970-what-it-needs-to-merge).
 
 ## Goal
@@ -55,7 +58,7 @@ so HADOOP-19972 shrinks to the port. The work runs in stages:
 | Stage | Tickets | What it does | Changes behaviour? |
 |---|---|---|---|
 | 1. One Jetty, declared where used | 20012 to 20016 | Cleans the classpaths and removes Jetty API that Jetty 12 drops | No intended change |
-| 2. One servlet API | 19970 | Moves to `jetty-servlet-api` 4.0.9 | No intended change |
+| 2. One servlet API | 19970 | Moves to `javax.servlet-api` 4.0.1 | No intended change |
 | 3. Prepare for what Jetty 12 changes | 20049, 20003 to 20007 | Makes Hadoop independent of Jetty 12's differences, on 9.4 | Refusal details move to the body |
 | 4. App catalog | 20008 or 19998 | Takes the last Jetty 9.4 user out of the way | 19998 retires a module |
 | 5. Port | 19972 | Jetty 12.1 on ee8 | Yes, incompatible |
@@ -64,6 +67,8 @@ so HADOOP-19972 shrinks to the port. The work runs in stages:
 ## Merge order
 
 1. HADOOP-20012 first, as the reviewer asked, then 20014, 20013, 20015, 20016.
+   After the 2026-11-04 rescope, 20015 (Java changes) and 20016 (pom changes)
+   are independent of each other.
 2. HADOOP-19970. It must come after 20014: until then `TestJettyClasspath`
    fails on the `jetty-continuation` 9.4.55 that the Jetty Jersey test provider
    brings. Expect one `NOTICE-binary` conflict with 20013.
@@ -91,8 +96,8 @@ the patch.
 | [HADOOP-20012](https://issues.apache.org/jira/browse/HADOOP-20012) | In Progress | Jose Luis López | [#8890](https://github.com/apache/hadoop/pull/8890) | -1, 11-01 | Yes | Pass | None |
 | [HADOOP-20014](https://issues.apache.org/jira/browse/HADOOP-20014) | In Progress | Jose Luis López | [#8892](https://github.com/apache/hadoop/pull/8892) | -1, 11-02 | Yes | Pass | None |
 | [HADOOP-20013](https://issues.apache.org/jira/browse/HADOOP-20013) | In Progress | Jose Luis López | [#8891](https://github.com/apache/hadoop/pull/8891) | -1 (patch), 11-01 | Yes | Pass | None |
-| [HADOOP-20015](https://issues.apache.org/jira/browse/HADOOP-20015) | In Progress | Jose Luis López | [#8893](https://github.com/apache/hadoop/pull/8893) | -1 (patch), 11-01 | Yes | Pass | None |
-| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | -1 (patch), 11-01 | Yes | Pass | None |
+| [HADOOP-20015](https://issues.apache.org/jira/browse/HADOOP-20015) | In Progress | Jose Luis López | [#8893](https://github.com/apache/hadoop/pull/8893) | -1 (patch), 11-01 | No (rescoped 11-04) | Pending | None |
+| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | -1 (patch), 11-01 | No (rescoped 11-04) | Pending | None |
 | [HADOOP-19970](https://issues.apache.org/jira/browse/HADOOP-19970) | In Progress | Jose Luis López | [#8699](https://github.com/apache/hadoop/pull/8699), draft | -1, 11-02 | Yes | Fail | None |
 | [HADOOP-20049](https://issues.apache.org/jira/browse/HADOOP-20049) | Open | Jose Luis López | [#8903](https://github.com/apache/hadoop/pull/8903) | -1, 11-01 | Yes | Pass | None |
 | [HADOOP-20003](https://issues.apache.org/jira/browse/HADOOP-20003) | Open | None | No PR | - | - | - | - |
@@ -104,7 +109,7 @@ the patch.
 | [HADOOP-19998](https://issues.apache.org/jira/browse/HADOOP-19998) | Open | None | No PR | - | - | - | - |
 | [HADOOP-19999](https://issues.apache.org/jira/browse/HADOOP-19999) | Open | None | No PR | - | - | - | - |
 | [HADOOP-20000](https://issues.apache.org/jira/browse/HADOOP-20000) | Open | None | No PR | - | - | - | - |
-| [HADOOP-19972](https://issues.apache.org/jira/browse/HADOOP-19972) | Open | Jose Luis López | [#8704](https://github.com/apache/hadoop/pull/8704), draft | -1, 10-31 | Yes | Pass | None |
+| [HADOOP-19972](https://issues.apache.org/jira/browse/HADOOP-19972) | Open | Jose Luis López | [#8704](https://github.com/apache/hadoop/pull/8704), draft | -1, 10-31 | No (head 11-04) | Pass | None |
 
 The tickets without a PR have their commit staged on the fork (tag
 `staged/<JIRA>`). Their code matches the published `<JIRA>` branch.
@@ -113,12 +118,16 @@ The tickets without a PR have their commit staged on the fork (tag
 
 - **#8890 (20012):** `test4tests` only, on the current head. It is a pom
   change with no test.
-- **#8891, #8893, #8894 (20013, 20015, 20016):** the last Yetus run, at
-  21:20 on 2026-11-01, three minutes after the heads were pushed, says the
-  patch "does not apply to trunk". GitHub reports all three mergeable and
-  their Build checks pass, so the run needs repeating; the cause is not
-  identified. Before that push, #8893 and #8894 had Yetus +1 and #8891 only
-  branch-side SpotBugs (trunk's 80 existing warnings).
+- **#8891 (20013):** the last Yetus run, at 21:20 on 2026-11-01, three
+  minutes after the head was pushed, says the patch "does not apply to
+  trunk". GitHub reports it mergeable and its Build check passes, so the run
+  needs repeating; the cause is not identified. Before that push, #8891 had
+  only branch-side SpotBugs (trunk's 80 existing warnings).
+- **#8893, #8894 (20015, 20016):** the 21:20 run on 2026-11-01 also said the
+  patch "does not apply to trunk", but both PRs were rescoped on 2026-11-04
+  and their heads changed, so that run is no longer on the current head.
+  Both need a fresh Yetus and Build. Before the rescope, #8893 and #8894 had
+  Yetus +1.
 - **#8892 (20014):** `test4tests` only, on the current head (2026-11-02).
   The Build check now passes; the earlier failure after the trunk merge did
   not come back.
@@ -132,8 +141,9 @@ The tickets without a PR have their commit staged on the fork (tag
 - **#8704 (19972):** branch-side SpotBugs, as above, and one unit failure,
   `TestSSLHttpServerMTLS`, a known intermittent test (HADOOP-19997,
   [#8783](https://github.com/apache/hadoop/pull/8783)). This run is the full
-  suite on Jetty 12. It predates 20048 and 20049, and the branch is 4 commits
-  behind trunk.
+  suite on Jetty 12. It predates 20048 and 20049, and the branch was rebuilt
+  on 2026-11-04 (21 commits, 6 of them the port), so the run is no longer on
+  the current head.
 
 ## The subtasks
 
@@ -150,21 +160,37 @@ The tickets without a PR have their commit staged on the fork (tag
   `jakarta.annotation-api` 1.3.5 is already on the classpath and provides the
   same classes. It updates `LICENSE-binary` and `NOTICE-binary`, and adds
   `TestAnnotationApiClasspath`.
-- **HADOOP-20015, declare YARN's Jetty artifacts.** `jetty-webapp` and
-  `jetty-servlet` are declared in the modules that use them (yarn-common, RM,
-  AHS, Router). It also replaces Jetty's `Log` and `ConcurrentHashSet`, which
-  Jetty 12 removes.
-- **HADOOP-20016, declare `jetty-http` where it is imported.** Covers
-  hadoop-common, HttpFS, the shuffle handler and SLS. It also removes Jetty's
-  `Log` and a context cast in `HttpServer2#inferMimeType`.
+- **HADOOP-20015, stop using Jetty 9.4 APIs that Jetty 12 removes.** Every
+  use, in main and test code across the repository, of a Jetty 9.4 class that
+  Jetty 12 no longer has, where the JDK, SLF4J or the servlet API does the
+  same job: Jetty's `Log` in 8 test files (hadoop-common and YARN),
+  `ConcurrentHashSet` in `FederationInterceptor`, the borrowed logger in
+  `TestDockerCommandExecutor`, `MultiException` in
+  `TestLogAggregationService`, and the Jetty context cast in
+  `HttpServer2#inferMimeType`. No pom change.
+- **HADOOP-20016, declare the Jetty artifacts each module imports directly.**
+  Every module that imports Jetty classes from an artifact it only receives
+  transitively declares that artifact, at the scope it already resolves at:
+  `jetty-http` and `jetty-io` are managed in `hadoop-project`; `jetty-http`
+  is declared in hadoop-common, the shuffle handler, HttpFS and SLS;
+  `jetty-webapp` in yarn-common, RM, AHS and the Router; `jetty-io` in
+  hadoop-hdfs; and `jetty-servlet` and `jetty-util` in HttpFS, jobclient, the
+  NodeManager, the Router and web-proxy. No Java change.
 
 ### Stage 2: one servlet API
 
-- **HADOOP-19970, move to `jetty-servlet-api` 4.0.9.** `HttpServer2` and its
+- **HADOOP-19970, move to `javax.servlet-api` 4.0.1.** `HttpServer2` and its
   filters compile against `javax.servlet`, which today arrives only as
   `javax.servlet-api` 3.1.0 through `jetty-server`. This manages one servlet API
   everywhere, declares it in hadoop-common, and adds classpath tests that hold
-  one servlet API and one Jetty release in place.
+  one servlet API and one Jetty release in place. On 2026-11-04 the owner
+  decided on `javax.servlet:javax.servlet-api` 4.0.1 instead of
+  `org.eclipse.jetty.toolchain:jetty-servlet-api` 4.0.9, because most
+  downstream projects already declare the `javax` coordinate. `#8699` still
+  carries 4.0.9; the replacement is on the unpushed local branch
+  `feat/HADOOP-19970-javax` (`9d9e5a15a69`). On Jetty 12 ee8,
+  `org.eclipse.jetty.toolchain:jetty-schemas` 4.0.3 supplies the web.xml
+  schemas that `javax.servlet-api` does not ship.
 
 ### Stage 3: prepare for what Jetty 12 changes
 
@@ -212,10 +238,20 @@ share a classpath with Jetty 12.
 ### Stage 5: the port
 
 - **HADOOP-19972, upgrade to Jetty 12 ee8.** Jetty 9.4.58 to 12.1.14. On
-  `jetty-phase-c`, the branch carries the prerequisites plus 4 port commits (65
-  files, +1166/−445). Assigned, flagged Incompatible, target 3.6.0. The Release
-  Note and Fix Version are set at merge. Check for a newer 12.1.x then, and
-  reviewers should confirm that `SUSPICIOUS_PATH_CHARACTERS` stays in the default.
+  `jetty-phase-c`, the branch carries the prerequisites plus 6 port commits (76
+  files, +1291/−514), 21 commits in all. Assigned, flagged Incompatible, target
+  3.6.0. The Release Note and Fix Version are set at merge. Check for a newer
+  12.1.x then, and reviewers should confirm that `SUSPICIOUS_PATH_CHARACTERS`
+  stays in the default.
+
+  The prerequisite commits are the pre-2026-11-04 split and do not equal the
+  current PRs: `6f962fe1de6` mixes the old 20015 pom scope with a Java change;
+  together with `6c7755527b7` and `78b813d4d6a` it covers 11 of the 12 files in
+  #8893 (`TestLogAggregationService` is in the port commit `dffea5f770e`),
+  `2943da135c1` and `6f962fe1de6` cover 9 of the 13 poms in #8894 (hdfs,
+  jobclient, NM and web-proxy are in the 19970/19972 commits), and
+  `8d43e65e786` is the old `jetty-servlet-api` 4.0.9, overridden by
+  `dd8150590cc`. Replace them when #8704 is rebuilt.
 
 ### Independent
 
@@ -332,21 +368,23 @@ HADOOP-19970 can merge when all of these hold:
      servlet behaviour probe with the HTTP/1.0 default answers (T22, T19),
      the API the new servlet API jar makes available (T23), and class
      loading in container JVMs (T14).
-4. **Its release note** says what users see: the servlet API coordinate
-   changes from `javax.servlet:javax.servlet-api` 3.1.0 to
-   `org.eclipse.jetty.toolchain:jetty-servlet-api` 4.0.9 with the
-   `javax.servlet` packages unchanged, the Servlet 4.0 types and methods that
-   become available (from T23), and every accepted user-visible difference of
-   its own whose rule says `announced: HADOOP-19970 release note`, checked by
-   hand (T18).
+4. **Its release note** says what users see: the servlet API version
+   changes from `javax.servlet:javax.servlet-api` 3.1.0 to 4.0.1 (same
+   coordinate, mediated by Maven) with the `javax.servlet` packages
+   unchanged, the Servlet 4.0 types and methods that become available (from
+   T23), and every accepted user-visible difference of its own whose rule says
+   `announced: HADOOP-19970 release note`, checked by hand (T18). On Jetty 12
+   ee8, `org.eclipse.jetty.toolchain:jetty-schemas` 4.0.3 supplies the
+   web.xml schemas.
 
    Draft sentence for the owner (not final): *The servlet API on the
-   classpath becomes `org.eclipse.jetty.toolchain:jetty-servlet-api` 4.0.9
-   (the `javax.servlet` namespace, the Servlet 4.0 API) instead of
-   `javax.servlet:javax.servlet-api` 3.1.0. The Jetty 9.4 container still
-   reports Servlet 3.1. Code that calls the Servlet 4.0 methods now finds
-   them; on Jetty 9.4 `getHttpServletMapping()` returns a mapping with empty
-   values and `newPushBuilder()` returns null.*
+   classpath becomes `javax.servlet:javax.servlet-api` 4.0.1 (the
+   `javax.servlet` namespace, the Servlet 4.0 API) instead of 3.1.0. The
+   Jetty 9.4 container still reports Servlet 3.1. Code that calls the Servlet
+   4.0 methods now finds them; on Jetty 9.4 `getHttpServletMapping()` returns
+   a mapping with empty values and `newPushBuilder()` returns null. On Jetty
+   12 ee8, `org.eclipse.jetty.toolchain:jetty-schemas` 4.0.3 supplies the
+   web.xml schemas.*
 5. **A committer approves the PR.**
 
 ### Course of action
@@ -382,10 +420,13 @@ Owner's actions:
 JIRA changes not yet made:
 
 - On HADOOP-19972: change HADOOP-19982 from blocker to Relates, and link 20003 to
-  20008 and 20012 to 20016 as blockers.
+  20008 and 20012 to 20016 as blockers. Its description's "Depends on" list
+  also omits HADOOP-20049, which JIRA already links as a blocker.
 - Add HADOOP-19970 blocked by HADOOP-20014, and HADOOP-20005 blocked by
   HADOOP-20003.
-- Assign 20003 to 20008 and 19998 to 20000.
+- On HADOOP-19970: the summary and description still say `jetty-servlet-api`
+  4.0.9; the draft changes them to `javax.servlet-api` 4.0.1.
+- Assign 20003–20008 and 19998–20000.
 
 After the prerequisites settle, #8704 needs rebuilding on trunk with 20049.
 
@@ -393,5 +434,17 @@ After the prerequisites settle, #8704 needs rebuilding on trunk with 20049.
 
 The `javax` to `jakarta` move (Jetty ee10 or ee11, Jersey 3, JAXB 4) starts only
 after HADOOP-19912 lands. HADOOP-19999 prepares it. HADOOP-19971 (`jetty-phase-b`,
-draft [#8703](https://github.com/apache/hadoop/pull/8703)) is listed as preparation
-but HADOOP-19972 does not depend on it, and it may be revisited or discarded.
+draft [#8703](https://github.com/apache/hadoop/pull/8703), 9 commits, head
+`1ac936850e8`) is preparation for it: it removes servlet and Jetty types from the
+secret providers, `CertificateUtil`, the shuffle handler and the YARN services
+client. It depends on nothing, is based on trunk, and nothing in HADOOP-19972
+depends on it. The plan is to land it with or just before the namespace change in
+HADOOP-19395, in the next major release. When it is rebased after HADOOP-20016
+lands, drop the shuffle module's `jetty-http` declaration (it comes from
+HADOOP-20016 as optional and from HADOOP-19972, not from HADOOP-19970); the change
+then touches 17 files and includes one dependency change. The servlet API move in
+HADOOP-19970 (`javax.servlet-api` 4.0.1 plus `jetty-schemas` 4.0.3 on Jetty 12
+ee8) does not affect it. If HADOOP-19972 has landed, re-check the shuffle headers
+and the `user.name` encoding against whatever Jetty classes it left in those two
+places. It works on Jetty 9.4 and on the Jetty 12 ee8 environment, and commits the
+namespace change to neither ee10 nor ee11.
