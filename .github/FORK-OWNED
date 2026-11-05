@@ -1,0 +1,10 @@
+# Paths this fork owns. Each one is replaced as a whole from the branch this
+# file is on when PREPARATION is rebuilt, and left out of every apache/hadoop
+# pull request, so a fork-only change survives both.
+#
+# One path or directory prefix per line; '#' starts a comment. A directory
+# prefix claims everything under it.
+#
+# See .github/scripts/fork-owned.sh, which reads this file.
+.github
+dev-support/jetty12-phase-a
