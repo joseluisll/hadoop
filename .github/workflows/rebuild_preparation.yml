@@ -17,12 +17,14 @@
 # under the License.
 #
 
-# Fork-only: rebuild PREPARATION as apache/hadoop trunk plus this fork's
-# .github/ with .github/scripts/rebuild-preparation.sh, and force-push it, so
-# it keeps following trunk. Anything else merged into PREPARATION is dropped.
-# "Upstream branch" calls this workflow after each push to a feature branch
-# (workflow_dispatch and schedule would need the file on trunk, the fork's
-# default branch). Several can run at once: the first to push wins, and the
+# Fork-only: rebuild PREPARATION as apache/hadoop trunk plus the paths
+# .github/FORK-OWNED lists (the fork's .github/ and dev-support material),
+# taken from feat/HARNESS with .github/scripts/rebuild-preparation.sh, and
+# force-push it, so it keeps following trunk. Anything else merged into
+# PREPARATION is dropped.
+# "Upstream branch" calls this workflow after each push to a feature branch or
+# to feat/HARNESS (workflow_dispatch and schedule would need the file on
+# trunk, the fork's default branch). Several can run at once: the first to push wins, and the
 # others find PREPARATION moved and leave it, so none waits in a queue
 # (GitHub cancels all but one waiting job of a concurrency group).
 #
@@ -55,14 +57,18 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           old_commit=$(git rev-parse HEAD)
-          # Keep a copy of the script: it checks out apache/hadoop trunk.
+          # The fork's current script, from feat/HARNESS, which keeps it
+          # up to date: the copy on PREPARATION may predate this rebuild.
+          # rebuild-preparation.sh checks out apache/hadoop trunk, which
+          # replaces it, so it is kept outside the work tree.
           script="${RUNNER_TEMP}/rebuild-preparation.sh"
-          cp .github/scripts/rebuild-preparation.sh "${script}"
+          git show "origin/feat/HARNESS:.github/scripts/rebuild-preparation.sh" \
+            > "${script}"
           status=0
-          SOURCE_COMMIT="${old_commit}" bash "${script}" PREPARATION \
+          SOURCE_BRANCH=feat/HARNESS bash "${script}" PREPARATION \
             | tee "${RUNNER_TEMP}/rebuild.log" || status=$?
           if [[ ${status} -eq 3 ]]; then
-            echo "::notice::PREPARATION is already apache/hadoop trunk plus .github/."
+            echo "::notice::PREPARATION is already apache/hadoop trunk plus the fork's own paths."
             exit 0
           elif [[ ${status} -ne 0 ]]; then
             exit "${status}"
