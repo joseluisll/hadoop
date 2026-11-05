@@ -48,11 +48,11 @@ run-name: "Yetus: ${{ github.ref_name }}"
 
 on:
   push:
+    # Any yetus/<branch> request, JIRA or not (the jetty-phase-* harness
+    # branches included). The branch it names is looked up next, so a request
+    # that names no branch of the fork fails there with a message saying so.
     branches:
-      - "yetus/HADOOP-*"
-      - "yetus/HDFS-*"
-      - "yetus/YARN-*"
-      - "yetus/MAPREDUCE-*"
+      - "yetus/**"
 
 permissions:
   contents: read
@@ -105,9 +105,14 @@ jobs:
   yetus:
     name: Yetus precommit (${{ matrix.platform }})
     needs: request
-    runs-on: ubuntu-24.04
-    # GitHub-hosted runners stop a job after 6 hours.
-    timeout-minutes: 360
+    # Fork-only: the local runner in ~/code/action-runner (label "self-hosted")
+    # runs the precommit; the request and report jobs stay on GitHub, as they
+    # only call the API. Yetus still builds and tests inside Docker, in the
+    # same image, so the result is the one Jenkins gives.
+    runs-on: self-hosted
+    # A self-hosted runner has no 6-hour limit of its own. This one has 8
+    # cores, so a full precommit takes hours; leave it room to finish.
+    timeout-minutes: 2880
     continue-on-error: ${{ matrix.optional == '1' }}
     # A newer request for the same branch replaces the one being tested.
     concurrency:
@@ -165,14 +170,47 @@ jobs:
           repository: ${{ env.YETUS_REPOSITORY }}
           ref: ${{ env.YETUS_VERSION }}
           path: yetus
-      - name: Use the Apache trunk build image
+      - name: Use the Apache trunk build image, as an account it has
         # Yetus builds whatever --dockerfile names as its base image. A single
         # FROM line makes that build a pull of the published image, and only
         # when jenkins.sh actually runs Yetus for this platform.
+        #
+        # Fork-only, from the second RUN on: Yetus then builds a run-specific
+        # image that adds the runner's own account and runs the container as
+        # it, by name. This runner's account is not in these images, and in
+        # the Ubuntu one its id (1000) is already taken by 'ubuntu', so the
+        # account is never added and docker run fails with "no matching
+        # entries in passwd file". The second RUN adds 'ubuntu' at the
+        # runner's own id where the image lacks it (that is where the Ubuntu
+        # image has it), and the next step names it to Yetus.
         run: |
           mkdir -p "$(dirname "${DOCKERFILE}")"
-          echo "FROM ${BUILD_IMAGE_PREFIX}${{ matrix.os }}${BUILD_IMAGE_SUFFIX}" > "${DOCKERFILE}"
+          runner_id=$(id -u)
+          {
+            echo "FROM ${BUILD_IMAGE_PREFIX}${{ matrix.os }}${BUILD_IMAGE_SUFFIX}"
+            echo "RUN getent passwd ubuntu >/dev/null 2>&1 || { \\"
+            echo "      getent group ubuntu >/dev/null 2>&1 \\"
+            echo "        || groupadd --non-unique -g ${runner_id} ubuntu; \\"
+            echo "      useradd -l -u ${runner_id} -g ${runner_id} -m ubuntu; }"
+          } > "${DOCKERFILE}"
           cat "${DOCKERFILE}"
+      - name: Run the Yetus container as that account
+        # Yetus takes the container account's name from SUDO_USER, and the ids
+        # from id(1), which finds no such host account and yields nothing,
+        # leaving its reaper and process counter useless. Those two lookups
+        # are rewritten to fall back to the runner's own.
+        run: |
+          patch="${YETUS}/precommit/src/main/shell/core.d/01-common.sh"
+          sed -i \
+            -e 's|^  USER_ID=$(id -u "${USER_NAME}")$|  USER_ID=$(id -u "${USER_NAME}" 2>/dev/null \|\| id -u)|' \
+            -e 's|^  GROUP_ID=$(id -g "${USER_NAME}")$|  GROUP_ID=$(id -g "${USER_NAME}" 2>/dev/null \|\| id -g)|' \
+            "${patch}"
+          grep -n 'USER_NAME=\|USER_ID=\|GROUP_ID=' "${patch}"
+          if ! grep -q '2>/dev/null || id -u' "${patch}"; then
+            echo "::warning::${YETUS_VERSION} is not the version these rewrites" \
+              "were written for; the ids may come out empty."
+          fi
+          echo "SUDO_USER=ubuntu" >> "${GITHUB_ENV}"
       - name: Run Yetus
         run: |
           # Yetus' GitHub Actions support would test the pushed request
