@@ -105,9 +105,14 @@ jobs:
   yetus:
     name: Yetus precommit (${{ matrix.platform }})
     needs: request
-    runs-on: ubuntu-24.04
-    # GitHub-hosted runners stop a job after 6 hours.
-    timeout-minutes: 360
+    # Fork-only: the local runner in ~/code/action-runner (label "self-hosted")
+    # runs the precommit; the request and report jobs stay on GitHub, as they
+    # only call the API. Yetus still builds and tests inside Docker, in the
+    # same image, so the result is the one Jenkins gives.
+    runs-on: self-hosted
+    # A self-hosted runner has no 6-hour limit of its own. This one has 8
+    # cores, so a full precommit takes hours; leave it room to finish.
+    timeout-minutes: 2880
     continue-on-error: ${{ matrix.optional == '1' }}
     # A newer request for the same branch replaces the one being tested.
     concurrency:
