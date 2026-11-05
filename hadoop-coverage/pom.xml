@@ -365,7 +365,7 @@
 
     <!-- Additional test-bearing modules so their coverage is included.
          Only jar-packaged modules may be listed here: a plain dependency on a
-         war module (e.g. hadoop-yarn-applications-catalog-webapp) resolves to a
+         war module (e.g. hadoop-auth-examples) resolves to a
          non-existent jar artifact and breaks this module's build. -->
     <dependency>
       <groupId>org.apache.hadoop</groupId>
