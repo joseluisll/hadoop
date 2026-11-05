@@ -48,11 +48,11 @@ run-name: "Yetus: ${{ github.ref_name }}"
 
 on:
   push:
+    # Any yetus/<branch> request, JIRA or not (the jetty-phase-* harness
+    # branches included). The branch it names is looked up next, so a request
+    # that names no branch of the fork fails there with a message saying so.
     branches:
-      - "yetus/HADOOP-*"
-      - "yetus/HDFS-*"
-      - "yetus/YARN-*"
-      - "yetus/MAPREDUCE-*"
+      - "yetus/**"
 
 permissions:
   contents: read
