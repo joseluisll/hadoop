@@ -99,14 +99,12 @@ jobs:
           git remote add apache https://github.com/apache/hadoop.git
           git fetch --quiet --no-tags apache trunk
           base_commit=$(git merge-base FETCH_HEAD "${feature_commit}")
-          # Keep a copy of the scripts, taken from the base branch: they
-          # check out apache/hadoop trunk, which replaces them, and a feature
-          # branch that predates them has nothing to carry.
-          for name in make-upstream-branch fork-owned; do
-            git show "origin/PREPARATION:.github/scripts/${name}.sh" \
-              > "${RUNNER_TEMP}/${name}.sh"
-          done
+          # Keep a copy of the script, taken from the base branch: it checks
+          # out apache/hadoop trunk, which replaces it, and a feature branch
+          # that predates it has nothing to carry.
           script="${RUNNER_TEMP}/make-upstream-branch.sh"
+          git show "origin/PREPARATION:.github/scripts/make-upstream-branch.sh" \
+            > "${script}"
           status=0
           BASE_COMMIT="${base_commit}" FEATURE_COMMIT="${feature_commit}" \
             bash "${script}" "${FEATURE}" || status=$?

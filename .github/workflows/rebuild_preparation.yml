@@ -57,15 +57,13 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           old_commit=$(git rev-parse HEAD)
-          # The fork's current scripts, from feat/HARNESS, which keeps them
+          # The fork's current script, from feat/HARNESS, which keeps it
           # up to date: the copy on PREPARATION may predate this rebuild.
           # rebuild-preparation.sh checks out apache/hadoop trunk, which
-          # replaces them, so they are kept outside the work tree.
-          for name in rebuild-preparation fork-owned; do
-            git show "origin/feat/HARNESS:.github/scripts/${name}.sh" \
-              > "${RUNNER_TEMP}/${name}.sh"
-          done
+          # replaces it, so it is kept outside the work tree.
           script="${RUNNER_TEMP}/rebuild-preparation.sh"
+          git show "origin/feat/HARNESS:.github/scripts/rebuild-preparation.sh" \
+            > "${script}"
           status=0
           SOURCE_BRANCH=feat/HARNESS bash "${script}" PREPARATION \
             | tee "${RUNNER_TEMP}/rebuild.log" || status=$?
