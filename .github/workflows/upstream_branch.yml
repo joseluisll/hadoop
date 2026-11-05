@@ -21,10 +21,11 @@
 # a Hadoop JIRA (HADOOP-, HDFS-, YARN-, MAPREDUCE-), e.g. feat/HADOOP-12345.
 # Each push to one builds the commit for its apache/hadoop pull request with
 # .github/scripts/make-upstream-branch.sh and stages it as the tag
-# staged/<name>. No pull request into PREPARATION is needed. Branches that
-# only change the fork's own files (its workflows and scripts) get no
-# upstream commit, and a push that leaves it unchanged does not push the tag
-# again.
+# staged/<name>. No pull request into PREPARATION is needed. The paths
+# .github/FORK-OWNED lists (the fork's workflows, scripts and dev-support
+# material) never go upstream: a branch that only changes them gets no
+# upstream commit, and a push that leaves the staged commit unchanged does
+# not push the tag again.
 #
 # Nothing is built automatically. Pushing a branch would start
 # apache/hadoop's build_and_test.yml on it, but every apache/hadoop workflow
@@ -32,8 +33,10 @@
 # The <name> branch, which the apache/hadoop pull request is opened from,
 # only moves, and gets its Build run, on request (see build_upstream.yml);
 # Yetus also only runs on request (see yetus.yml).
-# Then PREPARATION is rebuilt as apache/hadoop trunk plus .github/
-# (rebuild_preparation.yml), so it keeps following trunk.
+# Then PREPARATION is rebuilt as apache/hadoop trunk plus those paths, taken
+# from feat/HARNESS (rebuild_preparation.yml), so it keeps following trunk.
+# feat/HARNESS is where the fork's own files are kept up to date, so a push to
+# it rebuilds PREPARATION and does nothing else.
 #
 # A push with [skip ci] in its commit message runs none of this.
 #
@@ -54,12 +57,9 @@ on:
       - "feat/HDFS-*"
       - "feat/YARN-*"
       - "feat/MAPREDUCE-*"
-    # A push that only changes the fork's own .github/ (workflows, scripts)
-    # starts nothing: such changes get no upstream commit, and PREPARATION
-    # takes its .github/ from itself, not from a feature branch. A push that
-    # changes anything else (a merge of PREPARATION brings trunk too) runs.
-    paths-ignore:
-      - ".github/**"
+      # Not an upstream branch: it only carries the fork's own files, which
+      # PREPARATION is rebuilt from.
+      - "feat/HARNESS"
 
 permissions:
   contents: write
@@ -67,8 +67,8 @@ permissions:
 jobs:
   upstream-branch:
     name: Stage the upstream commit
-    # Not when the branch is deleted.
-    if: ${{ !github.event.deleted }}
+    # Not when the branch is deleted, and never for feat/HARNESS.
+    if: ${{ !github.event.deleted && github.ref_name != 'feat/HARNESS' }}
     runs-on: ubuntu-24.04
     # One run per feature at a time, so pushes are staged in order.
     concurrency:
@@ -94,14 +94,17 @@ jobs:
           feature_commit=${GITHUB_SHA}
           # The apache/hadoop trunk commit the feature is based on, not the
           # current PREPARATION, which may have been rebuilt on a newer trunk
-          # since. PREPARATION only adds .github/ to trunk, which the script
-          # leaves out anyway.
+          # since. PREPARATION only adds the fork's own paths to trunk, which
+          # the script leaves out anyway.
           git remote add apache https://github.com/apache/hadoop.git
           git fetch --quiet --no-tags apache trunk
           base_commit=$(git merge-base FETCH_HEAD "${feature_commit}")
-          # Keep a copy of the script: it checks out apache/hadoop trunk.
+          # Keep a copy of the script, taken from the base branch: it checks
+          # out apache/hadoop trunk, which replaces it, and a feature branch
+          # that predates it has nothing to carry.
           script="${RUNNER_TEMP}/make-upstream-branch.sh"
-          cp .github/scripts/make-upstream-branch.sh "${script}"
+          git show "origin/PREPARATION:.github/scripts/make-upstream-branch.sh" \
+            > "${script}"
           status=0
           BASE_COMMIT="${base_commit}" FEATURE_COMMIT="${feature_commit}" \
             bash "${script}" "${FEATURE}" || status=$?
@@ -127,5 +130,8 @@ jobs:
   rebuild-preparation:
     name: Rebuild PREPARATION
     needs: upstream-branch
+    # Also when upstream-branch was skipped (feat/HARNESS, which has nothing
+    # to stage), but not when it failed, or when the branch was deleted.
+    if: ${{ !cancelled() && !github.event.deleted && needs.upstream-branch.result != 'failure' }}
     uses: ./.github/workflows/rebuild_preparation.yml
     secrets: inherit
