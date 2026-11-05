@@ -23,12 +23,11 @@
 #
 # The feature branch's own changes are taken relative to the fork's base
 # branch (PREPARATION by default), so anything that reached the feature branch
-# by merging that base (fork workflows, other JIRAs) is left out. Changes to
-# the fork's own .github/ files are dropped as well: those PREPARATION adds or
-# changes on top of the trunk it is built on, and those that "Fork-only"
-# commits in the feature's history touch (older PREPARATIONs). Changes to
-# other .github/ files (e.g. .github/gha-tests/) are kept. The result is
-# applied on top of apache/hadoop trunk as a single commit.
+# by merging that base (fork workflows, other JIRAs) is left out. The paths
+# .github/FORK-OWNED lists (the fork's workflows, scripts and dev-support
+# material) are left out as well, with the list taken from the feature branch
+# or, for a feature that predates the file, from the base branch. The result
+# is applied on top of apache/hadoop trunk as a single commit.
 #
 # Usage: make-upstream-branch.sh <feature-branch> [<upstream-branch>]
 #   <feature-branch> is feat/<name> (e.g. feat/HADOOP-12345).
@@ -58,8 +57,11 @@
 
 set -euo pipefail
 
+# shellcheck source=fork-owned.sh
+source "$(dirname "${BASH_SOURCE[0]}")/fork-owned.sh"
+
 if [[ $# -lt 1 || $# -gt 2 ]]; then
-  sed -n '20,57p' "$0" | sed 's/^# \{0,1\}//'
+  sed -n '20,56p' "$0" | sed 's/^# \{0,1\}//'
   exit 2
 fi
 
@@ -111,19 +113,24 @@ else
   feature_ref="${fork_remote}/${feature}"
 fi
 
-# The fork's own .github/ files, which never go to apache/hadoop: those the
-# current PREPARATION adds or changes on top of the trunk it is built on, and
-# those that "Fork-only" commits in the feature's history touch.
-git fetch --quiet "${fork_remote}" "${fork_base}"
-fork_ref="${fork_remote}/${fork_base}"
-fork_files=$( {
-  git diff --name-only "$(git merge-base "${upstream_ref}" "${fork_ref}")" "${fork_ref}" -- .github
-  git log --format= --name-only -E --grep='^Fork-only' "${base_ref}..${feature_ref}" -- .github
-} | sed '/^$/d' | sort -u)
+# The fork's own paths, which never go to apache/hadoop. The feature branch
+# carries the newest list; a feature that predates the file is read with the
+# base branch's.
+if git cat-file -e "${feature_ref}:.github/FORK-OWNED" 2>/dev/null; then
+  list_ref=${feature_ref}
+else
+  list_ref=${base_ref}
+fi
+fork_prefixes=$(fork_owned_prefixes "${list_ref}")
+if [[ -z "${fork_prefixes}" ]]; then
+  echo "ERROR: no .github/FORK-OWNED on ${feature_ref} or ${base_ref}; merge" \
+    "the base branch, or add the file (see .github/scripts/fork-owned.sh)." >&2
+  exit 1
+fi
 fork_excludes=()
-while read -r path; do
-  if [[ -n "${path}" ]]; then fork_excludes+=(":(exclude,literal)${path}"); fi
-done <<< "${fork_files}"
+while IFS= read -r prefix; do
+  fork_excludes+=(":(exclude)${prefix}")
+done <<< "${fork_prefixes}"
 
 # Only the feature branch's own changes, without the fork's own files.
 patch=$(mktemp)
@@ -186,9 +193,12 @@ GIT_AUTHOR_NAME="${author_name}" GIT_AUTHOR_EMAIL="${author_email}" \
 echo "Created ${target} on ${upstream_ref}:"
 git log --oneline -1
 git diff --stat "${upstream_ref}" "${target}"
-dropped=$(git diff --name-only "${base_ref}...${feature_ref}" -- .github \
-  | grep -F -x -f <(printf '%s\n' "${fork_files}") || true)
+dropped=
+while IFS= read -r prefix; do
+  paths=$(git diff --name-only "${base_ref}...${feature_ref}" -- "${prefix}")
+  if [[ -n "${paths}" ]]; then dropped+="${paths}"$'\n'; fi
+done <<< "${fork_prefixes}"
 if [[ -n "${dropped}" ]]; then
   echo "Left out (fork-only):"
-  echo "${dropped}" | sed 's/^/  /'
+  printf '%s' "${dropped}" | sed 's/^/  /'
 fi
