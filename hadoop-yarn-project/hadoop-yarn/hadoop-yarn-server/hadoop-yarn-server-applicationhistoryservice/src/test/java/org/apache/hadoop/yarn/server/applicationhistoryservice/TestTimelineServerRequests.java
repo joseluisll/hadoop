@@ -125,6 +125,52 @@ public class TestTimelineServerRequests {
         + "\"primaryFilters\":{\"p\":[\"v\"]},\"otherInfo\":{\"o\":\"v\"}}]}");
   }
 
+  @Test
+  void testDocumentedDomainFieldNames() throws Exception {
+    putDomainAndCheck("doc_domain",
+        "{\"id\":\"doc_domain\",\"description\":\"d\",\"createdtime\":1,\"modifiedtime\":2}");
+
+    String url = String.format("http://%s:%d/ws/v1/timeline/domain/doc_domain?user.name=foo",
+        HOST, testTimelineServer.getPort());
+    Client client = ClientBuilder.newClient();
+    try {
+      String body = client.target(url).request(MediaType.APPLICATION_JSON).get(String.class);
+      assertTrue(body.contains("\"createdtime\":"), body);
+      assertTrue(body.contains("\"modifiedtime\":"), body);
+      assertFalse(body.contains("createdTime"), body);
+      assertTrue(body.contains("\"id\":\"doc_domain\""), body);
+      assertTrue(body.contains("\"description\":\"d\""), body);
+    } finally {
+      client.close();
+    }
+  }
+
+  @Test
+  void testDomainWithUnsetTimes() throws Exception {
+    putDomainAndCheck("doc_domain_no_times",
+        "{\"id\":\"doc_domain_no_times\",\"description\":\"d\"}");
+  }
+
+  @Test
+  void testCamelCaseDomainFieldNamesAreAccepted() throws Exception {
+    putDomainAndCheck("camel_domain",
+        "{\"id\":\"camel_domain\",\"description\":\"d\",\"createdTime\":1,\"modifiedTime\":2}");
+  }
+
+  private void putDomainAndCheck(String id, String json) throws IOException {
+    String url = String.format("http://%s:%d/ws/v1/timeline/domain?user.name=foo",
+        HOST, testTimelineServer.getPort());
+    Client client = ClientBuilder.newClient();
+    try (Response response = client.target(url).request(MediaType.APPLICATION_JSON)
+        .put(Entity.json(json))) {
+      assertEquals(200, response.getStatus());
+    } finally {
+      client.close();
+    }
+    assertNotNull(testTimelineServer.getTimelineStore().getDomain(id),
+        "Timeline domain should not be null");
+  }
+
   private void postAndCheck(String id, String json) throws IOException {
     String url = String.format("http://%s:%d/ws/v1/timeline?user.name=foo",
         HOST, testTimelineServer.getPort());
