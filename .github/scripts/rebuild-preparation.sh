@@ -47,8 +47,15 @@
 
 set -euo pipefail
 
-# shellcheck source=fork-owned.sh
-source "$(dirname "${BASH_SOURCE[0]}")/fork-owned.sh"
+# The paths .github/FORK-OWNED of <ref> claims, one per line: what a rebuild
+# replaces and what never goes upstream. A directory prefix claims everything
+# under it. Inlined in every script that needs it: the workflows run them from
+# $RUNNER_TEMP, where no sibling file is copied along.
+function fork_owned_prefixes()
+{
+  git show "${1}:.github/FORK-OWNED" 2>/dev/null \
+    | sed -e 's/[[:space:]]*#.*//' -e '/^[[:space:]]*$/d'
+}
 
 if [[ $# -gt 1 || "${1:-}" == -* ]]; then
   sed -n '20,46p' "$0" | sed 's/^# \{0,1\}//'
