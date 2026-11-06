@@ -6,6 +6,16 @@ third-party license information in this repository. The prototype on the
 implements the collection core; the remaining items describe the full
 solution.
 
+## Goal
+
+**Reach at least the same level of license inventory and management as the
+current manual process** — i.e. the automated output must cover every
+dependency tracked by the hand-maintained `licenses/` and
+`licenses-binary/` directories (no regressions), while additionally
+surfacing dependencies the manual process misses. The manual files remain
+the baseline of record until the automated inventory is proven to be a
+superset of them for the covered modules.
+
 ## Collection
 
 1. **Dependency inventory** — the build SHALL enumerate every compile- and
@@ -94,6 +104,11 @@ directories. It surfaced the following additional requirements:
     the project's `LICENSE-<name>.txt` convention
     (`dev-support/licenses/normalize-licenses.sh`) so they can replace or
     be diffed against the hand-maintained files.
+25. **Parity gate** — for each covered module, the generated inventory
+    SHALL contain every dependency tracked by the manual `licenses/` and
+    `licenses-binary/` files that ships from that module; any gap SHALL
+    fail CI until explained by a curated override or a correction to the
+    manual baseline. This is the acceptance test for the goal above.
 
 ## Implementation status (prototype on branch `LICENSES`)
 
@@ -104,4 +119,5 @@ directories. It surfaced the following additional requirements:
 | 8 | Existing (Apache RAT) |
 | 20–23 | Implemented (licenseMerges, overrideFile, includeOptional, excludedGroups) |
 | 24 | Implemented (`normalize-licenses.sh`, runs in CI) |
+| 25 | Open — first manual comparison done ad hoc; CI gate not yet wired |
 | 7, 9–14, 16 | Open |
