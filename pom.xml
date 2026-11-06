@@ -936,11 +936,24 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
               <outputDirectory>${project.build.directory}/third-party</outputDirectory>
               <licensesOutputDirectory>${project.build.directory}/licenses</licensesOutputDirectory>
               <failOnMissing>true</failOnMissing>
+              <!-- optional deps can still ship in the distribution
+                   (e.g. guava's checker-qual), so include them -->
+              <includeOptional>true</includeOptional>
+              <!-- curated fixes for dependencies with missing or wrong
+                   license metadata -->
+              <overrideFile>${maven.multiModuleProjectDirectory}/dev-support/licenses/override-THIRD-PARTY.properties</overrideFile>
+              <!-- build tooling must not leak into the shipped inventory -->
+              <excludedGroups>^(org\.apache\.maven(\..*)?|org\.codehaus\.plexus|org\.eclipse\.sisu)$</excludedGroups>
               <licenseMerges>
-                <licenseMerge>The Apache Software License, Version 2.0|Apache License, Version 2.0|Apache License 2.0|Apache License, Version 2.0 (Apache-2.0)|Apache-2.0</licenseMerge>
+                <!-- variants observed in the first collection run; keep
+                     BSD 2-clause and 3-clause separate: different licenses -->
+                <licenseMerge>The Apache Software License, Version 2.0|Apache License, Version 2.0|Apache License 2.0|Apache License, 2.0|The Apache License, Version 2.0|Apache Software License - Version 2.0|Apache-2.0</licenseMerge>
                 <licenseMerge>MIT License|The MIT License|MIT</licenseMerge>
-                <licenseMerge>BSD License|New BSD License|The BSD License|BSD-2-Clause|BSD-3-Clause</licenseMerge>
-                <licenseMerge>Eclipse Public License - v 1.0|Eclipse Public License 1.0|EPL-1.0</licenseMerge>
+                <licenseMerge>BSD 2-Clause License|BSD 2-Clause</licenseMerge>
+                <licenseMerge>Revised BSD|Modified BSD|New BSD License|BSD 3-Clause</licenseMerge>
+                <licenseMerge>Eclipse Public License - Version 1.0|Eclipse Public License, Version 1.0|Eclipse Public License - v 1.0|EPL-1.0</licenseMerge>
+                <licenseMerge>EDL 1.0|Eclipse Distribution License - v 1.0</licenseMerge>
+                <licenseMerge>CDDL + GPLv2 with classpath exception|CDDL+GPLv2 with classpath exception|GPL2 w/ CPE</licenseMerge>
               </licenseMerges>
             </configuration>
             <executions>

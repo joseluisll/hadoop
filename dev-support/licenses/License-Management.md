@@ -68,3 +68,40 @@ solution.
 19. **Network resilience** — failures to fetch remote license texts
     (404/403, renamed URLs) SHALL be reported as warnings with a fallback
     to curated local copies, not silently dropped.
+
+## Requirements added from the first automated-vs-manual comparison
+
+The first collected output (hadoop-common subtree, 134 dependencies) was
+compared against the hand-maintained `licenses/` and `licenses-binary/`
+directories. It surfaced the following additional requirements:
+
+20. **Observed-variant merging** — the normalization table SHALL cover the
+    license name variants actually seen in the dependency graph (three
+    Apache-2.0 spellings, three EPL-1.0 spellings, BSD 2-clause vs.
+    3-clause variants, EDL, CDDL+GPLv2-CE). BSD 2-clause and 3-clause
+    SHALL NOT be merged into each other: they are different licenses.
+21. **Curated overrides** — a versioned override file
+    (`dev-support/licenses/override-THIRD-PARTY.properties`) SHALL carry
+    license information for dependencies with missing or wrong POM
+    metadata, reviewed like any other source change.
+22. **Optional dependencies** — optional dependencies that still ship in
+    the distribution (e.g. guava's `checker-qual`, tracked manually in
+    `licenses-binary/`) SHALL be included in the inventory.
+23. **Build-tooling exclusion** — Maven/Plexus/Sisu and other build-only
+    groups SHALL be excluded so the inventory reflects only shipped
+    artifacts.
+24. **Naming convention** — generated license texts SHALL be renamed to
+    the project's `LICENSE-<name>.txt` convention
+    (`dev-support/licenses/normalize-licenses.sh`) so they can replace or
+    be diffed against the hand-maintained files.
+
+## Implementation status (prototype on branch `LICENSES`)
+
+| Requirement | Status |
+|---|---|
+| 1–5, 15, 17–19 | Implemented (`licenses` profile + `licenses.yml`) |
+| 6 | Implemented via `failOnMissing` (currently `true`) |
+| 8 | Existing (Apache RAT) |
+| 20–23 | Implemented (licenseMerges, overrideFile, includeOptional, excludedGroups) |
+| 24 | Implemented (`normalize-licenses.sh`, runs in CI) |
+| 7, 9–14, 16 | Open |

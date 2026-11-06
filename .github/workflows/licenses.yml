@@ -61,6 +61,12 @@ jobs:
           org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses
           -pl hadoop-common-project/hadoop-common -am
 
+      - name: Normalize license file names
+        run: >-
+          dev-support/licenses/normalize-licenses.sh
+          target/licenses
+          target/licenses-auto
+
       - name: Upload THIRD-PARTY reports and license texts
         uses: actions/upload-artifact@v4
         with:
@@ -68,4 +74,5 @@ jobs:
           path: |
             **/target/third-party/**
             **/target/licenses/**
+            **/target/licenses-auto/**
           if-no-files-found: error

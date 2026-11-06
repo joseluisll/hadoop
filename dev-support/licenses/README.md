@@ -43,9 +43,26 @@ mvn -Plicenses -DskipTests \
 ## CI
 
 `.github/workflows/licenses.yml` runs the collection on pushes to
-`LICENSES`, uploads the generated reports as workflow artifacts, and can be
-extended to fail when the checked-in license files drift from the generated
-output.
+`LICENSES`, normalizes the downloaded texts into `LICENSE-<name>.txt`
+files (`normalize-licenses.sh`), and uploads everything as workflow
+artifacts. It can be extended to fail when the checked-in license files
+drift from the generated output.
+
+## Curation files
+
+- `override-THIRD-PARTY.properties` — license overrides for dependencies
+  with missing or wrong POM metadata
+  (`groupId--artifactId--version=License Name`).
+
+## Refinements after the first manual-vs-automated comparison
+
+- extended `licenseMerges` with the variants actually observed
+  (BSD 2-clause and 3-clause are intentionally kept separate)
+- `includeOptional=true` so optional deps that ship (e.g. checker-qual)
+  are inventoried
+- `excludedGroups` drops Maven/Plexus/Sisu build tooling
+- `normalize-licenses.sh` renames texts to the `LICENSE-<name>.txt`
+  convention
 
 ## Not covered (yet)
 
