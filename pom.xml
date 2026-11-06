@@ -940,8 +940,8 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
                    (e.g. guava's checker-qual), so include them -->
               <includeOptional>true</includeOptional>
               <!-- curated fixes for dependencies with missing or wrong
-                   license metadata -->
-              <overrideFile>${maven.multiModuleProjectDirectory}/dev-support/licenses/override-THIRD-PARTY.properties</overrideFile>
+                   license metadata (overrideFile is deprecated) -->
+              <overrideUrl>file://${maven.multiModuleProjectDirectory}/dev-support/licenses/override-THIRD-PARTY.properties</overrideUrl>
               <!-- build tooling must not leak into the shipped inventory;
                    no ^$ anchors: the plugin embeds this in a wider pattern -->
               <excludedGroups>org\.apache\.maven(\..*)?|org\.codehaus\.plexus|org\.eclipse\.sisu</excludedGroups>

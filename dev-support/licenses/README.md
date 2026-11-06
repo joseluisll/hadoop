@@ -7,17 +7,51 @@ dependency licenses, complementing the hand-maintained `licenses/` and
 ## How it works
 
 The root `pom.xml` defines a `licenses` profile that wires in
-`org.codehaus.mojo:license-maven-plugin` with two executions:
+`org.codehaus.mojo:license-maven-plugin`:
 
-- `aggregate-add-third-party` — builds `THIRD-PARTY` reports listing every
-  (transitive) compile/runtime dependency with its resolved license.
-- `aggregate-download-licenses` — downloads the license *texts* into
-  `target/licenses`.
+- `aggregate-add-third-party` — builds the `THIRD-PARTY` inventory listing
+  every (transitive) compile/runtime dependency with its resolved license.
+- `aggregate-download-licenses` — *optional, opt-in only*: downloads
+  license texts from the network. Used to update the local store, never
+  part of the default flow.
 
-License names are normalized via `licenseMerges` so that variants such as
-"Apache License 2.0" and "The Apache Software License, Version 2.0" collapse
-into a single entry. Test and provided scopes are excluded so only what ships
-in the distribution is collected.
+**Offline-first:** license texts are project data. They live in
+`texts/` (`LICENSE-<name>.txt`, seeded from SPDX and upstream sources) and
+are resolved by `resolve-licenses.sh`, which fails (with `--strict`) when
+a detected license has no local text. License names are normalized via
+`licenseMerges`; the canonical-name → file-slug mapping lives in
+`license-slugs.sh`, shared by both scripts.
+
+## Usage
+
+```bash
+# the aggregate goals resolve artifacts from the local repository,
+# so the modules must be installed first (full reactor for full coverage)
+mvn install -DskipTests -Dmaven.javadoc.skip=true
+mvn -Plicenses -DskipTests \
+  org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party
+dev-support/licenses/resolve-licenses.sh \
+  target/third-party/THIRD-PARTY.txt \
+  dev-support/licenses/texts \
+  target/licenses-resolved --strict
+```
+
+For a quick local iteration over a single module:
+
+```bash
+mvn -Plicenses -DskipTests \
+  org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party \
+  -pl hadoop-common-project/hadoop-common -am
+```
+
+To refresh the local store from the network (rare, reviewed in a PR):
+
+```bash
+mvn -Plicenses -DskipTests \
+  org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses
+dev-support/licenses/normalize-licenses.sh target/licenses /tmp/downloaded
+# review /tmp/downloaded, then copy vetted texts into texts/
+```
 
 ## Usage
 
@@ -42,11 +76,12 @@ mvn -Plicenses -DskipTests \
 
 ## CI
 
-`.github/workflows/licenses.yml` runs the collection on pushes to
-`LICENSES`, normalizes the downloaded texts into `LICENSE-<name>.txt`
-files (`normalize-licenses.sh`), and uploads everything as workflow
-artifacts. It can be extended to fail when the checked-in license files
-drift from the generated output.
+`.github/workflows/licenses.yml` installs the full reactor (no skipped
+modules), builds the `THIRD-PARTY` inventory, resolves texts from the
+local store, and uploads everything as workflow artifacts — all offline.
+Downloading from the network runs only when explicitly requested via the
+`workflow_dispatch` `download` input. The workflow can be extended to fail
+when the checked-in license files drift from the generated output.
 
 ## Curation files
 

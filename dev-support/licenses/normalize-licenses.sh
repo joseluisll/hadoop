@@ -27,31 +27,10 @@ mkdir -p "$out_dir"
 
 # canonical merged license name -> project file slug
 # (downloaded file names are lowercased by the plugin, so match lowercase)
-slug() {
-  local name
-  name="$(echo "$1" | tr '[:upper:]' '[:lower:]')"
-  case "$name" in
-    "the apache software license, version 2.0") echo "apache-2.0" ;;
-    "mit license")                              echo "mit" ;;
-    "bsd 2-clause license")                     echo "bsd-2-clause" ;;
-    "revised bsd"|"bsd-3-clause")               echo "bsd-3-clause" ;;
-    "bsd license"|"the bsd license")            echo "bsd" ;;
-    "eclipse public license - version 1.0")     echo "epl-1.0" ;;
-    "epl 2.0")                                  echo "epl-2.0" ;;
-    "edl 1.0")                                  echo "edl-1.0" ;;
-    "cddl + gplv2 with classpath exception")    echo "cddl-gplv2-ce" ;;
-    "mpl 1.1")                                  echo "mpl-1.1" ;;
-    "lgpl 2.1")                                 echo "lgpl-2.1" ;;
-    "the go license")                           echo "go" ;;
-    "bouncy castle licence")                    echo "bouncycastle" ;;
-    "w3c license")                              echo "w3c" ;;
-    "public domain")                            echo "public-domain" ;;
-    "jquery license")                           echo "jquery" ;;
-    "json")                                     echo "json" ;;
-    # fallback: keep alphanumerics
-    *) echo "$name" | tr -cd 'a-z0-9' | cut -c1-40 ;;
-  esac
-}
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=license-slugs.sh
+source "$script_dir/license-slugs.sh"
+slug() { license_slug "$1"; }
 
 shopt -s nullglob
 for f in "$src_dir"/*; do

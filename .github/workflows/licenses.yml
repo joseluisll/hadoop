@@ -14,8 +14,12 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-# Prototype: collect third-party dependency licenses with
-# org.codehaus.mojo:license-maven-plugin. See dev-support/licenses/README.md.
+# Collect third-party dependency licenses with
+# org.codehaus.mojo:license-maven-plugin. Offline-first: license texts
+# are resolved from the versioned store in dev-support/licenses/texts/;
+# downloading from the network only happens when explicitly requested
+# via the workflow_dispatch "download" input.
+# See dev-support/licenses/README.md.
 name: Collect dependency licenses
 
 on:
@@ -23,6 +27,11 @@ on:
     branches:
       - LICENSES
   workflow_dispatch:
+    inputs:
+      download:
+        description: Also download license texts from the network
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -42,37 +51,43 @@ jobs:
           cache: maven
 
       # The aggregate goals resolve dependency artifacts from the local
-      # repository, so the reactor modules must be installed first.
-      # Scoped to hadoop-common to keep the prototype fast; drop -pl/-am
-      # after a full `mvn install -DskipTests` to cover every module.
+      # repository, so the full reactor must be installed first: every
+      # module must be covered, none may be skipped.
       - name: Install reactor modules
         run: >-
           mvn -B -ntp install
           -DskipTests -Dmaven.javadoc.skip=true
-          -Dcheckstyle.skip=true -Drat.skip=true
-          -pl hadoop-common-project/hadoop-common -am
+          -Dcheckstyle.skip=true -Drat.skip=true -Dspotbugs.skip=true
 
-      # invoke the goals directly: the profile's executions are not bound
-      # to a lifecycle phase
-      - name: Collect licenses
+      # inventory only: no downloads in the default run
+      - name: Build THIRD-PARTY inventory
         run: >-
           mvn -B -ntp -Plicenses -DskipTests
           org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party
-          org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses
-          -pl hadoop-common-project/hadoop-common -am
 
-      - name: Normalize license file names
+      - name: Resolve license texts from the local store
         run: >-
-          dev-support/licenses/normalize-licenses.sh
-          target/licenses
-          target/licenses-auto
+          dev-support/licenses/resolve-licenses.sh
+          target/third-party/THIRD-PARTY.txt
+          dev-support/licenses/texts
+          target/licenses-resolved
 
-      - name: Upload THIRD-PARTY reports and license texts
+      # optional, on demand only
+      - name: Download license texts from the network
+        if: inputs.download
+        run: >-
+          mvn -B -ntp -Plicenses -DskipTests
+          org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses
+          && dev-support/licenses/normalize-licenses.sh
+          target/licenses
+          target/licenses-downloaded
+
+      - name: Upload reports and license texts
         uses: actions/upload-artifact@v4
         with:
           name: collected-licenses
           path: |
             **/target/third-party/**
-            **/target/licenses/**
-            **/target/licenses-auto/**
+            **/target/licenses-resolved/**
+            **/target/licenses-downloaded/**
           if-no-files-found: error
