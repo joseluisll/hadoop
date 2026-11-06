@@ -22,8 +22,17 @@
 # Nothing is downloaded: network access is only used by the optional
 # aggregate-download-licenses goal (see .github/workflows/licenses.yml).
 #
+# The report lines look like:
+#     (License One) (License Two) Artifact Name (g:a:v - url)
+# Every leading parenthesized group is a license name — a dependency can
+# carry several, and names may themselves contain parentheses (e.g.
+# "(GNU General Public License (GPL), version 2, with the Classpath
+# exception)") — while the last group is the g:a:v coordinate. A naive
+# '\([^()]*\)' match loses both; this parser walks the groups instead.
+#
 # Usage: resolve-licenses.sh <THIRD-PARTY.txt> <texts-dir> <output-dir> [--strict]
-#   --strict  exit 1 if any license has no local text
+#   --strict  exit 1 if any license has no local text, or a stored text is
+#             HTML junk (an error page saved by a download, not a license)
 set -euo pipefail
 
 report="$1"
@@ -38,16 +47,80 @@ source "$script_dir/license-slugs.sh"
 mkdir -p "$out_dir"
 missing=()
 
-# distinct license names from lines like "     (MIT License) foo (...)"
+# Distinct license names: the license groups are the consecutive run of
+# parenthesized groups at the start of the line, each separated from the
+# next by a single " ", e.g.
+#     (BSD 2-Clause) (Public Domain, per CC0) HdrHistogram (g:a:v - url)
+# Artifact names may carry their own parens ("GAX (...) for Java (Core)")
+# but those never join the run, and the final group is the g:a:v
+# coordinate. Names may themselves contain parentheses (the JMH
+# GPL-with-Classpath-exception entry), so the walk tracks depth.
+extract_license_names() {
+  awk '
+    {
+      line = $0
+      sub(/^[ \t]+/, "", line)
+      n = length(line)
+      depth = 0
+      group = ""
+      ngroups = 0
+      i = 1
+      while (i <= n) {
+        c = substr(line, i, 1)
+        if (depth == 0) {
+          if (c == "(" && ngroups == 0) {
+            group = ""
+            depth = 1
+            i++
+            continue
+          }
+          break   # artifact name started; the run is complete
+        }
+        if (c == ")") {
+          depth--
+          if (depth == 0) {
+            groups[++ngroups] = group
+            # the run continues only when exactly " (" follows a close
+            if (substr(line, i + 1, 2) == " (") {
+              i += 3
+              depth = 1
+              group = ""
+              continue
+            }
+            i++
+            continue
+          }
+          group = group c
+          i++
+          continue
+        }
+        if (c == "(") { depth++ }
+        group = group c
+        i++
+      }
+      # every group of the leading run is a license name; the g:a:v
+      # coordinate never joins the run (an artifact name always sits
+      # between it and the licenses)
+      for (g = 1; g <= ngroups; g++) print groups[g]
+    }
+  ' "$report"
+}
+
 while IFS= read -r license_name; do
+  [[ -z "$license_name" ]] && continue
   slug="$(license_slug "$license_name")"
   src="$texts_dir/LICENSE-$slug.txt"
   if [[ -f "$src" ]]; then
+    if grep -qiE '<!doctype|<html' "$src"; then
+      echo "REJECTED HTML junk: $src (license [$license_name]) needs re-seeding" >&2
+      missing+=("$license_name (LICENSE-$slug.txt is HTML junk, re-seed it)")
+      continue
+    fi
     cp "$src" "$out_dir/"
   else
     missing+=("$license_name (LICENSE-$slug.txt)")
   fi
-done < <(grep -oE '^\s+\([^()]+\)' "$report" | sed 's/^\s*(//;s/)$//' | sort -u)
+done < <(extract_license_names | sort -u)
 
 resolved=$(find "$out_dir" -name 'LICENSE-*.txt' | wc -l)
 echo "Resolved $resolved license text(s) from $texts_dir into $out_dir"

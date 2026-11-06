@@ -943,28 +943,38 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
                    license metadata (overrideFile is deprecated) -->
               <overrideUrl>file://${maven.multiModuleProjectDirectory}/dev-support/licenses/override-THIRD-PARTY.properties</overrideUrl>
               <!-- build tooling must not leak into the shipped inventory;
+                   own-reactor artifacts (org.apache.hadoop) and our
+                   shaded thirdparty jars are not third-party;
                    no ^$ anchors: the plugin embeds this in a wider pattern -->
-              <excludedGroups>org\.apache\.maven(\..*)?|org\.codehaus\.plexus|org\.eclipse\.sisu</excludedGroups>
+              <excludedGroups>org\.apache\.maven(\..*)?|org\.codehaus\.plexus|org\.eclipse\.sisu|org\.apache\.hadoop(\..*)?</excludedGroups>
               <licenseMerges>
                 <!-- variants observed in the full-reactor run (44 detected
                      collapsed to 33, these merges target the remainder);
                      keep BSD 2-clause and 3-clause separate -->
                 <licenseMerge>The Apache Software License, Version 2.0|Apache License, Version 2.0|Apache License 2.0|Apache License, 2.0|The Apache License, Version 2.0|Apache Software License - Version 2.0|Apache-2.0|Apache 2|Apache 2.0|Apache 2.0 License|Apache License V2.0|Apache License v2.0</licenseMerge>
-                <licenseMerge>MIT License|The MIT License|MIT</licenseMerge>
+                <licenseMerge>MIT License|The MIT License|MIT|MIT license</licenseMerge>
                 <licenseMerge>BSD 2-Clause License|BSD 2-Clause|BSD-2-Clause</licenseMerge>
                 <licenseMerge>Revised BSD|Modified BSD|New BSD License|BSD 3-Clause|The BSD 3-Clause License|BSD New license|BSD-3-Clause</licenseMerge>
-                <licenseMerge>BSD License|The BSD License|Similar to Apache License but with the acknowledgment clause removed|Plexus</licenseMerge>
+                <!-- stax2-api, dom4j, jdom2 and jline declare the generic
+                     "BSD License" but all four are 3-clause BSD, so fold
+                     them into the 3-clause name -->
+                <licenseMerge>Revised BSD|BSD License|The BSD License|Similar to Apache License but with the acknowledgment clause removed|Plexus</licenseMerge>
                 <!-- Tencent COS SDK declares its license name as
                      "cos-java-sdk-bundle"; the SDK is Apache-2.0
                      (github.com/tencentyun/cos-java-sdk-v5) -->
                 <licenseMerge>The Apache Software License, Version 2.0|cos-java-sdk-bundle</licenseMerge>
                 <licenseMerge>Eclipse Public License - Version 1.0|Eclipse Public License, Version 1.0|Eclipse Public License - v 1.0|EPL-1.0</licenseMerge>
-                <licenseMerge>EPL 2.0|Eclipse Public License 2.0|Eclipse Public License v2.0</licenseMerge>
+                <licenseMerge>EPL 2.0|Eclipse Public License 2.0|Eclipse Public License v2.0|Eclipse Public License v. 2.0|Eclipse Public License - v 2.0</licenseMerge>
                 <licenseMerge>EDL 1.0|Eclipse Distribution License - v 1.0|Eclipse Distribution License v. 1.0</licenseMerge>
                 <licenseMerge>CDDL + GPLv2 with classpath exception|CDDL+GPLv2 with classpath exception|GPL2 w/ CPE|CDDL v1.1 / GPL v2 dual license|Dual license consisting of the CDDL v1.1 and GPL v2</licenseMerge>
-                <licenseMerge>CDDL License|CDDL 1.1|CDDL+GPL</licenseMerge>
+                <!-- javax.json (org.glassfish) declares "CDDL License";
+                     it is plain CDDL 1.1, not the CDDL+GPLv2 dual license -->
+                <licenseMerge>CDDL License|CDDL 1.1</licenseMerge>
                 <licenseMerge>LGPL 2.1|LGPL, version 2.1</licenseMerge>
-                <licenseMerge>Public Domain|CC0</licenseMerge>
+                <licenseMerge>Public Domain|CC0|Public Domain, per Creative Commons CC0</licenseMerge>
+                <!-- JMH (org.openjdk.jmh) and jersey ship the GPLv2 with
+                     the Classpath Exception under three spellings -->
+                <licenseMerge>GNU General Public License (GPL), version 2, with the Classpath exception|GNU General Public License, version 2 with the GNU Classpath Exception|The GNU General Public License (GPL), Version 2, With Classpath Exception</licenseMerge>
               </licenseMerges>
             </configuration>
             <executions>

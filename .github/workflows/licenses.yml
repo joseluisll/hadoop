@@ -65,7 +65,9 @@ jobs:
           mvn -B -ntp -Plicenses -DskipTests
           org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party
 
-      # keep going on failure: resolve and upload whatever was produced
+      # keep going on failure: resolve and upload whatever was produced.
+      # --strict: a detected license with no local text (or an HTML junk
+      # text) fails the run, so the store stays complete.
       - name: Resolve license texts from the local store
         if: always()
         run: >-
@@ -73,6 +75,16 @@ jobs:
           target/third-party/THIRD-PARTY.txt
           dev-support/licenses/texts
           target/licenses-resolved
+          --strict
+
+      # requirement 25: the generated inventory must cover every
+      # dependency the manual LICENSE-binary manifest tracks
+      - name: Parity gate vs the manual manifest
+        if: always()
+        run: >-
+          dev-support/licenses/check-licenses-parity.sh
+          target/third-party/THIRD-PARTY.txt
+          LICENSE-binary
 
       # optional, on demand only
       - name: Download license texts from the network

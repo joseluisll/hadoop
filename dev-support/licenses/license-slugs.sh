@@ -25,10 +25,17 @@ license_slug() {
     "the apache software license, version 2.0") echo "apache-2.0" ;;
     "mit license")                              echo "mit" ;;
     "bsd 2-clause license")                     echo "bsd-2-clause" ;;
-    "revised bsd"|"bsd-3-clause")               echo "bsd-3-clause" ;;
-    "bsd license"|"the bsd license")            echo "bsd" ;;
+    # generic "BSD License" carriers in this repo (stax2-api, dom4j,
+    # jdom2, jline) are all 3-clause BSD
+    "revised bsd"|"bsd-3-clause"|"bsd license"|"the bsd license") echo "bsd-3-clause" ;;
     "eclipse public license - version 1.0")     echo "epl-1.0" ;;
     "epl 2.0")                                  echo "epl-2.0" ;;
+    # pre-merge spellings that licenseMerges also collapses; mapped here
+    # so resolution also works on a raw report
+    "eclipse public license 2.0"|"eclipse public license v2.0"|"eclipse public license - v 2.0"|"eclipse public license v. 2.0") echo "epl-2.0" ;;
+    "gnu general public license (gpl), version 2, with the classpath exception") echo "gplv2-ce" ;;
+    "gnu general public license, version 2 with the gnu classpath exception")     echo "gplv2-ce" ;;
+    "the gnu general public license (gpl), version 2, with classpath exception") echo "gplv2-ce" ;;
     "edl 1.0")                                  echo "edl-1.0" ;;
     "cddl + gplv2 with classpath exception")    echo "cddl-gplv2-ce" ;;
     "cddl license")                             echo "cddl" ;;
@@ -38,6 +45,7 @@ license_slug() {
     "bouncy castle licence")                    echo "bouncycastle" ;;
     "w3c license")                              echo "w3c" ;;
     "public domain")                            echo "public-domain" ;;
+    "public domain, per creative commons cc0") echo "public-domain" ;;
     "jquery license")                           echo "jquery" ;;
     "json")                                     echo "json" ;;
     # fallback: keep alphanumerics

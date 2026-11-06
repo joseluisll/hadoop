@@ -34,6 +34,8 @@ dev-support/licenses/resolve-licenses.sh \
   target/third-party/THIRD-PARTY.txt \
   dev-support/licenses/texts \
   target/licenses-resolved --strict
+dev-support/licenses/check-licenses-parity.sh \
+  target/third-party/THIRD-PARTY.txt LICENSE-binary
 ```
 
 For a quick local iteration over a single module:
@@ -53,35 +55,14 @@ dev-support/licenses/normalize-licenses.sh target/licenses /tmp/downloaded
 # review /tmp/downloaded, then copy vetted texts into texts/
 ```
 
-## Usage
-
-```bash
-# the aggregate goals resolve artifacts from the local repository,
-# so the modules must be installed first
-mvn install -DskipTests -Dmaven.javadoc.skip=true
-mvn -Plicenses -DskipTests \
-  org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party \
-  org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses
-```
-
-Results land in `target/third-party` and `target/licenses` of the
-aggregating module. For a quick run over a single module:
-
-```bash
-mvn -Plicenses -DskipTests \
-  org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party \
-  org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses \
-  -pl hadoop-common-project/hadoop-common -am
-```
-
 ## CI
 
 `.github/workflows/licenses.yml` installs the full reactor (no skipped
 modules), builds the `THIRD-PARTY` inventory, resolves texts from the
-local store, and uploads everything as workflow artifacts — all offline.
-Downloading from the network runs only when explicitly requested via the
-`workflow_dispatch` `download` input. The workflow can be extended to fail
-when the checked-in license files drift from the generated output.
+local store (`--strict`), runs the parity gate against the manual
+`LICENSE-binary` manifest, and uploads everything as workflow artifacts —
+all offline. Downloading from the network runs only when explicitly
+requested via the `workflow_dispatch` `download` input.
 
 ## Curation files
 
@@ -99,12 +80,26 @@ when the checked-in license files drift from the generated output.
   plugin embeds the regex in a wider pattern — no `^`/`$` anchors)
 - `normalize-licenses.sh` renames texts to the `LICENSE-<name>.txt`
   convention
+- `resolve-licenses.sh` walks *every* leading license group of each
+  report line (a dependency can carry several licenses, and license names
+  can themselves contain parentheses — a naive `\([^()]*\)` match
+  silently drops both) and rejects HTML junk texts even without `--strict`
+- `check-licenses-parity.sh` gates the inventory against the manual
+  `LICENSE-binary` manifest (requirement 25): every `g:a` the manual
+  manifest tracks must appear in the generated inventory
+- `excludedGroups` also drops our own reactor artifacts
+  (`org.apache.hadoop`) and the shaded `hadoop-thirdparty` jars — they are
+  not third-party
+- generic `BSD License` declarations (stax2-api, dom4j, jdom2, jline —
+  all 3-clause BSD) fold into the 3-clause merge
+- `LICENSE-gplv2-ce.txt` covers the GPLv2 with Classpath Exception
+  spellings (JMH, jersey)
 
-Known limitation: `checker-qual` (manually tracked in
-`licenses-binary/`) is explicitly excluded from guava in
-`hadoop-project/pom.xml`, so it does not appear in the hadoop-common
-subtree inventory. The parity check (requirement 25) needs a
-full-reactor run to be meaningful.
+Known limitation: test-scope libraries of test-jar modules
+(mockito-core, junit-jupiter-api, ...) still surface in the aggregate
+because test-jar artifacts carry them at compile scope; the parity gate
+reports the generated direction as INFO until the `-Pdist` tarball
+ground-truth (requirement 26) lands.
 
 ## Not covered (yet)
 
@@ -113,3 +108,7 @@ full-reactor run to be meaningful.
 - Wiring the generated texts into `hadoop-dist`/`hadoop-assemblies` so the
   tarball ships them automatically.
 - Whitelist/audit policy enforcement (allowed-license gating).
+- The stale manual `LICENSE-binary` entries (hamcrest-core, sshd-*,
+  htrace-*, wro4j-maven-plugin, junit, ...) still need pruning; until then
+  the parity gate fails on them and they keep the manual baseline
+  authoritative.
