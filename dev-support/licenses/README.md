@@ -25,14 +25,18 @@ in the distribution is collected.
 # the aggregate goals resolve artifacts from the local repository,
 # so the modules must be installed first
 mvn install -DskipTests -Dmaven.javadoc.skip=true
-mvn -Plicenses -DskipTests process-sources
+mvn -Plicenses -DskipTests \
+  org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party \
+  org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses
 ```
 
 Results land in `target/third-party` and `target/licenses` of the
 aggregating module. For a quick run over a single module:
 
 ```bash
-mvn -Plicenses -DskipTests process-sources \
+mvn -Plicenses -DskipTests \
+  org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party \
+  org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses \
   -pl hadoop-common-project/hadoop-common -am
 ```
 

@@ -52,9 +52,13 @@ jobs:
           -Dcheckstyle.skip=true -Drat.skip=true
           -pl hadoop-common-project/hadoop-common -am
 
+      # invoke the goals directly: the profile's executions are not bound
+      # to a lifecycle phase
       - name: Collect licenses
         run: >-
-          mvn -B -ntp -Plicenses -DskipTests process-sources
+          mvn -B -ntp -Plicenses -DskipTests
+          org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party
+          org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses
           -pl hadoop-common-project/hadoop-common -am
 
       - name: Upload THIRD-PARTY reports and license texts
