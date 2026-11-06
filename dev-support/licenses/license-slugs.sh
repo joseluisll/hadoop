@@ -31,6 +31,7 @@ license_slug() {
     "epl 2.0")                                  echo "epl-2.0" ;;
     "edl 1.0")                                  echo "edl-1.0" ;;
     "cddl + gplv2 with classpath exception")    echo "cddl-gplv2-ce" ;;
+    "cddl license")                             echo "cddl" ;;
     "mpl 1.1")                                  echo "mpl-1.1" ;;
     "lgpl 2.1")                                 echo "lgpl-2.1" ;;
     "the go license")                           echo "go" ;;
