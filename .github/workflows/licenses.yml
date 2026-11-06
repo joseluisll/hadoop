@@ -65,7 +65,9 @@ jobs:
           mvn -B -ntp -Plicenses -DskipTests
           org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party
 
+      # keep going on failure: resolve and upload whatever was produced
       - name: Resolve license texts from the local store
+        if: always()
         run: >-
           dev-support/licenses/resolve-licenses.sh
           target/third-party/THIRD-PARTY.txt
@@ -74,7 +76,7 @@ jobs:
 
       # optional, on demand only
       - name: Download license texts from the network
-        if: inputs.download
+        if: always() && inputs.download
         run: >-
           mvn -B -ntp -Plicenses -DskipTests
           org.codehaus.mojo:license-maven-plugin:aggregate-download-licenses
@@ -83,6 +85,7 @@ jobs:
           target/licenses-downloaded
 
       - name: Upload reports and license texts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: collected-licenses
@@ -90,4 +93,4 @@ jobs:
             **/target/third-party/**
             **/target/licenses-resolved/**
             **/target/licenses-downloaded/**
-          if-no-files-found: error
+          if-no-files-found: warn
