@@ -942,8 +942,9 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
               <!-- curated fixes for dependencies with missing or wrong
                    license metadata -->
               <overrideFile>${maven.multiModuleProjectDirectory}/dev-support/licenses/override-THIRD-PARTY.properties</overrideFile>
-              <!-- build tooling must not leak into the shipped inventory -->
-              <excludedGroups>^(org\.apache\.maven(\..*)?|org\.codehaus\.plexus|org\.eclipse\.sisu)$</excludedGroups>
+              <!-- build tooling must not leak into the shipped inventory;
+                   no ^$ anchors: the plugin embeds this in a wider pattern -->
+              <excludedGroups>org\.apache\.maven(\..*)?|org\.codehaus\.plexus|org\.eclipse\.sisu</excludedGroups>
               <licenseMerges>
                 <!-- variants observed in the first collection run; keep
                      BSD 2-clause and 3-clause separate: different licenses -->

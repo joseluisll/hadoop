@@ -60,9 +60,16 @@ drift from the generated output.
   (BSD 2-clause and 3-clause are intentionally kept separate)
 - `includeOptional=true` so optional deps that ship (e.g. checker-qual)
   are inventoried
-- `excludedGroups` drops Maven/Plexus/Sisu build tooling
+- `excludedGroups` drops Maven/Plexus/Sisu build tooling (note: the
+  plugin embeds the regex in a wider pattern — no `^`/`$` anchors)
 - `normalize-licenses.sh` renames texts to the `LICENSE-<name>.txt`
   convention
+
+Known limitation: `checker-qual` (manually tracked in
+`licenses-binary/`) is explicitly excluded from guava in
+`hadoop-project/pom.xml`, so it does not appear in the hadoop-common
+subtree inventory. The parity check (requirement 25) needs a
+full-reactor run to be meaningful.
 
 ## Not covered (yet)
 
