@@ -963,6 +963,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
                 <licenseMerge>EDL 1.0|Eclipse Distribution License - v 1.0|Eclipse Distribution License v. 1.0</licenseMerge>
                 <licenseMerge>CDDL + GPLv2 with classpath exception|CDDL+GPLv2 with classpath exception|GPL2 w/ CPE|CDDL v1.1 / GPL v2 dual license|Dual license consisting of the CDDL v1.1 and GPL v2</licenseMerge>
                 <licenseMerge>CDDL License|CDDL 1.1|CDDL+GPL</licenseMerge>
+                <licenseMerge>LGPL 2.1|LGPL, version 2.1</licenseMerge>
                 <licenseMerge>Public Domain|CC0</licenseMerge>
               </licenseMerges>
             </configuration>
