@@ -1,0 +1,70 @@
+# Automatic license management — requirements
+
+Requirements for automating the collection, validation, and distribution of
+third-party license information in this repository. The prototype on the
+`LICENSES` branch (`licenses` Maven profile + `licenses.yml` workflow)
+implements the collection core; the remaining items describe the full
+solution.
+
+## Collection
+
+1. **Dependency inventory** — the build SHALL enumerate every compile- and
+   runtime-scoped dependency, including transitive ones, across all modules
+   that ship in the distribution.
+2. **Scope filtering** — test, provided, and build-only tooling
+   dependencies SHALL be excluded from the shipped license set.
+3. **License resolution** — each dependency SHALL be mapped to a license
+   identifier, using POM metadata first and curated overrides where metadata
+   is missing or wrong.
+4. **Name normalization** — license name variants (e.g. "Apache License
+   2.0" vs. "The Apache Software License, Version 2.0") SHALL be merged
+   into canonical names, ideally SPDX identifiers.
+5. **License texts** — the full license text for every detected license
+   SHALL be downloaded or otherwise obtained, not just referenced by name.
+6. **Missing-license detection** — dependencies with no resolvable license
+   SHALL be reported; whether they fail the build SHALL be configurable
+   (`failOnMissing`).
+7. **Non-Maven assets** — bundled JavaScript, native, and other non-Maven
+   assets (currently covered by the hand-maintained `licenses/` directory)
+   SHALL be included in the inventory, either via manifests or curated
+   configuration.
+
+## Validation
+
+8. **Header checks** — source-file license headers SHALL continue to be
+   validated by Apache RAT; the collection tooling complements, and does
+   not replace, RAT.
+9. **Allowlist policy** — a configurable list of approved licenses SHALL
+   gate the build, so that newly introduced dependencies with
+   non-approved licenses fail CI.
+10. **Drift detection** — CI SHALL fail when the checked-in license files
+    (`licenses/`, `licenses-binary/`, NOTICE) drift from the generated
+    output, forcing them to be regenerated on dependency changes.
+11. **Precommit integration** — license validation SHOULD run in the Yetus
+    precommit pipeline alongside RAT.
+
+## Distribution
+
+12. **Report generation** — a `THIRD-PARTY` report listing every shipped
+    dependency and its license SHALL be produced per release.
+13. **Text bundling** — collected license texts SHALL be wired into
+    `hadoop-dist`/`hadoop-assemblies` so release tarballs ship them
+    automatically, replacing the manual `licenses-binary/` maintenance.
+14. **NOTICE accuracy** — attribution-required licenses (e.g. BSD, MIT,
+    EPL) SHALL be reflected in the shipped NOTICE file.
+15. **CI artifacts** — every collection run SHALL publish the generated
+    reports and license texts as workflow artifacts for review.
+16. **Reproducibility** — collection output SHALL be deterministic for a
+    given dependency set, so diffs in review reflect only real changes.
+
+## Operations
+
+17. **Single command** — maintainers SHALL be able to regenerate all
+    license artifacts with one Maven invocation (documented in
+    `dev-support/licenses/README.md`).
+18. **Performance** — a full collection run SHOULD complete within normal
+    CI time budgets; scoped runs (e.g. `-pl hadoop-common -am`) SHALL be
+    supported for fast iteration.
+19. **Network resilience** — failures to fetch remote license texts
+    (404/403, renamed URLs) SHALL be reported as warnings with a fallback
+    to curated local copies, not silently dropped.
