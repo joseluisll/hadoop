@@ -22,11 +22,19 @@ in the distribution is collected.
 ## Usage
 
 ```bash
+# the aggregate goals resolve artifacts from the local repository,
+# so the modules must be installed first
+mvn install -DskipTests -Dmaven.javadoc.skip=true
 mvn -Plicenses -DskipTests process-sources
 ```
 
 Results land in `target/third-party` and `target/licenses` of the
-aggregating module.
+aggregating module. For a quick run over a single module:
+
+```bash
+mvn -Plicenses -DskipTests process-sources \
+  -pl hadoop-common-project/hadoop-common -am
+```
 
 ## CI
 

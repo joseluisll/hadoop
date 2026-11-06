@@ -41,8 +41,21 @@ jobs:
           java-version: 17
           cache: maven
 
+      # The aggregate goals resolve dependency artifacts from the local
+      # repository, so the reactor modules must be installed first.
+      # Scoped to hadoop-common to keep the prototype fast; drop -pl/-am
+      # after a full `mvn install -DskipTests` to cover every module.
+      - name: Install reactor modules
+        run: >-
+          mvn -B -ntp install
+          -DskipTests -Dmaven.javadoc.skip=true
+          -Dcheckstyle.skip=true -Drat.skip=true
+          -pl hadoop-common-project/hadoop-common -am
+
       - name: Collect licenses
-        run: mvn -B -ntp -Plicenses -DskipTests process-sources
+        run: >-
+          mvn -B -ntp -Plicenses -DskipTests process-sources
+          -pl hadoop-common-project/hadoop-common -am
 
       - name: Upload THIRD-PARTY reports and license texts
         uses: actions/upload-artifact@v4
