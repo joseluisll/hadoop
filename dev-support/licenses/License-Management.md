@@ -110,6 +110,43 @@ directories. It surfaced the following additional requirements:
     fail CI until explained by a curated override or a correction to the
     manual baseline. This is the acceptance test for the goal above.
 
+## Requirements from real-world findings (pjfanning/hadoop#116)
+
+The review of `LICENSE-binary` against the hadoop-3.5.0 tarball in
+https://github.com/pjfanning/hadoop/pull/116 found 37 missing jars,
+9 entries for artifacts that don't ship (build plugins, test libraries),
+~12 stale entries, version mismatches, and one malformed entry. Lessons:
+
+26. **Ground truth is the distribution** — the inventory SHALL be
+    validated against the jars in the assembled release tarball, not only
+    against the Maven dependency graph. POM-derived inventories miss what
+    actually ships (37 missing entries in 3.5.0).
+27. **WAR coverage** — jars nested in webapp WARs (e.g.
+    hadoop-yarn-applications-catalog-webapp, 157 nested jars in 3.5.0)
+    SHALL be inventoried; artifacts shipping only inside WARs
+    (solr-solrj, http2-*, httpmime, jcl-over-slf4j) must not be missed.
+28. **Multi-license disambiguation** — artifacts under multiple licenses
+    (e.g. javassist: MPL/LGPL/Apache; org.eclipse.persistence: EPL+EDL;
+    HdrHistogram: CC0/BSD; hk2: EPL2/GPL+CPE) SHALL be listed under the
+    license chosen by a curated, documented policy.
+29. **No-metadata curation** — artifacts declaring no license in jar or
+    POM (e.g. zookeeper-jute) SHALL get reviewed curated entries with a
+    recorded justification.
+30. **Entry format validation** — malformed inventory entries (e.g.
+    `com.google.code.gson:2.9.0` in place of `gson:2.9.0`) SHALL fail
+    validation.
+31. **Version consistency** — listed versions SHALL match the shipped
+    jar versions (3.5.0 shipped httpclient5 5.6.3 but listed 6.3;
+    failureaccess 1.0.3 shipped vs 1.0/1.0.2 listed; the WAR bundled
+    zookeeper-jute 3.6.2 while 3.8.6 was listed). Mismatches SHALL be
+    reported, and divergent versions between standalone jars and WAR
+    contents flagged.
+32. **Pruning** — entries for artifacts that no longer ship (build
+    plugins such as wro4j-maven-plugin and jacoco, test libraries such
+    as junit/sshd/hsqldb, removed deps such as htrace, opentracing,
+    dom4j) SHALL be flagged for removal; license sections left empty by
+    pruning SHALL be dropped.
+
 ## Implementation status (prototype on branch `LICENSES`)
 
 | Requirement | Status |
@@ -120,4 +157,7 @@ directories. It surfaced the following additional requirements:
 | 20–23 | Implemented (licenseMerges, overrideFile, includeOptional, excludedGroups) |
 | 24 | Implemented (`normalize-licenses.sh`, runs in CI) |
 | 25 | Open — first manual comparison done ad hoc; CI gate not yet wired |
+| 26–27 | Open — requires validating against the assembled dist tarball (`-Pdist`), including WAR contents |
+| 28–29 | Partially — `override-THIRD-PARTY.properties` mechanism exists; disambiguation policy not yet curated |
+| 30–32 | Open |
 | 7, 9–14, 16 | Open |
