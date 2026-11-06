@@ -25,7 +25,7 @@ name: Collect dependency licenses
 on:
   push:
     branches:
-      - LICENSES
+      - feat/LICENSES
   workflow_dispatch:
     inputs:
       download:
