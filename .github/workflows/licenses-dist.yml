@@ -85,7 +85,22 @@ jobs:
           mkdir -p target/archive-ground-truth
           status=0
           found=0
-          while IFS= read -r tar; do
+          # distribution tarballs only: the dist build also leaves module
+          # staging tars under */target (hadoop-common-<v>.tar.gz and
+          # friends) that are build intermediates, not distributed
+          # archives — they carry no jars and must not be gated
+          dists=()
+          for mod in hadoop-dist/target \
+                     hadoop-cloud-storage-project/hadoop-cloud-storage-dist/target; do
+            if [[ -d "$mod" ]]; then
+              for t in "$mod"/*.tar.gz; do
+                if [[ -e "$t" && "$t" != *-src.tar.gz ]]; then
+                  dists+=("$t")
+                fi
+              done
+            fi
+          done
+          for tar in "${dists[@]}"; do
             found=1
             name="$(basename "$tar" .tar.gz)"
             dir="target/archive-ground-truth/$name"
@@ -106,9 +121,7 @@ jobs:
               status=1
             fi
             echo "::endgroup::"
-          done < <(find . -path ./.git -prune -o -path './target' -prune -o \
-                    -name '*.tar.gz' -path '*/target/*' -print \
-                    | grep -v -- '-src\.tar\.gz$')
+          done
           if [[ "$found" -eq 0 ]]; then
             echo "no distribution tarball produced by the build" >&2
             exit 1
