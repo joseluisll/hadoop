@@ -41,6 +41,24 @@
       <outputDirectory>/libexec/shellprofile.d</outputDirectory>
       <fileMode>0755</fileMode>
     </fileSet>
+    <!-- license the archive like the main distribution does
+         (dist-layout-stitching copies these into hadoop-dist): every
+         distributed archive must carry the license file that states
+         what it bundles (R38 of dev-support/licenses/License-Management.md) -->
+    <fileSet>
+      <directory>../..</directory>
+      <includes>
+        <include>LICENSE-binary</include>
+        <include>NOTICE-binary</include>
+      </includes>
+    </fileSet>
+    <fileSet>
+      <directory>../../licenses-binary</directory>
+      <includes>
+        <include>*</include>
+      </includes>
+      <outputDirectory>/licenses-binary</outputDirectory>
+    </fileSet>
   </fileSets>
 
   <dependencySets>

@@ -294,7 +294,8 @@ both.
 | Stage | Marker | Status |
 |---|---|---|
 | 1 | R25 in CI, manual baseline authoritative | Done — parity gate wired; green since the 2026-11-07 R32 pruning |
-| 2 | R35–R38 tooling (`licenses-dist` workflow, archive enumeration, completeness gate) | Landed and validated by the first ground-truth run 2026-11-07 (42374519973): 264 jars enumerated on the real tarball, R38 caught 47 unlicensed shipped jars (now listed), R36 produced the curated `archive-jar-mappings` set, R31 aligned shipped versions; expected to go green on the next run |
+| 2 | R35–R38 tooling (`licenses-dist` workflow, archive enumeration, completeness gate) | Landed and validated by the first ground-truth run 2026-11-07 (42374519973 triaged in 2026-11-07-1430); both distributed archives now built and gated (main + cloud-storage dist with its -Dhadoop-*-package SDK sets; the cloud dist assembly now ships LICENSE-binary/NOTICE-binary/licenses-binary) |
+| 2 | R37 shaded-jar mapping | Curated 2026-11-07 from jar evidence: hadoop-gcp shades nothing (earlier premise corrected); hadoop-client-runtime relocates protobuf and embeds unrelocated runtime deps (kerby, jline, ...) — see `shaded-jars` and the 15:00 record |
 | 2 | R39 justifications confirmed by first ground-truth run | Done 2026-11-07 — first run (42374519973) confirmed no curated exclusion ships, caught one that did (objenesis; un-excluded and re-listed); record: `2026-11-07-1430-Archive-Ground-Truth-First-Run.md` |
 | 2 | R32 pruning of stale manual entries | Done — 2026-11-07 curation pass; R25 green; record: `2026-11-07-1150-License-binary-Curation-R30-R31-R32.md` |
 | 3 | R40 generator (archive → `LICENSE-binary`/`NOTICE-binary`) | Open — after Stage 2 converges |

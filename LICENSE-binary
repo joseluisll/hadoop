@@ -398,6 +398,7 @@ org.apache.httpcomponents:httpcore-nio:4.4.13
 org.apache.httpcomponents:httpmime:4.5.13
 org.apache.httpcomponents.client5:httpclient5:6.3
 org.apache.httpcomponents.core5:httpcore5:5.4.3
+org.apache.httpcomponents.core5:httpcore5-h2:5.4.3
 org.apache.kafka:kafka-clients:3.9.2
 org.apache.kerby:kerb-admin:2.0.3
 org.apache.kerby:kerb-client:2.0.3
@@ -648,6 +649,7 @@ javax.cache:cache-api:1.1.1
 javax.servlet:javax.servlet-api:3.1.0
 javax.websocket:javax.websocket-api:1.0
 javax.websocket:javax.websocket-client-api:1.0
+javax.ws.rs:jsr311-api:1.1.1
 org.glassfish:javax.json:1.1.4
 
 Eclipse Distribution License (EDL) 1.0
