@@ -59,11 +59,19 @@ jobs:
           -DskipTests -Dmaven.javadoc.skip=true
           -Dcheckstyle.skip=true -Drat.skip=true -Dspotbugs.skip=true
 
-      # inventory only: no downloads in the default run
+      # inventory only: no downloads in the default run.
+      # The goal is invoked directly on the root aggregator, so the reactor
+      # summary marks every other module SKIPPED (no lifecycle goal runs for
+      # them in this session; the aggregator walks all reactor POMs
+      # in-process instead). Those 118 dotted rows are noise — filter them
+      # from the log while keeping mvn's exit code (pipefail) and every
+      # other line.
       - name: Build THIRD-PARTY inventory
         run: >-
+          set -o pipefail;
           mvn -B -ntp -Plicenses -DskipTests
           org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party
+          | grep -vE '( |\.)*SKIPPED$'
 
       # keep going on failure: resolve and upload whatever was produced.
       # --strict: a detected license with no local text (or an HTML junk
