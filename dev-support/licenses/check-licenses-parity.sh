@@ -79,15 +79,17 @@ LC_ALL=C awk '
       i++
     }
     split(last, parts, ":")
-    if (parts[1] != "" && parts[2] != "") print tolower(parts[1]) ":" parts[2]
+    if (parts[1] != "" && parts[2] != "") print tolower(parts[1] ":" parts[2])
   }
 ' "$report" | LC_ALL=C sort -u > "$generated"
 
 # g:a pairs from the manual manifest: lines that look like g:a[:v];
 # tolerate the known malformed entries by taking the first two fields
-# (an empty match set must not kill the script under pipefail)
+# (an empty match set must not kill the script under pipefail).
+# Case-insensitive both sides: the manifest and the inventory echo POM
+# artifactIds verbatim, and mixed-case spellings (HikariCP) must match.
 grep -E '^[a-z][a-zA-Z0-9._-]*(:[a-zA-Z0-9._=-]+)+' "$manifest" \
-  | sed 's/\.jar$//' | LC_ALL=C awk -F: '{print tolower($1) ":" $2}' | LC_ALL=C sort -u > "$manifest_gas" || true
+  | sed 's/\.jar$//' | LC_ALL=C awk -F: '{print tolower($1 ":" $2)}' | LC_ALL=C sort -u > "$manifest_gas" || true
 
 missing=$(comm -23 "$manifest_gas" "$generated")
 extra=$(comm -13 "$manifest_gas" "$generated")

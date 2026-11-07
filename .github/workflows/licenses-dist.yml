@@ -36,6 +36,8 @@ on:
     paths:
       - '.github/workflows/licenses-dist.yml'
       - 'dev-support/licenses/**'
+      - 'LICENSE-binary'
+      - 'pom.xml'
   schedule:
     # weekly, Sunday 03:00 UTC
     - cron: '0 3 * * 0'
@@ -133,7 +135,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: archive-ground-truth
+          # the extracted tarballs stay on the runner; upload only the
+          # evidence (enumeration TSVs, gate logs, inventory)
           path: |
             target/third-party/**
-            target/archive-ground-truth/**
+            target/archive-ground-truth/*/archive-jars.tsv
+            target/archive-ground-truth/*/gate.log
           if-no-files-found: warn

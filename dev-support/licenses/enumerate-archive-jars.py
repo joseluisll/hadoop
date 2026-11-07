@@ -129,13 +129,21 @@ VERSION_SEGMENT = re.compile(r"^[0-9]")
 
 
 def parse_filename(path):
-    """artifactId/version guess from the last version-looking -segment."""
+    """artifactId/version guess from the last version-looking -segment.
+
+    Scans right-to-left for the first segment starting with a digit, then
+    keeps extending left while the preceding segment also starts with a
+    digit — hyphenated versions (zstd-jni 1.5.7-8) must stay in the
+    version, not bleed into the artifactId.
+    """
     base = os.path.basename(path)
     if base.lower().endswith(".jar"):
         base = base[: -len(".jar")]
     parts = base.split("-")
     for i in range(len(parts) - 1, 0, -1):
         if VERSION_SEGMENT.match(parts[i]):
+            while i > 1 and VERSION_SEGMENT.match(parts[i - 1]):
+                i -= 1
             return "", "-".join(parts[:i]), "-".join(parts[i:]), "filename"
     return None
 

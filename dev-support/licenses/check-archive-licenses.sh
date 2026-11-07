@@ -105,10 +105,10 @@ if [[ -s "$mappings" ]]; then
 fi
 
 # excludedArtifacts regex from the root pom (R39); tolerate a root with
-# no pom (no exclusions configured) rather than dying
+# no pom (no exclusions configured) rather than dying. NOTE: `sed q` is
+# unconditional and would quit after line 1 — extract with awk instead.
 if [[ -f "$root/pom.xml" ]]; then
-  # `q` after the first match: no head, no SIGPIPE window under pipefail
-  exclude_pattern="$(sed -n 's/.*<excludedArtifacts>\(.*\)<\/excludedArtifacts>.*/\1/p;q' "$root/pom.xml")"
+  exclude_pattern="$(awk '/<excludedArtifacts>/ { sub(/.*<excludedArtifacts>/, ""); sub(/<\/excludedArtifacts>.*/, ""); print; exit }' "$root/pom.xml")"
 else
   exclude_pattern=""
 fi
@@ -145,9 +145,11 @@ LC_ALL=C sort "$unmapped" -o "$unmapped" 2>/dev/null || true
 manifest_gas="$(mktemp)"
 if [[ -n "$manifest" && -f "$manifest" ]]; then
   # an empty manifest must not kill the gate (pipefail): no matches is a
-  # valid — failing-later — state, every shipped jar is then unlicensed
+  # valid — failing-later — state, every shipped jar is then unlicensed.
+  # g:a comparison is case-insensitive (HikariCP/Objenesis jars carry
+  # mixed-case artifactIds)
   grep -E '^[a-z][a-zA-Z0-9._-]*(:[a-zA-Z0-9._=-]+)+' "$manifest" \
-    | sed 's/\.jar$//' | LC_ALL=C awk -F: '{print tolower($1) ":" $2}' \
+    | sed 's/\.jar$//' | LC_ALL=C awk -F: '{print tolower($1 ":" $2)}' \
     | LC_ALL=C sort -u > "$manifest_gas" || true
 fi
 
@@ -181,7 +183,7 @@ LC_ALL=C awk '
       i++
     }
     split(last, parts, ":")
-    if (parts[1] != "" && parts[2] != "") print tolower(parts[1]) ":" parts[2]
+    if (parts[1] != "" && parts[2] != "") print tolower(parts[1] ":" parts[2])
   }
 ' "$report" | LC_ALL=C sort -u > "$inventory_gas"
 
@@ -282,9 +284,10 @@ if [[ -n "$manifest" && -f "$manifest" ]]; then
   manifest_gav="$(mktemp)"
   archive_gav="$(mktemp)"
   cleanup() { rm -f "$archive_all" "$archive_gas" "$own" "$partial" "$unmapped" "$manifest_gas" "$inventory_gas" "$includes_gas" "$manifest_gav" "$archive_gav"; if [[ -n "$promoted" ]]; then rm -f "$promoted"; fi; }
-  # g:a:v the archive's LICENSE-binary lists
+  # g:a:v the archive's LICENSE-binary lists (case-insensitive: versions
+  # like 4.1.137.Final arrive as 4.1.137.final from the enumeration)
   grep -E '^[a-z][a-zA-Z0-9._-]*(:[a-zA-Z0-9._=-]+)+' "$manifest" \
-    | sed 's/\.jar$//' | awk -F: '{print tolower($1) ":" $2 ":" $3}' \
+    | sed 's/\.jar$//' | awk -F: '{print tolower($1 ":" $2 ":" $3)}' \
     | LC_ALL=C sort -u > "$manifest_gav" || true
   # g:a:v of the third-party jars actually shipped (skip versionless rows:
   # promoted/manifest rows may carry none, and g:a: noise helps nobody)

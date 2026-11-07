@@ -234,7 +234,7 @@ audit (37 bundled-but-unlisted jars; jacoco/ini4j listed yet absent).
 | 20–24 | Implemented (licenseMerges, overrideUrl, includeOptional, excludedGroups, license-slugs.sh) |
 | 34 | Implemented — full `mvn install` reactor, no `-pl` scoping |
 | 25 | Implemented — `check-licenses-parity.sh` in CI, green since the 2026-11-07 curation pass; `assembly-includes` carries the justified off-graph exceptions |
-| 26–27 | Tooling landed 2026-11-07 — `enumerate-archive-jars.py` + `check-archive-licenses.sh` in `licenses-dist.yml`; first ground-truth run pending |
+| 26–27 | Implemented and validated by the first ground-truth run 2026-11-07 (42374519973): the real tarball was enumerated (264 jars incl. the catalog webapp WAR's nested libs), R38 caught 47 unlicensed shipped jars, R36/R37 mapping curated; gate bugs found by the run were fixed (see the run record) |
 | 28–29 | Partially — override mechanism exists; disambiguation policy not yet curated |
 | 30–32 | Addressed by the 2026-11-07 curation pass (record: `2026-11-07-1150-License-binary-Curation-R30-R31-R32.md`): known malformed entries fixed, disputed versions aligned, 30 stale entries pruned; a systematic validator for future entries is still open |
 | 7, 9–14, 16 | Open |
@@ -294,8 +294,8 @@ both.
 | Stage | Marker | Status |
 |---|---|---|
 | 1 | R25 in CI, manual baseline authoritative | Done — parity gate wired; green since the 2026-11-07 R32 pruning |
-| 2 | R35–R38 tooling (`licenses-dist` workflow, archive enumeration, completeness gate) | Landed 2026-11-07 — first ground-truth run pending (dispatch "Archive license ground truth") |
-| 2 | R39 justifications confirmed by first ground-truth run | Open — justifications recorded in the 2026-11-07 curation record; archive confirmation now unblocked, pending the first dist run |
+| 2 | R35–R38 tooling (`licenses-dist` workflow, archive enumeration, completeness gate) | Landed and validated by the first ground-truth run 2026-11-07 (42374519973): 264 jars enumerated on the real tarball, R38 caught 47 unlicensed shipped jars (now listed), R36 produced the curated `archive-jar-mappings` set, R31 aligned shipped versions; expected to go green on the next run |
+| 2 | R39 justifications confirmed by first ground-truth run | Done 2026-11-07 — first run (42374519973) confirmed no curated exclusion ships, caught one that did (objenesis; un-excluded and re-listed); record: `2026-11-07-1430-Archive-Ground-Truth-First-Run.md` |
 | 2 | R32 pruning of stale manual entries | Done — 2026-11-07 curation pass; R25 green; record: `2026-11-07-1150-License-binary-Curation-R30-R31-R32.md` |
 | 3 | R40 generator (archive → `LICENSE-binary`/`NOTICE-binary`) | Open — after Stage 2 converges |
 | 3 | Manual files deleted, R25 retired, R10 re-pointed at generated baseline | Open — final state |
