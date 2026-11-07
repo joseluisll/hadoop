@@ -95,11 +95,13 @@ requested via the `workflow_dispatch` `download` input.
 - `LICENSE-gplv2-ce.txt` covers the GPLv2 with Classpath Exception
   spellings (JMH, jersey)
 
-Known limitation: test-scope libraries of test-jar modules
-(mockito-core, junit-jupiter-api, ...) still surface in the aggregate
-because test-jar artifacts carry them at compile scope; the parity gate
-reports the generated direction as INFO until the `-Pdist` tarball
-ground-truth (requirement 26) lands.
+Test tooling that enters the graph at compile scope is curated out via
+`excludedArtifacts`: `hadoop-client-minicluster` declares its test-jar
+support dependencies (mockito, jersey-test-framework, junit-jupiter...)
+at compile+optional, and some upstream SDK POMs declare test tooling at
+compile (the aliyun SDK's jacoco agent, JMH's jopt-simple, the tencent
+SDK's ini4j). The scope filter cannot see these; only the tarball
+ground-truth (requirement 26) can confirm the remaining ones.
 
 ## Not covered (yet)
 
