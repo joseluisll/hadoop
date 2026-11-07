@@ -955,12 +955,13 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
                    jopt-simple, tencent's ini4j). None of it ships; the
                    scope filter cannot see it. artifactId regex, like
                    excludedGroups unanchored.
-                   objenesis is deliberately NOT here: it ships in the
-                   binary distribution (share/hadoop/yarn/lib) and enters
-                   the graph via the hadoop-client-minicluster compile-
-                   scope support path, so the inventory must carry it —
-                   archive ground truth, run 42374519973, R39 -->
-              <excludedArtifacts>mockito-.*|junit-.*|junit-.*|opentest4j|apiguardian-api|byte-buddy(-agent)?|hamcrest|jersey-test-framework-.*|org\.jacoco\.agent|jopt-simple|ini4j</excludedArtifacts>
+                   objenesis, the jacoco agent and ini4j are deliberately
+                   NOT here: they ship in the binary distribution
+                   (objenesis via the yarn dist, jacoco+ini4j via the
+                   cloud SDK trees once -Dhadoop-*-package is on) —
+                   archive ground truth runs 42374519973/42405080846,
+                   R39 -->
+              <excludedArtifacts>mockito-.*|junit-.*|junit-.*|opentest4j|apiguardian-api|byte-buddy(-agent)?|hamcrest|jersey-test-framework-.*|jopt-simple</excludedArtifacts>
               <licenseMerges>
                 <!-- variants observed in the full-reactor run (44 detected
                      collapsed to 33, these merges target the remainder);

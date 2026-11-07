@@ -70,6 +70,26 @@ opentracing, threetenbp, joda-time, java-xmlbuilder, dom4j, jdom2,
 httpasyncclient, reactive-streams) were already listed in
 LICENSE-binary.
 
+## Verdict after curation (re-gated against run 42405080846's own data)
+
+Both archives: **R36/R38/R39 = 0** — every shipped jar in both tarballs
+is licensed and no curated exclusion ships. Remaining:
+
+- **R26 (transient, self-resolving):** org.ini4j:ini4i and
+  org.jacoco:org.jacoco.agent are absent from that run's inventory
+  because the exclusions were still active in its pom; this commit
+  removes them, so the next per-push inventory carries both and the
+  parity/archive gates go green.
+- **R31 (benign version-string mismatches):**
+  google-api-services-storage 2.0.0 (filename form) vs
+  v1-rev20250420-2.0.0 (POM form); the EclipseLink OSGi build stamps;
+  org.jacoco.agent 0.8.5-runtime (classifier form) vs 0.8.5.
+- **Parity:** fails only on the same two transient entries.
+- **WORKLIST:** 93 → the cloud-SDK entries now ship in the gated cloud
+  archive; the remaining non-shippers (kerby non-embedded set, jmh,
+  checker-qual, conscrypt, kfs, ...) are the R32 prune worklist for the
+  next pass.
+
 ## Backlog for the next convergence pass
 
 After the cloud run gates, whatever remains in the worklist on BOTH

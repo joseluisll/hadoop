@@ -219,6 +219,7 @@ com.aliyun:aliyun-java-sdk-kms:2.11.0
 com.aliyun:aliyun-java-sdk-ram:3.1.0
 com.aliyun:java-trace-api:0.2.11-beta
 com.aliyun.oss:aliyun-sdk-oss:3.13.2
+com.aliyun.oss:aliyun-sdk-oss:3.18.1
 com.baidubce:bce-java-sdk:0.10.332
 com.fasterxml.jackson.core:jackson-annotations:2.18.12
 com.fasterxml.jackson.core:jackson-core:2.18.12
@@ -249,7 +250,10 @@ com.google.cloud:google-cloud-core-grpc:2.54.2
 com.google.cloud:google-cloud-core-http:2.54.2
 com.google.cloud:google-cloud-core:2.54.2
 com.google.cloud:google-cloud-monitoring:3.52.0
+com.google.cloud:google-cloud-storage:2.52.0
+com.google.cloud.opentelemetry:detector-resources-support:0.33.0
 com.google.cloud.opentelemetry:exporter-metrics:0.33.0
+com.google.cloud.opentelemetry:shared-resourcemapping:0.33.0
 com.google.errorprone:error_prone_annotations:2.30.0
 com.google.errorprone:error_prone_annotations:2.32.0
 com.google.errorprone:error_prone_annotations:2.36.0
@@ -276,6 +280,7 @@ com.google.oauth-client:google-oauth-client:1.37.0
 com.huaweicloud:esdk-obs-java:3.20.4.2
 com.jamesmurty.utils:java-xmlbuilder:1.2
 com.nimbusds:nimbus-jose-jwt:10.4
+com.qcloud:cos_api-bundle:5.6.19
 com.squareup.okhttp3:okhttp:3.14.2
 com.squareup.okio:okio:1.17.2
 com.volcengine:ve-tos-java-sdk-hadoop:2.8.9
@@ -311,6 +316,7 @@ io.grpc:grpc-opentelemetry:1.70.0
 io.grpc:grpc-protobuf:1.69.0
 io.grpc:grpc-protobuf:1.70.0
 io.grpc:grpc-protobuf-lite:1.69.0
+io.grpc:grpc-protobuf-lite:1.70.0
 io.grpc:grpc-rls:1.70.0
 io.grpc:grpc-services:1.70.0
 io.grpc:grpc-stub:1.69.0
@@ -353,15 +359,22 @@ io.opencensus:opencensus-api:0.12.3
 io.opencensus:opencensus-api:0.31.1
 io.opencensus:opencensus-contrib-http-util:0.31.1
 io.opentelemetry.contrib:opentelemetry-gcp-resources:1.37.0-alpha
+io.opentelemetry:opentelemetry-api:1.47.0
 io.opentelemetry:opentelemetry-api:1.49.0
 io.opentelemetry:opentelemetry-api:1.59.0
+io.opentelemetry:opentelemetry-context:1.47.0
 io.opentelemetry:opentelemetry-context:1.49.0
-io.opentelemetry:opentelemetry-context:1.59.0
-io.opentelemetry:opentelemetry-sdk-common:1.59.0
-io.opentelemetry:opentelemetry-sdk-extension-autoconfigure-spi:1.59.0
+io.opentelemetry:opentelemetry-sdk:1.47.0
 io.opentelemetry:opentelemetry-sdk:1.59.0
+io.opentelemetry:opentelemetry-sdk-common:1.47.0
+io.opentelemetry:opentelemetry-sdk-common:1.59.0
+io.opentelemetry:opentelemetry-sdk-extension-autoconfigure-spi:1.47.0
+io.opentelemetry:opentelemetry-sdk-extension-autoconfigure-spi:1.59.0
+io.opentelemetry:opentelemetry-sdk-logs:1.47.0
 io.opentelemetry:opentelemetry-sdk-logs:1.59.0
+io.opentelemetry:opentelemetry-sdk-metrics:1.47.0
 io.opentelemetry:opentelemetry-sdk-metrics:1.59.0
+io.opentelemetry:opentelemetry-sdk-trace:1.47.0
 io.opentelemetry:opentelemetry-sdk-trace:1.59.0
 io.opentelemetry.semconv:opentelemetry-semconv:1.29.0-alpha
 io.perfmark:perfmark-api:0.27.0
@@ -396,6 +409,7 @@ org.apache.httpcomponents:httpclient:4.5.13
 org.apache.httpcomponents:httpcore:4.4.13
 org.apache.httpcomponents:httpcore-nio:4.4.13
 org.apache.httpcomponents:httpmime:4.5.13
+org.apache.httpcomponents.client5:httpclient5:5.6.3
 org.apache.httpcomponents.client5:httpclient5:6.3
 org.apache.httpcomponents.core5:httpcore5:5.4.3
 org.apache.httpcomponents.core5:httpcore5-h2:5.4.3
@@ -450,6 +464,7 @@ org.eclipse.jetty.websocket:websocket-common:9.4.58.v20250814
 org.eclipse.jetty.websocket:websocket-server:9.4.58.v20250814
 org.eclipse.jetty.websocket:websocket-servlet:9.4.58.v20250814
 org.ehcache:ehcache:3.8.2
+org.ini4j:ini4j:0.5.4
 org.javassist:javassist:3.30.2-GA
 org.jsonschema2pojo:jsonschema2pojo-core:1.0.2
 org.jspecify:jspecify:1.0.0
@@ -501,6 +516,7 @@ com.google.auth:google-auth-library-credentials:1.33.1
 com.google.auth:google-auth-library-oauth2-http:1.33.1
 com.google.protobuf:protobuf-java:2.5.0
 com.google.protobuf:protobuf-java:3.25.5
+com.google.protobuf:protobuf-java-util:3.25.5
 com.google.re2j:re2j:1.1
 com.jcraft:jsch:0.1.55
 jakarta.activation:jakarta.activation-api:1.2.1
@@ -538,7 +554,6 @@ hadoop-yarn-project/hadoop-yarn/hadoop-yarn-server/hadoop-yarn-server-nodemanage
 bootstrap v3.3.6
 broccoli-asset-rev v2.4.2
 broccoli-funnel v1.0.1
-cos_api-bundle-5.6.19.jar
 datatables v1.11.5
 em-helpers v0.5.13
 em-table v0.1.6
@@ -665,6 +680,11 @@ org.eclipse.persistence:org.eclipse.persistence.core:2.7.14
 org.eclipse.persistence:org.eclipse.persistence.moxy:2.7.14
 org.glassfish.jaxb:jaxb-runtime:2.3.9
 org.glassfish.jaxb:txw2:2.3.9
+
+Eclipse Public License 1.0
+--------------------------
+
+org.jacoco:org.jacoco.agent:0.8.5
 
 Eclipse Public License (EPL) 2.0
 --------------------------
