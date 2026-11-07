@@ -16,11 +16,16 @@ The root `pom.xml` defines a `licenses` profile that wires in
   part of the default flow.
 
 **Offline-first:** license texts are project data. They live in
-`texts/` (`LICENSE-<name>.txt`, seeded from SPDX and upstream sources) and
-are resolved by `resolve-licenses.sh`, which fails (with `--strict`) when
-a detected license has no local text. License names are normalized via
+`texts/` (`LICENSE-<name>.txt`) and are resolved by
+`resolve-licenses.sh`, which fails (with `--strict`) when a detected
+license has no local text. License names are normalized via
 `licenseMerges`; the canonical-name → file-slug mapping lives in
-`license-slugs.sh`, shared by both scripts.
+`license-slugs.sh`, shared by both scripts. Store provenance:
+`bouncycastle` and `cddl-gplv2-ce` are copies of the repo's own
+`licenses-binary/` texts, `edl-1.0` is the canonical eclipse.org plain
+text, and `gplv2-ce` is the JMH project's COPYING (GPLv2 plus the
+Classpath Exception); the rest were seeded from SPDX and upstream
+sources.
 
 ## Usage
 
@@ -101,7 +106,11 @@ support dependencies (mockito, jersey-test-framework, junit-jupiter...)
 at compile+optional, and some upstream SDK POMs declare test tooling at
 compile (the aliyun SDK's jacoco agent, JMH's jopt-simple, the tencent
 SDK's ini4j). The scope filter cannot see these; only the tarball
-ground-truth (requirement 26) can confirm the remaining ones.
+ground-truth (requirement 26) can confirm the remaining ones. The
+pattern matches bare artifactIds unanchored, so a new dependency whose
+artifactId contains one of these names (e.g. anything `junit-*`) is
+silently excluded too — re-audit the list whenever the dependency set
+changes.
 
 ## Not covered (yet)
 

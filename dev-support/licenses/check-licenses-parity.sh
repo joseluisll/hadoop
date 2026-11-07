@@ -38,16 +38,13 @@ set -euo pipefail
 report="$1"
 manifest="$2"
 
-# g:a pairs from the generated inventory: last group of each report line
-# is the g:a:v coordinate
+# g:a pairs from the generated inventory: the LAST parenthesized group of
+# each report line is the g:a:v coordinate (an artifact name always sits
+# between the license groups and it, and names may carry their own parens)
 generated="$(mktemp)"
 manifest_gas="$(mktemp)"
 cleanup() { rm -f "$generated" "$manifest_gas"; }
 trap cleanup EXIT
-
-# g:a pairs from the generated inventory: the LAST parenthesized group of
-# each report line is the g:a:v coordinate (an artifact name always sits
-# between the license groups and it, and names may carry their own parens)
 LC_ALL=C awk '
   {
     line = $0
@@ -89,13 +86,13 @@ extra=$(comm -13 "$manifest_gas" "$generated")
 
 if [[ -n "$missing" ]]; then
   echo "PARITY FAILURE: manual LICENSE-binary entries absent from the generated inventory:" >&2
-  printf '  %s\n' "$missing" | sed 's/^  //' >&2
+  printf '%s\n' "$missing" >&2
 fi
 if [[ -n "$extra" ]]; then
   {
     echo "INFO: generated inventory entries not in the manual manifest"
     echo "(expected: the automated collection surfaces what the manual process misses):"
-    printf '  %s\n' "$extra" | sed 's/^  //'
+    printf '%s\n' "$extra"
   } >&2
 fi
 

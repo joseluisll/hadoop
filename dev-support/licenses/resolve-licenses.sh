@@ -107,7 +107,6 @@ extract_license_names() {
 }
 
 while IFS= read -r license_name; do
-  [[ -z "$license_name" ]] && continue
   slug="$(license_slug "$license_name")"
   src="$texts_dir/LICENSE-$slug.txt"
   if [[ -f "$src" ]]; then

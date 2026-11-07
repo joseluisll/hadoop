@@ -963,11 +963,10 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
                 <licenseMerge>The Apache Software License, Version 2.0|Apache License, Version 2.0|Apache License 2.0|Apache License, 2.0|The Apache License, Version 2.0|Apache Software License - Version 2.0|Apache-2.0|Apache 2|Apache 2.0|Apache 2.0 License|Apache License V2.0|Apache License v2.0</licenseMerge>
                 <licenseMerge>MIT License|The MIT License|MIT|MIT license</licenseMerge>
                 <licenseMerge>BSD 2-Clause License|BSD 2-Clause|BSD-2-Clause</licenseMerge>
-                <licenseMerge>Revised BSD|Modified BSD|New BSD License|BSD 3-Clause|The BSD 3-Clause License|BSD New license|BSD-3-Clause</licenseMerge>
-                <!-- stax2-api, dom4j, jdom2 and jline declare the generic
-                     "BSD License" but all four are 3-clause BSD, so fold
-                     them into the 3-clause name -->
-                <licenseMerge>Revised BSD|BSD License|The BSD License|Similar to Apache License but with the acknowledgment clause removed|Plexus</licenseMerge>
+                <!-- 3-clause BSD under all its spellings; the generic
+                     "BSD License" carriers (stax2-api, dom4j, jdom2,
+                     jline) are all 3-clause BSD, so they fold in here -->
+                <licenseMerge>Revised BSD|Modified BSD|New BSD License|BSD 3-Clause|The BSD 3-Clause License|BSD New license|BSD-3-Clause|BSD License|The BSD License|Similar to Apache License but with the acknowledgment clause removed|Plexus</licenseMerge>
                 <!-- Tencent COS SDK declares its license name as
                      "cos-java-sdk-bundle"; the SDK is Apache-2.0
                      (github.com/tencentyun/cos-java-sdk-v5) -->
