@@ -519,8 +519,6 @@ com.google.protobuf:protobuf-java:3.25.5
 com.google.protobuf:protobuf-java-util:3.25.5
 com.google.re2j:re2j:1.1
 com.jcraft:jsch:0.1.55
-jakarta.activation:jakarta.activation-api:1.2.1
-org.checkerframework:checker-qual:3.49.0
 org.fusesource.leveldbjni:leveldbjni-all:1.8
 org.jline:jline:3.30.14
 org.ow2.asm:asm-commons:9.7.1
@@ -646,6 +644,7 @@ com.microsoft.sqlserver:mssql-jdbc:6.2.1.jre7
 org.bouncycastle:bcpkix-jdk18on:1.85
 org.bouncycastle:bcprov-jdk18on:1.85
 org.bouncycastle:bcutil-jdk18on:1.85
+org.checkerframework:checker-qual:3.49.0
 org.codehaus.mojo:animal-sniffer-annotations:1.24
 org.jruby.jcodings:jcodings:1.0.13
 org.ojalgo:ojalgo:43.0
@@ -672,6 +671,7 @@ Eclipse Distribution License (EDL) 1.0
 
 com.sun.activation:jakarta.activation:1.2.2
 com.sun.istack:istack-commons-runtime:3.0.12
+jakarta.activation:jakarta.activation-api:1.2.1
 jakarta.xml.bind:jakarta.xml.bind-api:2.3.3
 org.eclipse.collections:eclipse-collections:11.1.0
 org.eclipse.collections:eclipse-collections-api:11.1.0

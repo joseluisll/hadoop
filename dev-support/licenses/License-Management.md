@@ -235,7 +235,7 @@ audit (37 bundled-but-unlisted jars; jacoco/ini4j listed yet absent).
 | 34 | Implemented — full `mvn install` reactor, no `-pl` scoping |
 | 25 | Implemented — `check-licenses-parity.sh` in CI, green since the 2026-11-07 curation pass; `assembly-includes` carries the justified off-graph exceptions |
 | 26–27 | Implemented and validated by the first ground-truth run 2026-11-07 (42374519973): the real tarball was enumerated (264 jars incl. the catalog webapp WAR's nested libs), R38 caught 47 unlicensed shipped jars, R36/R37 mapping curated; gate bugs found by the run were fixed (see the run record) |
-| 28–29 | Partially — override mechanism exists; disambiguation policy not yet curated |
+| 28–29 | **28 Done 2026-11-07** — curated multi-license policy (`Multi-License-Policy.md`: prefer Apache-2.0, then EDL, then EPL-2.0; jersey/hk2 keep their combined section) applied to the shipped manifest, two misplaced entries corrected (checker-qual → MIT, jakarta.activation-api → EDL; record: `2026-11-07-1630-R28-Policy-Application.md`). 29 Partially — override mechanism exists; disambiguation policy done, no-metadata justification coverage still partial |
 | 30–32 | Addressed by the 2026-11-07 curation pass (record: `2026-11-07-1150-License-binary-Curation-R30-R31-R32.md`): known malformed entries fixed, disputed versions aligned, 30 stale entries pruned; a systematic validator for future entries is still open |
 | 7, 9–14, 16 | Open |
 | 35–38 | Landed 2026-11-07 — `licenses-dist.yml` (weekly + `workflow_dispatch`), archive enumeration incl. WAR-nested jars, archive-completeness and archive-vs-inventory gates; validated by the first ground-truth run |
