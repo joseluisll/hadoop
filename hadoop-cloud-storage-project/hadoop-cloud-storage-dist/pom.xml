@@ -248,6 +248,17 @@ mvn package -Pdist -DskipTests -Dtar -Dmaven.javadoc.skip=true \
           <groupId>org.apache.hadoop</groupId>
           <artifactId>hadoop-aliyun</artifactId>
           <scope>compile</scope>
+          <exclusions>
+            <!-- aliyun-sdk-oss's java-trace-api pulls opentelemetry-api
+                 1.38.0, which fails DependencyConvergence against
+                 google-cloud-storage's 1.47.0 when the SDKs are combined;
+                 the otel api is runtime-tolerant across those minors, the
+                 newer version wins -->
+            <exclusion>
+              <groupId>io.opentelemetry</groupId>
+              <artifactId>*</artifactId>
+            </exclusion>
+          </exclusions>
         </dependency>
       </dependencies>
     </profile>
