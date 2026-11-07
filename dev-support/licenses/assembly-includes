@@ -11,5 +11,12 @@
 # Ground truth is the assembled archive (requirement 26): the Stage-2 dist
 # run must confirm each of these actually ships; one that does not ship
 # shall be removed from LICENSE-binary (requirement 32).
-
-org.hsqldb:hsqldb # test (jobclient) / provided (mapreduce-examples) scope in the poms, but shipped in share/hadoop/mapreduce/lib-examples and share/hadoop/yarn/lib by the hadoop-mapreduce-dist.xml and hadoop-yarn-dist.xml assembly includes
+#
+# No entries currently: the first ground-truth run (42380708044,
+# 2026-11-07) enumerated 637 jars and found NO hsqldb — the
+# hadoop-mapreduce-dist.xml lib-examples include does not resolve the
+# provided-scope dependency, so the jar never reaches the tarball. The
+# former hsqldb exception and LICENSE-binary listing were pruned on that
+# evidence (record: 2026-11-07-1430-Archive-Ground-Truth-First-Run.md);
+# if a future run ships hsqldb, the archive gate fails it as unlicensed
+# and the entry comes back with evidence.

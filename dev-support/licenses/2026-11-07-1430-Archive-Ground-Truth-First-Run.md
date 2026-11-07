@@ -112,6 +112,32 @@ Section placement for dual/triple-licensed entries is first-license or
 existing-precedent and is provisional until the R28 multi-license
 policy is curated.
 
+## Addendum: the hsqldb assembly include was dead
+
+The second ground-truth run (42380708044, green) enumerated 637 jars on
+the freshly built tarball and found **no hsqldb jar at all**: the
+`hadoop-mapreduce-dist.xml` / `hadoop-yarn-dist.xml` lib-examples
+`<include>` never resolves — hsqldb is provided/test-scoped in the
+consuming poms, so no jar reaches the tarball. The 2026-11-06 review's
+R2 finding ("hsqldb ... ships in the dist's lib-examples") was inferred
+from the assembly descriptors, not from a built archive; the ground
+truth corrects it.
+
+**Action:** `org.hsqldb:hsqldb:2.7.1` pruned from LICENSE-binary (the
+emptied HSQL section dropped, R32) and the hsqldb entry pruned from
+`dev-support/licenses/assembly-includes` — a dead exception is removed,
+not kept. The parity gate's includes parsing also needed an empty-set
+guard (grep with no matching lines killed the script under pipefail
+once the file held only comments). If a future build ships hsqldb, the
+archive gate fails it as unlicensed and the entries return with
+evidence.
+
+Final gate state on the green run: 637 jars — 221 third-party g:a
+licensed, 79 own jars, 0 partial, 0 unmapped, zero R26/R38/R39
+failures, zero R31 warnings; the 93-entry WORKLIST (cloud-store SDKs
+that ship only in the cloud-storage tarball, google-cloud coordinates
+shaded into hadoop-gcp) remains the Stage-2 convergence backlog.
+
 ## Backlog (not failing, tracked)
 
 - **Known-benign R31 warnings after this pass:** the EclipseLink

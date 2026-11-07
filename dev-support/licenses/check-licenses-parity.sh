@@ -106,8 +106,10 @@ expected=""
 if [[ -n "$includes" ]]; then
   includes_gas="$(mktemp)"
   cleanup() { rm -f "$generated" "$manifest_gas" "$includes_gas"; }
+  # an all-comments includes file is a valid empty exception set (grep
+  # exits 1 with no matches; pipefail must not kill the gate)
   grep -vE '^[[:space:]]*(#|$)' "$includes" \
-    | awk '{print tolower($1)}' | LC_ALL=C sort -u > "$includes_gas"
+    | awk '{print tolower($1)}' | LC_ALL=C sort -u > "$includes_gas" || true
   # an exception that is already covered by the inventory is stale
   stale=$(comm -12 "$includes_gas" "$generated")
   if [[ -n "$stale" ]]; then

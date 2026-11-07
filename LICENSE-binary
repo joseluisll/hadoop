@@ -697,12 +697,6 @@ org.glassfish.jersey.media:jersey-media-json-jettison:2.46
 org.glassfish.jersey.media:jersey-media-jaxb:2.46
 
 
-HSQL License
-------------
-
-org.hsqldb:hsqldb:2.7.1
-
-
 JDOM License
 ------------
 
