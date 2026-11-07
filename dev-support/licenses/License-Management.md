@@ -240,7 +240,7 @@ audit (37 bundled-but-unlisted jars; jacoco/ini4j listed yet absent).
 | 7, 9–14, 16 | Open |
 | 35–38 | Landed 2026-11-07 — `licenses-dist.yml` (weekly + `workflow_dispatch`), archive enumeration incl. WAR-nested jars, archive-completeness and archive-vs-inventory gates; validated by the first ground-truth run |
 | 39 | Exclusion justifications recorded (2026-11-07 curation record + README); archive confirmation starts with the first dist run |
-| 40 | Open — after Stage 2 converges |
+| 40 | Landed for LICENSE-binary 2026-11-07 — `generate-archive-manifest.py` derives the manifest from the enumerated archives + inventory + R28 policy, fail-closed; validated against run 42413534907 (record: `2026-11-07-1730-R40-Generator.md`). NOTICE-binary stays curated (attribution corpus is prose; protected by R10) |
 
 ## Transition plan: from the manual gate to archive-derived licensing
 
