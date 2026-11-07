@@ -414,21 +414,13 @@ org.apache.httpcomponents.client5:httpclient5:6.3
 org.apache.httpcomponents.core5:httpcore5:5.4.3
 org.apache.httpcomponents.core5:httpcore5-h2:5.4.3
 org.apache.kafka:kafka-clients:3.9.2
-org.apache.kerby:kerb-admin:2.0.3
-org.apache.kerby:kerb-client:2.0.3
-org.apache.kerby:kerb-common:2.0.3
 org.apache.kerby:kerb-core:2.0.3
 org.apache.kerby:kerb-crypto:2.0.3
-org.apache.kerby:kerb-identity:2.0.3
-org.apache.kerby:kerb-server:2.0.3
-org.apache.kerby:kerb-simplekdc:2.0.3
 org.apache.kerby:kerb-util:2.0.3
 org.apache.kerby:kerby-asn1:2.0.3
 org.apache.kerby:kerby-config:2.0.3
 org.apache.kerby:kerby-pkix:2.0.3
 org.apache.kerby:kerby-util:2.0.3
-org.apache.kerby:kerby-xdr:2.0.3
-org.apache.kerby:token-provider:2.0.3
 org.apache.solr:solr-solrj:8.11.2
 org.apache.yetus:audience-annotations:0.5.0
 org.apache.yetus:audience-annotations:0.12.0
@@ -663,7 +655,6 @@ javax.cache:cache-api:1.1.1
 javax.servlet:javax.servlet-api:3.1.0
 javax.websocket:javax.websocket-api:1.0
 javax.websocket:javax.websocket-client-api:1.0
-javax.ws.rs:jsr311-api:1.1.1
 org.glassfish:javax.json:1.1.4
 
 Eclipse Distribution License (EDL) 1.0
@@ -712,7 +703,6 @@ org.glassfish.jersey.core:jersey-common:2.46
 org.glassfish.jersey.core:jersey-server:2.46
 org.glassfish.jersey.inject:jersey-hk2:2.46
 org.glassfish.jersey.core:jersey-client:2.46
-org.glassfish.jersey.containers:jersey-container-jdk-http:2.46
 org.glassfish.jersey.containers:jersey-container-servlet:2.46
 org.glassfish.jersey.containers:jersey-container-servlet-core:2.46
 org.glassfish.jersey.media:jersey-media-json-jettison:2.46
