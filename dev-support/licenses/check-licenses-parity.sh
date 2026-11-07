@@ -85,11 +85,19 @@ LC_ALL=C awk '
 
 # g:a pairs from the manual manifest: lines that look like g:a[:v];
 # tolerate the known malformed entries by taking the first two fields
+# (an empty match set must not kill the script under pipefail)
 grep -E '^[a-z][a-zA-Z0-9._-]*(:[a-zA-Z0-9._=-]+)+' "$manifest" \
-  | sed 's/\.jar$//' | LC_ALL=C awk -F: '{print tolower($1) ":" $2}' | LC_ALL=C sort -u > "$manifest_gas"
+  | sed 's/\.jar$//' | LC_ALL=C awk -F: '{print tolower($1) ":" $2}' | LC_ALL=C sort -u > "$manifest_gas" || true
 
 missing=$(comm -23 "$manifest_gas" "$generated")
 extra=$(comm -13 "$manifest_gas" "$generated")
+
+# a manifest that parsed to zero g:a entries is a broken input, not a
+# vacuous pass — every manual entry cannot be "covered" by nothing
+if [[ ! -s "$manifest_gas" ]]; then
+  echo "PARITY FAILURE: no g:a entries parsed from $manifest" >&2
+  exit 1
+fi
 
 # jars that ship via assembly includes and are legitimately off-graph
 expected=""

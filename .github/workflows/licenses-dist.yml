@@ -1,0 +1,112 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied.  See the License for the specific
+# language governing permissions and limitations under the License.
+
+# Archive ground truth for the license inventory (requirements 35-38 of
+# dev-support/licenses/License-Management.md). Assembling the binary
+# tarball needs the Docker native-build environment and hours-scale time
+# the per-push budget does not have, so this runs as its own concern:
+# weekly plus manual dispatch. It complements the per-push graph gate
+# (licenses.yml) — neither replaces the other.
+#
+# Steps: build the dist tarball + graph inventory in the Docker build env,
+# enumerate every jar in every assembled tarball (WAR-nested included),
+# then gate each archive against ITS OWN LICENSE-binary (R38 compliance
+# direction), the graph inventory (R26/R27), and the curated exclusions
+# (R39 confirmation).
+name: Archive license ground truth
+
+on:
+  schedule:
+    # weekly, Sunday 03:00 UTC
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dist-archive-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Same image the Hadoop CI uses, with the full native toolchain.
+      # One reactor pass installs the modules (the aggregate goal resolves
+      # artifacts from the local repository) and assembles the tarball;
+      # the direct goal invocation then builds the root THIRD-PARTY
+      # inventory, as in licenses.yml.
+      - name: Build dist tarball and inventory (Docker build env)
+        run: >-
+          DOCKER_INTERACTIVE_RUN= ./start-build-env.sh ubuntu_24 bash -c
+          'mvn -B -ntp install -Pdist,native -DskipTests -Dtar
+          -Dmaven.javadoc.skip=true -Dcheckstyle.skip=true -Drat.skip=true
+          -Dspotbugs.skip=true
+          && mvn -B -ntp -Plicenses -DskipTests
+          org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party'
+
+      # R36: enumerate every jar in every assembled archive, then gate
+      # each archive against the LICENSE-binary it actually ships (R38),
+      # the graph inventory (R26/R27) and the curated exclusions (R39).
+      # The dist build produces hadoop-dist/target/hadoop-<version>.tar.gz
+      # (cloud-storage tarballs appear too when their -Dhadoop-*-package
+      # profiles are enabled).
+      - name: Enumerate archives and run the archive gates
+        run: |
+          set -euo pipefail
+          mkdir -p target/archive-ground-truth
+          status=0
+          found=0
+          while IFS= read -r tar; do
+            found=1
+            name="$(basename "$tar" .tar.gz)"
+            dir="target/archive-ground-truth/$name"
+            mkdir -p "$dir/untarred"
+            echo "::group::$name"
+            tar -xzf "$tar" -C "$dir/untarred"
+            python3 dev-support/licenses/enumerate-archive-jars.py \
+              "$dir/untarred" -o "$dir/archive-jars.tsv"
+            lb="$(find "$dir/untarred" -maxdepth 2 -name LICENSE-binary -print -quit)"
+            if [[ -n "$lb" ]]; then
+              dev-support/licenses/check-archive-licenses.sh \
+                "$dir/archive-jars.tsv" \
+                "$lb" \
+                target/third-party/THIRD-PARTY.txt \
+                . | tee "$dir/gate.log" || status=1
+            else
+              echo "R38 FAILURE: $tar ships no LICENSE-binary — every jar in it is unlicensed" | tee "$dir/gate.log"
+              status=1
+            fi
+            echo "::endgroup::"
+          done < <(find . -path ./.git -prune -o -path './target' -prune -o \
+                    -name '*.tar.gz' -path '*/target/*' -print \
+                    | grep -v -- '-src\.tar\.gz$')
+          if [[ "$found" -eq 0 ]]; then
+            echo "no distribution tarball produced by the build" >&2
+            exit 1
+          fi
+          exit "$status"
+
+      - name: Upload archive ground truth
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-ground-truth
+          path: |
+            target/third-party/**
+            target/archive-ground-truth/**
+          if-no-files-found: warn

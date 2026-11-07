@@ -1,0 +1,21 @@
+# Curated archive-jar mappings (requirement 36 of
+# dev-support/licenses/License-Management.md).
+#
+# Jars in the assembled archive that resist automatic g:a normalization —
+# shaded jars whose own pom.properties is absent (the enumeration then
+# knows only the artifactId from the manifest/filename) or jars with no
+# metadata at all. The archive gate (check-archive-licenses.sh) promotes
+# matching rows before any check runs; a mapped jar is classified by its
+# real group like any other (own org.apache.hadoop jars are exempt from
+# third-party checks, everything else must be licensed in LICENSE-binary).
+#
+# Format: `stem g:a # justification` — stem is the jar filename without
+# the version and .jar (the manifest/filename artifactId the enumeration
+# reports). The version comes from the jar itself; the mapping pins only
+# the identity.
+#
+# Every entry is confirmed by the next ground-truth run: a mapping whose
+# jar stops shipping, or whose stem now resolves automatically, is stale
+# and must be pruned.
+
+hadoop-client-runtime org.apache.hadoop:hadoop-client-runtime # shaded client jar: keeps 71 embedded pom.properties but none of its own; our artifact, covered by the archive's top-level Apache LICENSE

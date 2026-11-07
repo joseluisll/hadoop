@@ -1,0 +1,20 @@
+# Shaded-jar mapping (requirement 37 of
+# dev-support/licenses/License-Management.md).
+#
+# When a shipping jar relocates and embeds other artifacts, the archive's
+# view (one jar) wins over the graph's view (several GAVs) for completeness
+# checks; the embedded artifacts' licenses still apply and their texts stay
+# in the resolved set. This file records which coordinates are embedded in
+# which top-level jar, so check-archive-licenses.sh can annotate
+# inventory entries that have no standalone jar in the archive.
+#
+# Format: `g:a # embedded in <top-level jar> — justification`
+# Lines starting with # are comments and do not count as mappings.
+#
+# The list is curated from the first ground-truth run's WORKLIST output
+# (the archive-vs-inventory comparison). Known shading sites to curate
+# from, per the v2.1 requirements analysis:
+#   - hadoop-gcp shades opencensus and google-cloud classes into itself
+#   - the hadoop-client-api/runtime jars shade their dependencies via
+#     hadoop-thirdparty
+# No entries are asserted until confirmed against the assembled archive.

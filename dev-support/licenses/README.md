@@ -70,6 +70,33 @@ local store (`--strict`), runs the parity gate against the manual
 all offline. Downloading from the network runs only when explicitly
 requested via the `workflow_dispatch` `download` input.
 
+## Archive ground truth (weekly / on demand)
+
+`.github/workflows/licenses-dist.yml` (requirement 35) assembles the
+binary tarball in the Docker build environment, then enumerates every jar
+in it — including jars nested inside WARs (requirements 26, 27, 36) —
+and gates each archive against:
+
+- the `LICENSE-binary` the archive itself ships (requirement 38, the
+  compliance direction: a shipped jar whose license the archive's
+  license file does not state is a failure),
+- the graph inventory `THIRD-PARTY.txt` (requirement 26), with
+  `assembly-includes` as the expected off-graph exception,
+- the root pom's `excludedArtifacts` curation (requirement 39: a curated
+  exclusion that turns out to ship is a failure),
+- the `shaded-jars` mapping (requirement 37) for graph entries shaded
+  into top-level jars.
+
+The tools also run standalone against any tarball or exploded layout:
+
+```bash
+python3 dev-support/licenses/enumerate-archive-jars.py \
+  hadoop-dist/target/hadoop-<version>.tar.gz -o archive-jars.tsv
+dev-support/licenses/check-archive-licenses.sh \
+  archive-jars.tsv <extracted>/hadoop-<version>/LICENSE-binary \
+  target/third-party/THIRD-PARTY.txt
+```
+
 ## Curation files
 
 - `override-THIRD-PARTY.properties` — license overrides for dependencies
@@ -79,6 +106,11 @@ requested via the `workflow_dispatch` `download` input.
   are absent from the Maven compile/runtime graph (e.g. hsqldb in
   lib-examples). The parity gate treats them as expected absences and
   fails if one shows up in the inventory (a stale exception).
+- `archive-jar-mappings` — filename stem to `g:a` for archive jars that
+  resist automatic normalization (shaded jars whose own pom.properties is
+  absent). The archive gate promotes matching rows before any check;
+  own `org.apache.hadoop` jars become exempt, third-party ones must be
+  licensed.
 
 ## Refinements after the first manual-vs-automated comparison
 
