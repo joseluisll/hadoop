@@ -18,17 +18,24 @@
 # dev-support/licenses/License-Management.md). Assembling the binary
 # tarball needs the Docker native-build environment and hours-scale time
 # the per-push budget does not have, so this runs as its own concern:
-# weekly plus manual dispatch. It complements the per-push graph gate
-# (licenses.yml) — neither replaces the other.
+# weekly, manual dispatch, and on pushes that change the archive tooling
+# itself. It complements the per-push graph gate (licenses.yml) — neither
+# replaces the other.
 #
-# Steps: build the dist tarball + graph inventory in the Docker build env,
-# enumerate every jar in every assembled tarball (WAR-nested included),
-# then gate each archive against ITS OWN LICENSE-binary (R38 compliance
-# direction), the graph inventory (R26/R27), and the curated exclusions
-# (R39 confirmation).
+# The paths-filtered push trigger also exists for a GitHub limitation:
+# workflow_dispatch only reaches workflows registered from the default
+# branch; a workflow that has run via push gets registered, so the filter
+# (tooling paths only) both enables dispatch and re-validates the archive
+# whenever this tooling changes.
 name: Archive license ground truth
 
 on:
+  push:
+    branches:
+      - feat/LICENSES
+    paths:
+      - '.github/workflows/licenses-dist.yml'
+      - 'dev-support/licenses/**'
   schedule:
     # weekly, Sunday 03:00 UTC
     - cron: '0 3 * * 0'
