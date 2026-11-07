@@ -52,6 +52,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # A fresh runner has no ~/.m2: Docker would create the bind-mount
+      # source root-owned, and the in-container user (uid 1001) then
+      # cannot create the local Maven repository — pre-create it as the
+      # runner user instead (same for ~/.gnupg, also bind-mounted).
+      - name: Prepare bind-mount sources for the Docker build env
+        run: mkdir -p "$HOME/.m2/repository" "$HOME/.gnupg"
+
       # Same image the Hadoop CI uses, with the full native toolchain.
       # One reactor pass installs the modules (the aggregate goal resolves
       # artifacts from the local repository) and assembles the tarball;
