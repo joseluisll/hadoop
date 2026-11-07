@@ -32,11 +32,18 @@
 # is expected in the generated direction and listed only for information.
 #
 # Usage: check-licenses-parity.sh <THIRD-PARTY.txt> <LICENSE-binary>
-#   exit 1 when any manual g:a is absent from the generated inventory
+#                               [assembly-includes]
+#   exit 1 when any manual g:a is absent from the generated inventory,
+#          unless it is listed (with a justification) in the optional
+#          assembly-includes file: jars that ship via assembly includes
+#          and are legitimately outside the compile/runtime graph.
+#   exit 1 when an assembly-includes entry IS in the generated inventory
+#          (the exception is stale and must be pruned).
 set -euo pipefail
 
 report="$1"
 manifest="$2"
+includes="${3:-}"
 
 # g:a pairs from the generated inventory: the LAST parenthesized group of
 # each report line is the g:a:v coordinate (an artifact name always sits
@@ -84,6 +91,26 @@ grep -E '^[a-z][a-zA-Z0-9._-]*(:[a-zA-Z0-9._=-]+)+' "$manifest" \
 missing=$(comm -23 "$manifest_gas" "$generated")
 extra=$(comm -13 "$manifest_gas" "$generated")
 
+# jars that ship via assembly includes and are legitimately off-graph
+expected=""
+if [[ -n "$includes" ]]; then
+  includes_gas="$(mktemp)"
+  cleanup() { rm -f "$generated" "$manifest_gas" "$includes_gas"; }
+  grep -vE '^[[:space:]]*(#|$)' "$includes" \
+    | awk '{print tolower($1)}' | LC_ALL=C sort -u > "$includes_gas"
+  # an exception that is already covered by the inventory is stale
+  stale=$(comm -12 "$includes_gas" "$generated")
+  if [[ -n "$stale" ]]; then
+    echo "STALE assembly-includes entries (already in the generated inventory, prune them from $includes):" >&2
+    printf '%s\n' "$stale" >&2
+    exit 1
+  fi
+  if [[ -n "$missing" ]]; then
+    expected=$(comm -12 "$includes_gas" <(printf '%s\n' "$missing"))
+    missing=$(comm -23 <(printf '%s\n' "$missing") "$includes_gas")
+  fi
+fi
+
 if [[ -n "$missing" ]]; then
   echo "PARITY FAILURE: manual LICENSE-binary entries absent from the generated inventory:" >&2
   printf '%s\n' "$missing" >&2
@@ -93,6 +120,13 @@ if [[ -n "$extra" ]]; then
     echo "INFO: generated inventory entries not in the manual manifest"
     echo "(expected: the automated collection surfaces what the manual process misses):"
     printf '%s\n' "$extra"
+  } >&2
+fi
+
+if [[ -n "$expected" ]]; then
+  {
+    echo "expected: manual entries shipped via assembly includes (see dev-support/licenses/assembly-includes):"
+    printf '%s\n' "$expected"
   } >&2
 fi
 

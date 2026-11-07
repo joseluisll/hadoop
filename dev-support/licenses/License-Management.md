@@ -233,10 +233,10 @@ audit (37 bundled-but-unlisted jars; jacoco/ini4j listed yet absent).
 | 8 | Existing (Apache RAT) |
 | 20–24 | Implemented (licenseMerges, overrideUrl, includeOptional, excludedGroups, license-slugs.sh) |
 | 34 | Implemented — full `mvn install` reactor, no `-pl` scoping |
-| 25 | Implemented — `check-licenses-parity.sh` in CI; currently failing on the known-stale `LICENSE-binary` entries pending R32 pruning |
+| 25 | Implemented — `check-licenses-parity.sh` in CI, green since the 2026-11-07 curation pass; `assembly-includes` carries the justified off-graph exceptions |
 | 26–27 | Open — requires the dist-tarball run (now specified by R35–R38) |
 | 28–29 | Partially — override mechanism exists; disambiguation policy not yet curated |
-| 30–32 | Open |
+| 30–32 | Addressed by the 2026-11-07 curation pass (record: `2026-11-07-1150-License-binary-Curation-R30-R31-R32.md`): known malformed entries fixed, disputed versions aligned, 30 stale entries pruned; a systematic validator for future entries is still open |
 | 7, 9–14, 16 | Open |
 | 35–40 | Open — this revision; the archive ground-truth tooling is the next build step |
 
@@ -249,8 +249,12 @@ is dropped before its replacement covers it.
 **Stage 1 — manual baseline (current).** The hand-maintained
 `LICENSE-binary` is the only cheap approximation of "what ships", so the
 per-push parity gate (R25) compares the graph inventory against it.
-The gate is currently red on the known-stale manual entries; that is
-the intended state until R32 pruning fixes the baseline.
+The gate was red on the known-stale manual entries until the R32 pruning
+of 2026-11-07 fixed the baseline (30 stale entries pruned, malformed
+entries fixed, versions aligned — see
+`dev-support/licenses/2026-11-07-1150-License-binary-Curation-R30-R31-R32.md`);
+it is green now, failing only on genuine regressions plus the justified
+`assembly-includes` exceptions (hsqldb).
 
 **Stage 2 — ground truth in parallel (R35–R38 landed, R40 not yet).**
 The dist-build run enumerates the actual archive (R36) and two new
@@ -287,10 +291,10 @@ both.
 
 | Stage | Marker | Status |
 |---|---|---|
-| 1 | R25 in CI, manual baseline authoritative | Done — parity gate wired, red on stale entries as intended |
+| 1 | R25 in CI, manual baseline authoritative | Done — parity gate wired; green since the 2026-11-07 R32 pruning |
 | 2 | R35–R38 tooling (`licenses-dist` workflow, archive enumeration, completeness gate) | Open — next build step |
-| 2 | R39 justifications confirmed by first ground-truth run | Open — blocked on the step above |
-| 2 | R32 pruning of stale manual entries | Open — turns R25 green; prerequisite for trusting Stage-3 deletion |
+| 2 | R39 justifications confirmed by first ground-truth run | Open — justifications recorded in the 2026-11-07 curation record; archive confirmation blocked on the step above |
+| 2 | R32 pruning of stale manual entries | Done — 2026-11-07 curation pass; R25 green; record: `2026-11-07-1150-License-binary-Curation-R30-R31-R32.md` |
 | 3 | R40 generator (archive → `LICENSE-binary`/`NOTICE-binary`) | Open — after Stage 2 converges |
 | 3 | Manual files deleted, R25 retired, R10 re-pointed at generated baseline | Open — final state |
 

@@ -40,7 +40,8 @@ dev-support/licenses/resolve-licenses.sh \
   dev-support/licenses/texts \
   target/licenses-resolved --strict
 dev-support/licenses/check-licenses-parity.sh \
-  target/third-party/THIRD-PARTY.txt LICENSE-binary
+  target/third-party/THIRD-PARTY.txt LICENSE-binary \
+  dev-support/licenses/assembly-includes
 ```
 
 For a quick local iteration over a single module:
@@ -74,6 +75,10 @@ requested via the `workflow_dispatch` `download` input.
 - `override-THIRD-PARTY.properties` — license overrides for dependencies
   with missing or wrong POM metadata
   (`groupId--artifactId--version=License Name`).
+- `assembly-includes` — `g:a` entries that ship via assembly includes but
+  are absent from the Maven compile/runtime graph (e.g. hsqldb in
+  lib-examples). The parity gate treats them as expected absences and
+  fails if one shows up in the inventory (a stale exception).
 
 ## Refinements after the first manual-vs-automated comparison
 
@@ -119,7 +124,3 @@ changes.
 - Wiring the generated texts into `hadoop-dist`/`hadoop-assemblies` so the
   tarball ships them automatically.
 - Whitelist/audit policy enforcement (allowed-license gating).
-- The stale manual `LICENSE-binary` entries (hamcrest-core, sshd-*,
-  htrace-*, wro4j-maven-plugin, junit, ...) still need pruning; until then
-  the parity gate fails on them and they keep the manual baseline
-  authoritative.

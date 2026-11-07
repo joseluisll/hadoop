@@ -93,6 +93,7 @@ jobs:
           dev-support/licenses/check-licenses-parity.sh
           target/third-party/THIRD-PARTY.txt
           LICENSE-binary
+          dev-support/licenses/assembly-includes
 
       # optional, on demand only
       - name: Download license texts from the network
