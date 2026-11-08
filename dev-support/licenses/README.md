@@ -180,7 +180,9 @@ ground-truth (requirement 26) can confirm the remaining ones. The plugin
 wraps the pattern as `[^:]+:[^:]*(PATTERN)[^:]*`, which makes a bare
 alternative a substring match (`junit-.*` would also exclude
 `my-junit-extras`), so it is written anchored, `(?<=:)(?:alt|...)$`, and
-matches whole artifactIds only (requirement 47). The archive gate
+matches whole artifactIds only (requirement 47). In the pom the
+lookbehind's `<` must be written `&lt;`: a bare `<` is not well-formed XML
+and Maven refuses to read the pom. The archive gate
 (`check-archive-licenses.sh`, requirement 39) reads the same element,
 fails unless it has that anchored form or if an alternative is listed
 twice, and matches the alternatives as `^(alt|...)$`.

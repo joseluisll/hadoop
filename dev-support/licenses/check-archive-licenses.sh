@@ -112,6 +112,11 @@ if [[ -f "$root/pom.xml" ]]; then
 else
   exclude_pattern=""
 fi
+# the pom is XML: decode the entities as Maven does before handing the
+# pattern to the plugin (the lookbehind's < is written &lt;)
+exclude_pattern="${exclude_pattern//&lt;/<}"
+exclude_pattern="${exclude_pattern//&gt;/>}"
+exclude_pattern="${exclude_pattern//&amp;/"&"}"
 
 # R47: the pom pattern must be anchored. The plugin matches "g:a" against
 # [^:]+:[^:]*(PATTERN)[^:]*, so a bare alternative (junit-.*) is a substring

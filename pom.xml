@@ -961,7 +961,9 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
                    [^:]+:[^:]*(PATTERN)[^:]*, so a bare alternative is a
                    substring match (junit-.* also excluded my-junit-extras);
                    the (?<=:) lookbehind and $ make every alternative match
-                   the whole artifactId. check-archive-licenses.sh (R39)
+                   the whole artifactId (the < of the lookbehind is written
+                   &lt; - a bare < is not well-formed XML; Maven decodes it).
+                   check-archive-licenses.sh (R39)
                    reads this element, requires exactly this
                    (?<=:)(?:...)$ form and rejects duplicate alternatives.
                    objenesis, the jacoco agent and ini4j are deliberately
@@ -970,7 +972,7 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
                    cloud SDK trees once -Dhadoop-*-package is on) —
                    archive ground truth runs 42374519973/42405080846,
                    R39 -->
-              <excludedArtifacts>(?<=:)(?:mockito-.*|junit-.*|opentest4j|apiguardian-api|byte-buddy(-agent)?|hamcrest(-.*)?|jersey-test-framework-.*|jopt-simple)$</excludedArtifacts>
+              <excludedArtifacts>(?&lt;=:)(?:mockito-.*|junit-.*|opentest4j|apiguardian-api|byte-buddy(-agent)?|hamcrest(-.*)?|jersey-test-framework-.*|jopt-simple)$</excludedArtifacts>
               <licenseMerges>
                 <!-- variants observed in the full-reactor run (44 detected
                      collapsed to 33, these merges target the remainder);
