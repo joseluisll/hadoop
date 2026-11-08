@@ -91,6 +91,22 @@ jobs:
       # from the last archive-derived manifest. (It replaces the R25
       # parity gate against the hand-maintained manifest, retired with
       # the Stage 3 switch.)
+      #
+      # Selection is commit-aware, branching on the state of the archive
+      # run for THIS commit:
+      # - succeeded: that run's own R40 gate is the like-for-like
+      #   authority (it compares the committed file against a manifest
+      #   generated from its own archives) — defer to it.
+      # - still running: the comparison would read a stale baseline (the
+      #   40+-minute archive run has not published its manifest yet), so
+      #   defer; when it finishes it validates the manifest itself, and
+      #   if it fails the branch shows a red run.
+      # - failed: the committed manifest was never validated for this
+      #   commit — fail here too rather than silently pass.
+      # Only when this commit has no archive run — its paths did not hit
+      # the dist workflow's filter, so LICENSE-binary and every other
+      # manifest input are unchanged — is the previous commit's baseline
+      # a valid comparison target.
       - name: Drift gate vs the last archive-derived manifest
         if: always()
         env:
@@ -104,6 +120,27 @@ jobs:
             exit 1
           fi
           branch="${GITHUB_REF_NAME}"
+          # per_page=1: the newest run for the commit is the authoritative
+          # one. Re-runs reuse the run id (a re-run of a failed run reads
+          # as in_progress, so it defers until it finishes); a later
+          # dispatch-triggered run for the same SHA sorts newest-first.
+          # "unknown", not "pending", for a null conclusion: a completed
+          # run with no conclusion must FAIL below, never defer.
+          same_sha_run="$(gh api "repos/${{ github.repository }}/actions/workflows/$wf_id/runs?head_branch=$branch&head_sha=$GITHUB_SHA&per_page=1" \
+            --jq '.workflow_runs[0] | if . == null then "" else "\(.id) \(.status) \(.conclusion // "unknown")" end')"
+          if [[ -n "$same_sha_run" ]]; then
+            run_id="${same_sha_run%% *}"
+            if grep -qE ' (in_progress|queued|waiting|pending)( |$)' <<<"$same_sha_run"; then
+              echo "R10 drift gate: archive run $run_id for this commit is still running ($same_sha_run) — its own R40 gate validates the committed manifest like-for-like; skipping the cross-commit comparison"
+              exit 0
+            fi
+            if ! grep -q ' completed success' <<<"$same_sha_run"; then
+              echo "R10 FAILURE: archive run $run_id for this commit did not validate the manifest ($same_sha_run) — triage that run; until it succeeds the committed LICENSE-binary has no like-for-like validation" >&2
+              exit 1
+            fi
+            echo "R10 drift gate: archive run $run_id for this commit succeeded ($same_sha_run) — its own R40 gate validated the committed manifest like-for-like; skipping the cross-commit comparison"
+            exit 0
+          fi
           last_run="$(gh api "repos/${{ github.repository }}/actions/workflows/$wf_id/runs?status=success&per_page=100" \
             --jq "[.workflow_runs[] | select(.head_branch == \"$branch\")][0].id")"
           if [[ -z "$last_run" ]]; then
