@@ -25,8 +25,16 @@ items were re-read from JIRA, GitHub and the fork on 2026-11-08 (trunk is
 still at the HADOOP-20014 merge). The rest of the body carries the
 2026-11-06 reading. Later on 2026-11-08 the owner decided stage 4: keep
 HADOOP-20008 (the catalog gets its own Jetty version) and drop
-HADOOP-19998 (no catalog retirement, so no `[DISCUSS]` mail). This
-document is updated to that decision.
+HADOOP-19998 (no catalog retirement, so no `[DISCUSS]` mail). That
+decision rewrote the Goal's done-criteria, Approach table row 4, Merge
+order step 5, the HADOOP-19998 table row, Stage 4, Course of action item
+7, Open items item 4 and the JIRA changes. The 2026-11-08 evening CI
+read-out (`3a7e0114c6d`) then updated "Where it stands", the #8891 and
+#8894 table rows and their notes, and Course of action item 2. A coherence
+review on 2026-11-08 aligned the plan with JIRA and GitHub: the #8950
+conflict with #8890 on `solr-test-framework`, HADOOP-19998's JIRA state,
+the done-criteria amendment, the stale Yetus wait on #8704, the
+HADOOP-19999 status and the commit count of the 11-05 PRs.
 
 **Where it stands (2026-11-08):** HADOOP-20014 is the first subtask in trunk
 (merged 2026-11-05, approved by pan3793). Two more stage-1 PRs are approved:
@@ -101,7 +109,9 @@ so HADOOP-19972 shrinks to the port. The work runs in stages:
    `TestHttpServer`.
 5. HADOOP-20008. The owner decided on 2026-11-08 to keep the catalog on its
    own Jetty version and dropped HADOOP-19998 (retirement), so #8950 is the
-   only stage-4 PR.
+   only stage-4 PR. It lands after #8890 (20012) and must be rebased over
+   it: #8950 removes `solr-test-framework` from the catalog-webapp pom,
+   where #8890 declares Solr's exclusions, so the two conflict there.
 6. HADOOP-19972.
 
 HADOOP-19999 and HADOOP-20000 can land at any time.
@@ -135,13 +145,14 @@ the patch.
 | [HADOOP-20006](https://issues.apache.org/jira/browse/HADOOP-20006) | Open | None | [#8948](https://github.com/apache/hadoop/pull/8948), draft | +1, 11-06 | Yes | None yet | None |
 | [HADOOP-20007](https://issues.apache.org/jira/browse/HADOOP-20007) | Open | None | [#8949](https://github.com/apache/hadoop/pull/8949), draft | +1, 11-06 | Yes | Pass | None |
 | [HADOOP-20008](https://issues.apache.org/jira/browse/HADOOP-20008) | Open | None | [#8950](https://github.com/apache/hadoop/pull/8950), draft | -1 (test4tests), 11-06 | Yes | Pass | None |
-| [HADOOP-19998](https://issues.apache.org/jira/browse/HADOOP-19998) | Dropped 2026-11-08 | None | No PR | - | - | - | - |
+| [HADOOP-19998](https://issues.apache.org/jira/browse/HADOOP-19998) | Open (dropped by the owner 2026-11-08; to resolve as Won't Fix) | None | No PR | - | - | - | - |
 | [HADOOP-19999](https://issues.apache.org/jira/browse/HADOOP-19999) | Open | None | [#8944](https://github.com/apache/hadoop/pull/8944), draft | -1 (test4tests), 11-06 | Yes | Pass | None |
 | [HADOOP-20000](https://issues.apache.org/jira/browse/HADOOP-20000) | Open | None | [#8940](https://github.com/apache/hadoop/pull/8940) | -1 (test4tests), 11-05 | Yes | Pass | None |
 | [HADOOP-19972](https://issues.apache.org/jira/browse/HADOOP-19972) | Open | Jose Luis López | [#8704](https://github.com/apache/hadoop/pull/8704), draft | -1 (branch SpotBugs + unit anomaly), 11-06 | Yes | Pass | None |
 
 The nine PRs opened on 2026-11-05 come from the generated `<JIRA>` branches
-(one commit each on trunk `c815ec8e1e9`). 20003 to 20008 and 19999 to 20000
+(one commit each on trunk `c815ec8e1e9`, except #8947, which carries 20003
+and 20005). 20003 to 20008 and 19999 to 20000
 are still unassigned in JIRA.
 
 ### What the red results mean
@@ -318,7 +329,10 @@ share a classpath with Jetty 12.
 
 - **HADOOP-20008, give the catalog its own Jetty version.** New
   `solr.jetty.version`, set to 9.4.58.v20250814, decouples it from Hadoop's
-  Jetty. The build still ships Jetty 9.4 inside the catalog; with the
+  Jetty. #8950 also drops the unused `solr-test-framework` from the
+  catalog-webapp pom, the dependency on which #8890 (20012) declares Solr's
+  exclusions; #8890 is approved and lands first, so #8950 must be rebased
+  over it and will conflict in that pom. The build still ships Jetty 9.4 inside the catalog; with the
   retirement (19998) dropped, this is the accepted end state for the catalog.
   Harmless on its own: app.war ships the
   same Jetty as today.
@@ -355,7 +369,7 @@ share a classpath with Jetty 12.
 - **HADOOP-19999, upgrade Guice 5.1.0 to 6.0.0.** Guice 6 accepts both
   `javax.inject` and `jakarta.inject`, and `guice-servlet` 6 still uses
   `javax.servlet`, so it prepares HADOOP-19395 with no namespace change.
-  #8944, draft, waits for its first Yetus.
+  #8944, draft, Yetus `test4tests` only (11-06, on head); Build passes.
 - **HADOOP-20000, remove `jsr311-api`.** It duplicates JAX-RS 2.1 on the
   classpath of `hadoop-yarn-server-timelineservice-hbase-tests`. #8940, Yetus
   `test4tests` only.
@@ -544,9 +558,11 @@ order and keeps everything else off the reviewer's path.
 7. **Stage 4 is decided (owner, 2026-11-08):** HADOOP-20008 stays — the
    catalog keeps shipping its own Jetty 9.4 under `solr.jetty.version` — and
    HADOOP-19998 is dropped, so there is no `[DISCUSS]` mail to send.
-   #8950 (20008) is harmless and can land any time in the stage-2/3 queue.
-8. **HADOOP-19972:** wait for Yetus on `5c47e102dda` (the `jetty-schemas`
-   fix); rebuild on the PR branches with step 3; keep it draft until 20049
+   #8950 (20008) is harmless and lands after #8890, rebased over it (both
+   touch `solr-test-framework` in the catalog-webapp pom).
+8. **HADOOP-19972:** Yetus run 37 on `5c47e102dda` (the `jetty-schemas`
+   fix, 2026-11-06) shows only branch-side SpotBugs and the known unit
+   anomaly, so nothing waits on it; rebuild on the PR branches with step 3; keep it draft until 20049
    and stage 3 are in. File the Build-coverage JIRA from the 2026-11-05
    draft, so `verify` on the client modules runs in the project's workflow,
    not only in Yetus.
@@ -581,6 +597,10 @@ Owner's actions (refreshed 2026-11-08):
 JIRA changes not yet made:
 
 - Assign 20003 to 20008. (The 19998-to-20000 half is moot: 19998 is dropped.)
+- Resolve HADOOP-19998 as Won't Fix (it is still Open and a subtask of
+  HADOOP-19912).
+- Amend HADOOP-19912's done-criteria to exempt the application catalog's
+  own Jetty 9.4 (HADOOP-20008), as the Goal section here does.
 - On HADOOP-19972: the description's "Depends on" list should name 20049
   and 20003 to 20008, 20012 to 20016 as JIRA links do.
 - File the Build-coverage improvement from
