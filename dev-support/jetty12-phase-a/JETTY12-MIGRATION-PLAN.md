@@ -19,18 +19,29 @@ All status in this document was read from JIRA, GitHub and the fork on
 merge of HADOOP-20014. It is a snapshot: JIRA and the PRs are the source of
 truth. PR numbers are `apache/hadoop` PRs.
 
-**Where it stands:** HADOOP-20014 is the first subtask in trunk (merged
-2026-11-05, approved by pan3793). HADOOP-20015 is approved by pan3793 and
-waits for Yetus and Build on the head that carries the last review fix.
-Every other subtask except HADOOP-19998 now has a PR: nine were opened on
-2026-11-05 (20003 to 20008, 19999, 20000, plus HADOOP-20048 outside the
-umbrella), so 16 PRs are open in the series. No red result left on any of
-them is caused by its patch: what remains is `test4tests` on pom-only
-changes, trunk's 80 SpotBugs warnings, flaky tests (HADOOP-19997,
-HADOOP-19982, HADOOP-20048), and Yetus runs that have not yet reported on the
-current head. HADOOP-19970's only patch-caused failure, `TestJettyClasspath`,
-is gone now that HADOOP-20014 is in trunk. The bottleneck is review
-capacity, and pan3793 is the one committer engaged. See
+Status refresh 2026-11-08: "Where it stands", the PR tracking table, "What
+the red results mean", "Course of action" items 1-2 and the owner's open
+items were re-read from JIRA, GitHub and the fork on 2026-11-08 (trunk is
+still at the HADOOP-20014 merge). The rest of the body carries the
+2026-11-06 reading.
+
+**Where it stands (2026-11-08):** HADOOP-20014 is the first subtask in trunk
+(merged 2026-11-05, approved by pan3793). Two more stage-1 PRs are approved:
+#8890 (20012, pjfanning, 11-06) and #8893 (20015, pan3793, 11-05) — #8893 is
+fully green on its final head (Yetus +1, 11-06; Build pass) and #8890's only
+red is the waived `test4tests`; both wait on merge. Every other subtask
+except HADOOP-19998 now has a PR: nine were opened on 2026-11-05 (20003 to
+20008, 19999, 20000, plus HADOOP-20048 outside the umbrella), so 16 PRs are
+open in the series. No red result left on any of them is caused by its
+patch: what remains is `test4tests` on pom-only changes, trunk's 80 SpotBugs
+warnings, flaky tests (HADOOP-19997, HADOOP-19982, HADOOP-20048), and the
+unit -1s whose own comment says the patch passed (#8891, #8903, #8947,
+#8704). HADOOP-19970's only patch-caused failure, `TestJettyClasspath`, is
+gone now that HADOOP-20014 is in trunk, and #8699's Build passes; the PR has
+not been rebased on the post-merge trunk yet. On 2026-11-08 #8891 got an
+empty trigger commit (`6a889ae8fd8`) and its fresh Build was still running,
+and #8894's Build rerun was still in progress. The bottleneck is review and
+merge capacity, and pan3793 and pjfanning are the committers engaged. See
 [Course of action](#course-of-action-proposal-of-2026-11-06).
 
 ## Goal
@@ -69,8 +80,9 @@ so HADOOP-19972 shrinks to the port. The work runs in stages:
 
 ## Merge order
 
-1. Stage 1: HADOOP-20014 is in trunk. HADOOP-20015 next, since it is approved,
-   then 20012 (the one pjfanning asked for first), 20013 and 20016. After the
+1. Stage 1: HADOOP-20014 is in trunk. #8890 (20012) and #8893 (20015) are
+   approved — land #8890 first, as pjfanning asked (he approved it on
+   11-06), then #8893 (approved by pan3793), then 20013 and 20016. After the
    2026-11-04 rescope, 20015 (Java changes) and 20016 (pom changes) are
    independent of each other, and the four remaining PRs do not depend on each
    other either. Expect one `NOTICE-binary` conflict between 20013 and 19970.
@@ -92,31 +104,32 @@ the patch.
 
 - **Yetus:** the vote in the last `hadoop-yetus` comment, with its date and
   whether it ran on the PR's current head.
-- **Build:** the `Build` check on the PR, from the fork's workflow. "Queued"
-  means the fork's run has not started: on 2026-11-06 at 07:00 the fork had
-  16 Build runs queued since 2026-11-05 22:10 and the ones that finished took
-  about 8.5 hours each.
+- **Build:** the `Build` check on the PR, from the fork's workflow. On
+  2026-11-06 at 07:00 the fork had 16 Build runs queued since 2026-11-05
+  22:10 and the ones that finished took about 8.5 hours each; by 2026-11-08
+  nearly all had reported (the runs still in flight are marked "Running" in
+  the table).
 - **Approval:** approving reviews. Reviews that only comment are not counted.
 
 | Ticket | JIRA status | Assignee | PR | Yetus | On head? | Build | Approval |
 |---|---|---|---|---|---|---|---|
 | [HADOOP-20014](https://issues.apache.org/jira/browse/HADOOP-20014) | Resolved | Jose Luis López | [#8892](https://github.com/apache/hadoop/pull/8892), merged 11-05 | - | - | - | pan3793 |
-| [HADOOP-20015](https://issues.apache.org/jira/browse/HADOOP-20015) | In Progress | Jose Luis López | [#8893](https://github.com/apache/hadoop/pull/8893) | -1, 11-04 | No (head 11-06) | Queued | pan3793, 11-05 |
-| [HADOOP-20012](https://issues.apache.org/jira/browse/HADOOP-20012) | In Progress | Jose Luis López | [#8890](https://github.com/apache/hadoop/pull/8890) | -1, 11-06 | Yes | Queued | None |
-| [HADOOP-20013](https://issues.apache.org/jira/browse/HADOOP-20013) | In Progress | Jose Luis López | [#8891](https://github.com/apache/hadoop/pull/8891) | -1, 11-05 | No (trunk merged 11-05) | Queued | None |
-| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | -1 (patch), 11-01 | No (rescoped 11-04) | Queued | None |
-| [HADOOP-19970](https://issues.apache.org/jira/browse/HADOOP-19970) | In Progress | Jose Luis López | [#8699](https://github.com/apache/hadoop/pull/8699), draft | -1, 11-05 | No (head 11-04, Yetus merged trunk) | Queued | None |
-| [HADOOP-20049](https://issues.apache.org/jira/browse/HADOOP-20049) | Open | Jose Luis López | [#8903](https://github.com/apache/hadoop/pull/8903) | -1, 11-06 | Yes | Queued | None |
+| [HADOOP-20015](https://issues.apache.org/jira/browse/HADOOP-20015) | In Progress | Jose Luis López | [#8893](https://github.com/apache/hadoop/pull/8893) | +1, 11-06 | Yes | Pass | pan3793, 11-05 |
+| [HADOOP-20012](https://issues.apache.org/jira/browse/HADOOP-20012) | In Progress | Jose Luis López | [#8890](https://github.com/apache/hadoop/pull/8890) | -1 (test4tests), 11-06 | Yes | Pass | pjfanning, 11-06 |
+| [HADOOP-20013](https://issues.apache.org/jira/browse/HADOOP-20013) | In Progress | Jose Luis López | [#8891](https://github.com/apache/hadoop/pull/8891) | -1 (branch SpotBugs + unit anomaly), 11-07 | No (trigger 11-08) | Running | None |
+| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | -1 (test4tests), 11-06 | Yes | Fail (flaky TestSSLHttpServerMTLS; rerun running) | None |
+| [HADOOP-19970](https://issues.apache.org/jira/browse/HADOOP-19970) | In Progress | Jose Luis López | [#8699](https://github.com/apache/hadoop/pull/8699), draft | -1 (branch SpotBugs only), 11-06 | Yes | Pass | None |
+| [HADOOP-20049](https://issues.apache.org/jira/browse/HADOOP-20049) | Open | Jose Luis López | [#8903](https://github.com/apache/hadoop/pull/8903) | -1 (test4tests + unit anomaly), 11-06 | Yes | Pass | None |
 | [HADOOP-20003](https://issues.apache.org/jira/browse/HADOOP-20003) | Open | None | [#8945](https://github.com/apache/hadoop/pull/8945), draft | +1, 11-06 | Yes | Pass | None |
-| [HADOOP-20005](https://issues.apache.org/jira/browse/HADOOP-20005) | Open | None | [#8947](https://github.com/apache/hadoop/pull/8947), draft, stacked on #8945 | none yet | - | Fail (flaky) | None |
-| [HADOOP-20004](https://issues.apache.org/jira/browse/HADOOP-20004) | Open | None | [#8946](https://github.com/apache/hadoop/pull/8946), draft | +1, 11-06 | Yes | Queued | None |
-| [HADOOP-20006](https://issues.apache.org/jira/browse/HADOOP-20006) | Open | None | [#8948](https://github.com/apache/hadoop/pull/8948), draft | none yet | - | Fail (flaky) | None |
+| [HADOOP-20005](https://issues.apache.org/jira/browse/HADOOP-20005) | Open | None | [#8947](https://github.com/apache/hadoop/pull/8947), draft, stacked on #8945 | -1 (unit anomaly), 11-06 | Yes | Fail (flaky) | None |
+| [HADOOP-20004](https://issues.apache.org/jira/browse/HADOOP-20004) | Open | None | [#8946](https://github.com/apache/hadoop/pull/8946), draft | +1, 11-06 | Yes | Fail (11-05 run; cause not read) | None |
+| [HADOOP-20006](https://issues.apache.org/jira/browse/HADOOP-20006) | Open | None | [#8948](https://github.com/apache/hadoop/pull/8948), draft | +1, 11-06 | Yes | None yet | None |
 | [HADOOP-20007](https://issues.apache.org/jira/browse/HADOOP-20007) | Open | None | [#8949](https://github.com/apache/hadoop/pull/8949), draft | +1, 11-06 | Yes | Pass | None |
-| [HADOOP-20008](https://issues.apache.org/jira/browse/HADOOP-20008) | Open | None | [#8950](https://github.com/apache/hadoop/pull/8950), draft | -1, 11-06 | Yes | Queued | None |
+| [HADOOP-20008](https://issues.apache.org/jira/browse/HADOOP-20008) | Open | None | [#8950](https://github.com/apache/hadoop/pull/8950), draft | -1 (test4tests), 11-06 | Yes | Pass | None |
 | [HADOOP-19998](https://issues.apache.org/jira/browse/HADOOP-19998) | Open | None | No PR | - | - | - | - |
-| [HADOOP-19999](https://issues.apache.org/jira/browse/HADOOP-19999) | Open | None | [#8944](https://github.com/apache/hadoop/pull/8944), draft | none yet | - | Queued | None |
-| [HADOOP-20000](https://issues.apache.org/jira/browse/HADOOP-20000) | Open | None | [#8940](https://github.com/apache/hadoop/pull/8940) | -1, 11-05 | Yes | Queued | None |
-| [HADOOP-19972](https://issues.apache.org/jira/browse/HADOOP-19972) | Open | Jose Luis López | [#8704](https://github.com/apache/hadoop/pull/8704), draft | -1, 11-05 | No (head 11-06) | Queued | None |
+| [HADOOP-19999](https://issues.apache.org/jira/browse/HADOOP-19999) | Open | None | [#8944](https://github.com/apache/hadoop/pull/8944), draft | -1 (test4tests), 11-06 | Yes | Pass | None |
+| [HADOOP-20000](https://issues.apache.org/jira/browse/HADOOP-20000) | Open | None | [#8940](https://github.com/apache/hadoop/pull/8940) | -1 (test4tests), 11-05 | Yes | Pass | None |
+| [HADOOP-19972](https://issues.apache.org/jira/browse/HADOOP-19972) | Open | Jose Luis López | [#8704](https://github.com/apache/hadoop/pull/8704), draft | -1 (branch SpotBugs + unit anomaly), 11-06 | Yes | Pass | None |
 
 The nine PRs opened on 2026-11-05 come from the generated `<JIRA>` branches
 (one commit each on trunk `c815ec8e1e9`). 20003 to 20008 and 19998 to 20000
@@ -124,47 +137,61 @@ are still unassigned in JIRA.
 
 ### What the red results mean
 
-- **#8893 (20015):** the last Yetus (build 8, 2026-11-04) failed three YARN
-  unit modules; the only named test is `TestSubmitApplicationWithRMHA`, which
-  the patch does not touch. Since then the head changed twice: the 2026-11-05
-  review fixes (`MultiException` out of `HttpServer2`, `MultipleFailuresError`
-  in `TestLogAggregationService`, nits) and, on 2026-11-06, pan3793's last
-  suggestion to keep `addSuppressed`. pan3793 approved on 2026-11-05. The head
-  `7610c8fd644` has no Yetus or Build result yet.
-- **#8890 (20012):** `test4tests` only, on the current head (build of
-  2026-11-06). It is a pom change with no test.
+- **#8893 (20015):** resolved. The last Yetus (build 8, 2026-11-04) had failed
+  three YARN unit modules on `TestSubmitApplicationWithRMHA`, which the patch
+  does not touch. After the 2026-11-05 review fixes (`MultiException` out of
+  `HttpServer2`, `MultipleFailuresError` in `TestLogAggregationService`, nits)
+  and pan3793's 2026-11-06 `addSuppressed` suggestion, the final head
+  `7610c8fd644` is fully green: Yetus +1 (11-06) and Build pass. pan3793
+  approved on 2026-11-05; the PR waits on merge.
+- **#8890 (20012):** `test4tests` only, on the current head (11-06 run). It is a
+  pom change with no test. pjfanning approved on 2026-11-06; the Build check
+  passes. Waiting on merge.
 - **#8891 (20013):** build 6 (2026-11-05) ran the whole root for 434 minutes
   because the patch touches `LICENSE-binary`; it reports trunk's SpotBugs and
   "root in the patch failed" with no named test in the summary. The log shows
   HDFS flakes (`TestDFSClientRetries`, HADOOP-19982's test, `TestBalancerRPCDelay`,
   `TestBlockManager`, `TestFileCreation`, `TestViewFileSystemHdfs`) and a
   ResourceManager surefire fork that died ("The forked VM terminated"). None
-  involves `javax.annotation-api`. The head moved on 2026-11-05 23:40 (trunk
-  merge), so the run needs repeating anyway.
-- **#8894 (20016):** the last Yetus (2026-11-01) is the "does not apply"
-  run from before the rescope. The 2026-11-04 head `914b446837b` plus the
-  2026-11-06 empty commit `c6aa864bbef` have no Yetus yet; the branch is 4
-  commits behind trunk. The fork's Build on the generated `HADOOP-20016`
-  branch failed on `TestSSLHttpServerMTLS` only (HADOOP-19997). pan3793
-  questioned the module declarations on 2026-11-04 ("I would leverage
+  involves `javax.annotation-api`. The 11-07 Yetus (PR-8891/8, on the head
+  before the 2026-11-08 empty trigger commit `6a889ae8fd8`) shows only
+  branch-side SpotBugs (trunk's 80 existing warnings) and a unit -1 whose own
+  comment says the patch passed — the known anomaly; read the linked unit log
+  before treating it as real (the listed failure is `TestYarnNativeServices`).
+  A fresh Yetus and Build started on the new head on 11-08; no approval yet.
+- **#8894 (20016):** the 11-06 Yetus on the current head is `test4tests` only.
+  The branch is 4 commits behind trunk. The fork's Build on the generated
+  `HADOOP-20016` branch failed on `TestSSLHttpServerMTLS` only (HADOOP-19997);
+  a rerun (fork run 42131124105) was still in progress on 2026-11-08.
+  pan3793 questioned the module declarations on 2026-11-04 ("I would leverage
   Maven's built-in transitive dependency management"); the answer (the
   declarations are `optional`, downstream resolution is unchanged, and they
   can be dropped if preferred) has had no reply.
 - **#8699 (19970):** build 32 (2026-11-05, on Yetus's merge of the head with
-  trunk, so with HADOOP-20014 in) shows trunk's SpotBugs and one unit failure,
-  `TestYarnNativeServices`, which is unrelated and intermittent.
-  `TestJettyClasspath` no longer fails. `jetty-phase-a` still carries its own
-  HADOOP-20014 commit, now a 5-line leftover in the minicluster pom, and the
-  pre-review version of HADOOP-20015; see [Stage 5](#stage-5-the-port).
-- **#8903 (20049):** `test4tests` and `TestNameNodeMXBean` (a known flaky
-  test, HDFS-17225 on the fork) on the current head.
+  trunk, so with HADOOP-20014 in) showed trunk's SpotBugs and one unit failure,
+  `TestYarnNativeServices`, which is unrelated and intermittent; the 11-06 Yetus
+  (run 33, on the current head) shows only branch-side SpotBugs.
+  `TestJettyClasspath` no longer fails and the PR's Build check passes. The
+  head still predates the trunk merge (only trigger commits on top), so the PR
+  should be rebased on the post-20014 trunk before review.
+  `jetty-phase-a` still carries its own HADOOP-20014 commit, now a 5-line
+  leftover in the minicluster pom, and the pre-review version of HADOOP-20015;
+  see [Stage 5](#stage-5-the-port).
+- **#8903 (20049):** `test4tests` (11-06) plus a unit -1 on `hadoop-hdfs` whose
+  comment says "in the patch passed" — the same anomaly as #8891; read the log.
+  The earlier run's `TestNameNodeMXBean` (a known flaky test, HDFS-17225 on the
+  fork) did not come back.
 - **#8945, #8946, #8949 (20003, 20004, 20007):** Yetus +1 on the head.
-  Build passes on 20003 and 20007.
-- **#8947 (20005), #8948 (20006):** no Yetus yet. The fork's Build failed on
-  `TestZKDelegationTokenSecretManager` (20005) and on
+  Build passes on 20003 and 20007; #8946's Build check failed in the 11-05
+  fork run (cause not read yet).
+- **#8947 (20005), #8948 (20006):** #8947's 11-06 Yetus is a unit -1 on
+  `hadoop-hdfs` whose comment says "in the patch passed" — the known anomaly;
+  #8948 is Yetus +1 (11-06) with no Build check on the PR yet. The fork's
+  branch Build failed on `TestZKDelegationTokenSecretManager` (20005) and on
   `TestNamenodeCapacityReport` and `TestDFSInputStreamBlockLocations` (20006),
   all flaky and unrelated.
 - **#8950 (20008), #8940 (20000):** `test4tests` only; both are pom changes.
+  Both Build checks pass.
 - **#8704 (19972):** build 34 (2026-11-05 15:03, on `bf9bf372ffd`) was the
   first -1 the patch caused since the full-suite run of 2026-10-31:
   `shadedclient` failed because commit `bf9bf372ffd` excluded `jetty-schemas`
@@ -172,8 +199,10 @@ are still unassigned in JIRA.
   so the web.xml DTDs went missing from the shaded jar and `ITUseMiniCluster`
   failed. `d5f478b2db9` (2026-11-05 17:02) keeps `jetty-schemas` in the shaded
   client. Build 31, which posted after build 34, is the older full run with
-  `TestSSLHttpServerMTLS` only. The head `5c47e102dda` has no Yetus yet. The
-  fork's Build was green on the broken commit: see
+  `TestSSLHttpServerMTLS` only. On the fixed head `5c47e102dda` the 11-06
+  Yetus (run 37) shows only branch-side SpotBugs and a unit -1 whose comment
+  says the patch passed (the known anomaly), and the PR's Build check passes
+  on the fix. The fork's Build was green even on the broken commit: see
   [The Build workflow and the shaded client](#the-build-workflow-and-the-shaded-client).
 
 ## The subtasks
@@ -459,17 +488,21 @@ approved, every PR up". What limits it now is one engaged reviewer and the
 fork's Build throughput, so the proposal spends review attention in merge
 order and keeps everything else off the reviewer's path.
 
-1. **Finish HADOOP-20015 this week.** It is approved. Wait for Yetus and
-   Build on `7610c8fd644`, answer the vote on the PR (the YARN unit failures
-   of build 8 were unrelated), and ask pan3793 to commit. Resolve the JIRA
+1. **Finish HADOOP-20015 and land HADOOP-20012 this week.** Both are approved
+   (pan3793; pjfanning on 11-06). #8893 is fully green on its final head
+   (Yetus +1, 11-06; Build pass) and #8890's only red is the waived
+   `test4tests`; land #8890 first, as pjfanning asked. Resolve each JIRA
    with a one-line release note (none needed: no behaviour change).
-2. **Hand pan3793 the rest of stage 1, one at a time, in this order:**
-   #8890 (20012), #8891 (20013), #8894 (20016). Before each ask, make sure the
-   PR shows only `test4tests` or trunk's SpotBugs: repeat Yetus on #8891 and
-   #8894 (both heads have no run), and justify `test4tests` in the PR body
-   where it applies. On #8894, decide the open point now rather than let it
-   stall: if pan3793 still prefers transitive resolution, reduce the PR to
-   the two `dependencyManagement` entries and drop the module declarations,
+2. **Hand the reviewers the rest of stage 1, one at a time:** #8891 (20013)
+   and #8894 (20016). On 11-08 both heads were made fresh: #8891 via an
+   empty trigger commit (`6a889ae8fd8`, fresh Yetus and Build in flight) and
+   #8894 via the Build rerun for the flaky `TestSSLHttpServerMTLS`
+   (HADOOP-19997); merge-nudge comments were posted on both PRs on 11-08.
+   Make sure each PR shows only `test4tests` or trunk's SpotBugs before the
+   ask, and justify `test4tests` in the PR body where it applies. On #8894,
+   decide the open point now rather than let it stall: if pan3793 still
+   prefers transitive resolution, reduce the PR to the two
+   `dependencyManagement` entries and drop the module declarations,
    since the port does not need them (recommended: offer that fallback in
    the reply and let pan3793 choose).
 3. **Rebuild `jetty-phase-a` and `jetty-phase-c` from the PR branches**
@@ -515,16 +548,19 @@ order and keeps everything else off the reviewer's path.
 
 ## Open items
 
-Owner's actions:
+Owner's actions (refreshed 2026-11-08):
 
-1. Ask pan3793 to commit #8893, then review #8890, #8891, #8894 in that order.
-2. Repeat Yetus on #8891 and #8894 (no run on the current heads).
+1. Ask for merge of #8890 (pjfanning, 11-06) and #8893 (pan3793, 11-05) —
+   approvals are in hand; #8890 first.
+2. Confirm the fresh runs on #8891 (Yetus + Build, started 11-08) and the
+   #8894 Build rerun; reviews are still missing on both.
 3. Reply to pan3793 on #8894 with the fallback (dependencyManagement only).
 4. Send the `[DISCUSS]` mail on retiring the catalog (HADOOP-19998).
 5. OK the rebuild and force-push of `jetty-phase-a` and `jetty-phase-c`, and
    the next harness batch.
 6. Un-draft #8945, #8946, #8949, #8951 once their Build is green; get Yetus
-   on #8947, #8948, #8944.
+   read-outs confirmed on #8947 (unit anomaly), #8948 and #8944 (both now
+   reported: #8948 +1, #8944 test4tests only).
 
 JIRA changes not yet made:
 
