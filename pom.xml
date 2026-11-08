@@ -944,24 +944,33 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
               <overrideUrl>file://${maven.multiModuleProjectDirectory}/dev-support/licenses/override-THIRD-PARTY.properties</overrideUrl>
               <!-- build tooling must not leak into the shipped inventory;
                    own-reactor artifacts (org.apache.hadoop) and our
-                   shaded thirdparty jars are not third-party;
-                   no ^$ anchors: the plugin embeds this in a wider pattern -->
-              <excludedGroups>org\.apache\.maven(\..*)?|org\.codehaus\.plexus|org\.eclipse\.sisu|org\.apache\.hadoop(\..*)?</excludedGroups>
+                   shaded thirdparty jars are not third-party.
+                   Anchored (R47): the plugin matches "g:a" against
+                   [^:]*(PATTERN)[^:]*:[^:]+, so a bare alternative is a
+                   substring match; ^ and the (?=:) lookahead make every
+                   alternative match the whole groupId -->
+              <excludedGroups>^(?:org\.apache\.maven(\..*)?|org\.codehaus\.plexus|org\.eclipse\.sisu|org\.apache\.hadoop(\..*)?)(?=:)</excludedGroups>
               <!-- test tooling that enters the graph at compile scope:
                    hadoop-client-minicluster declares test-jar support deps
                    at compile+optional (mockito, jersey-test-framework,
                    junit-jupiter...) and some upstream SDK POMs declare test
                    tooling at compile (aliyun's jacoco agent, JMH's
                    jopt-simple, tencent's ini4j). None of it ships; the
-                   scope filter cannot see it. artifactId regex, like
-                   excludedGroups unanchored.
+                   scope filter cannot see it.
+                   Anchored (R47): the plugin matches "g:a" against
+                   [^:]+:[^:]*(PATTERN)[^:]*, so a bare alternative is a
+                   substring match (junit-.* also excluded my-junit-extras);
+                   the (?<=:) lookbehind and $ make every alternative match
+                   the whole artifactId. check-archive-licenses.sh (R39)
+                   reads this element, requires exactly this
+                   (?<=:)(?:...)$ form and rejects duplicate alternatives.
                    objenesis, the jacoco agent and ini4j are deliberately
                    NOT here: they ship in the binary distribution
                    (objenesis via the yarn dist, jacoco+ini4j via the
                    cloud SDK trees once -Dhadoop-*-package is on) —
                    archive ground truth runs 42374519973/42405080846,
                    R39 -->
-              <excludedArtifacts>mockito-.*|junit-.*|junit-.*|opentest4j|apiguardian-api|byte-buddy(-agent)?|hamcrest|jersey-test-framework-.*|jopt-simple</excludedArtifacts>
+              <excludedArtifacts>(?<=:)(?:mockito-.*|junit-.*|opentest4j|apiguardian-api|byte-buddy(-agent)?|hamcrest(-.*)?|jersey-test-framework-.*|jopt-simple)$</excludedArtifacts>
               <licenseMerges>
                 <!-- variants observed in the full-reactor run (44 detected
                      collapsed to 33, these merges target the remainder);

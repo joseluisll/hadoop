@@ -160,11 +160,17 @@ jobs:
           fi
           echo "R10 drift gate: committed LICENSE-binary matches run $last_run"
 
-      # requirement 7 (stage B): every path-style entry in the curated
-      # non-jar asset manifest must still resolve in the source tree — a
-      # stale entry silently lists an absent asset and hides the asset
-      # that shipped in its place (see the 2026-11-08 R7 record).
-      - name: Curated asset manifest source-tree gate
+      # requirements 7 (stage B), 48 and 53, one script:
+      # - every path-style entry in the curated non-jar asset manifest
+      #   must still resolve in the source tree — a stale entry silently
+      #   lists an absent asset and hides the asset that shipped in its
+      #   place (see the 2026-11-08 R7 record);
+      # - every path the source-release LICENSE.txt names must resolve,
+      #   and every shipped asset path must be listed in it;
+      # - every text in licenses-binary/ must belong to a component
+      #   LICENSE-binary still lists (licenses-binary-aliases maps the
+      #   texts named differently).
+      - name: Source-tree licence gates (assets, LICENSE.txt, licenses-binary)
         if: always()
         run: python3 dev-support/licenses/check-asset-manifest.py
 

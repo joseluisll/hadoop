@@ -113,6 +113,41 @@ else
   exclude_pattern=""
 fi
 
+# R47: the pom pattern must be anchored. The plugin matches "g:a" against
+# [^:]+:[^:]*(PATTERN)[^:]*, so a bare alternative (junit-.*) is a substring
+# match that also excludes my-junit-extras; only the (?<=:)(?:alt|...)$ form
+# matches whole artifactIds. Bash ERE has no lookbehind, so the gate checks
+# that form, rejects duplicate alternatives, and matches the alternatives
+# itself as ^(alt|...)$ — the same set the plugin excludes.
+exclude_ere=""
+if [[ -n "$exclude_pattern" ]]; then
+  anchor_prefix='(?<=:)(?:'
+  anchor_suffix=')$'
+  if [[ "$exclude_pattern" != "$anchor_prefix"*"$anchor_suffix" ]]; then
+    echo "R47 FAILURE: excludedArtifacts '$exclude_pattern' is not anchored — write it as (?<=:)(?:alt|alt...)\$ (the plugin wraps it in [^:]*(...)[^:]*, so a bare alternative matches substrings)" >&2
+    failures=1
+  else
+    inner="${exclude_pattern#"$anchor_prefix"}"
+    inner="${inner%"$anchor_suffix"}"
+    # top-level alternatives (a | inside parentheses does not split)
+    duplicates="$(awk -v s="$inner" 'BEGIN {
+      depth = 0; alt = ""
+      for (i = 1; i <= length(s); i++) {
+        c = substr(s, i, 1)
+        if (c == "(") depth++
+        else if (c == ")") depth--
+        if (c == "|" && depth == 0) { print alt; alt = "" } else alt = alt c
+      }
+      print alt
+    }' | sort | uniq -d)"
+    if [[ -n "$duplicates" ]]; then
+      echo "R47 FAILURE: excludedArtifacts lists duplicate alternatives: $(tr '\n' ' ' <<<"$duplicates")" >&2
+      failures=1
+    fi
+    exclude_ere="^(${inner})\$"
+  fi
+fi
+
 # g:a pairs from the archive enumeration, third-party only (own
 # org.apache.hadoop* jars are covered by the archive's top-level LICENSE)
 archive_all="$(mktemp)"
@@ -198,11 +233,11 @@ echo "archive: $(wc -l < "$archive_gas") third-party g:a, $(wc -l < "$own") own 
 
 # --- R39: curated exclusions that ship -------------------------------------
 
-if [[ -n "$exclude_pattern" ]]; then
+if [[ -n "$exclude_ere" ]]; then
   # mapped third-party jars
   while IFS= read -r ga; do
     artifact="${ga#*:}"
-    if [[ "$artifact" =~ $exclude_pattern ]]; then
+    if [[ "$artifact" =~ $exclude_ere ]]; then
       echo "R39 FAILURE: curated exclusion ships in the archive: $ga (matches excludedArtifacts '$exclude_pattern' — remove the exclusion or the jar)" >&2
       failures=1
     fi
@@ -212,7 +247,7 @@ if [[ -n "$exclude_pattern" ]]; then
   # field would collapse and shift artifactId into the wrong variable —
   # extract the fields with awk first
   while IFS=$'\t' read -r path artifact; do
-    if [[ "$artifact" =~ $exclude_pattern ]]; then
+    if [[ "$artifact" =~ $exclude_ere ]]; then
       echo "R39 FAILURE: curated exclusion ships in the archive: $path (artifact '$artifact' matches excludedArtifacts '$exclude_pattern')" >&2
       failures=1
     fi

@@ -1,4 +1,4 @@
-# Automatic license management — requirements (v2.3)
+# Automatic license management — requirements (v2.4)
 
 Requirements for automating the collection, validation, and distribution of
 third-party license information in this repository. The implementation on the
@@ -64,9 +64,15 @@ requested operation — never part of the default build or CI run.
 9. **Allowlist policy** — a configurable list of approved licenses SHALL
    gate the build, so that newly introduced dependencies with
    non-approved licenses fail CI.
-10. **Drift detection** — CI SHALL fail when the checked-in license files
-    (`licenses/`, `licenses-binary/`, NOTICE, and the
-    `dev-support/licenses/texts/` store) drift from the generated output.
+10. **Drift detection** — CI SHALL fail when a checked-in shipped license
+    file drifts from what it must describe: `LICENSE-binary` from the
+    archive-derived manifest (R40), and `licenses-binary/` from the
+    components `LICENSE-binary` lists (R53). The source-release
+    `LICENSE.txt` is covered by R48, the `texts/` store by `--strict`
+    resolution (R6); `NOTICE-binary` stays curated prose, reviewed in pull
+    requests. *(Narrowed in v2.4: previously named `licenses/`,
+    `licenses-binary/`, NOTICE and `texts/` as drift-checked against a
+    generated output most of them do not have.)*
 11. **Precommit integration** — license validation SHOULD run in the Yetus
     precommit pipeline alongside RAT.
 
@@ -303,7 +309,7 @@ every dependency change, at release time, and in the precommit vote.
     (Dockerfiles, download retry, the googletest pre-seed) SHALL be proposed
     under their own JIRA, separately from the license tooling.
 
-## Implementation status (branch `feat/LICENSES`, v2.3)
+## Implementation status (branch `feat/LICENSES`, v2.4)
 
 Open work items, the transition plan, and in-flight CI verification are
 tracked in the claude-mem work state for this project (list
@@ -313,12 +319,12 @@ open and what is in flight.
 
 | Requirement | Status |
 |---|---|
-| 1–4, 15, 17–18 | Implemented (`licenses` profile + `licenses.yml`). R2: the `excludedArtifacts` pattern matches substrings (2026-11-08 review F4, reproduced) — see R47 |
+| 1–4, 15, 17–18 | Implemented (`licenses` profile + `licenses.yml`). R2: the substring matching of `excludedArtifacts` (2026-11-08 review F4) is fixed 2026-11-08 — see the R47 row |
 | 5, 19, 33 | Implemented — `texts/` store + `resolve-licenses.sh`; download behind `workflow_dispatch` input |
 | 6 | Implemented via `failOnMissing` and `--strict` (HTML-junk rejection included) |
 | 8 | Existing (Apache RAT) |
 | 7 | Partial — stage A curation fix + stage B source-tree gate landed 2026-11-08 (stale nvd3/angular/d3-3.5.17/lz4 entries pruned, d3-v4.1.1 and nativetask lz4 added; `check-asset-manifest.py` gates `manifest-assets.txt` per-push; record: `2026-11-08-0930-R7-Assets-Stages-A-B.md`). Open: stage C archive-side asset gate (incl. jar-embedded webapps) |
-| 10 | Partly — implemented for LICENSE-binary 2026-11-08 — the per-push gate diffs the committed file against the last successful dist run's generated manifest; the dist workflow diffs it against what its own archives generate (R40 drift gate). Selection is commit-aware (fixed 2026-11-08 after run 42461135530 raced its same-push archive run): a same-commit archive run is deferred to when succeeded or in flight and fails the gate when failed; only a commit with no archive run — no manifest input touched — compares against the previous commit's baseline. First green per-push drift-gate run 2026-11-08 (collect run 42474966366 on commit 404fe3abbee) — the first green collect since the Stage 3 switch. Gaps found by the 2026-11-08 review: only `LICENSE-binary` is compared — `licenses/`, `licenses-binary/`, NOTICE and `texts/` are not (F6, see R53); and a dependency change outside the archive workflow's path filter (any module pom, incl. `hadoop-project/pom.xml`) passes, because the gate then compares against the previous commit's baseline (F1, see R42) |
+| 10 | Partly — implemented for LICENSE-binary 2026-11-08 — the per-push gate diffs the committed file against the last successful dist run's generated manifest; the dist workflow diffs it against what its own archives generate (R40 drift gate). Selection is commit-aware (fixed 2026-11-08 after run 42461135530 raced its same-push archive run): a same-commit archive run is deferred to when succeeded or in flight and fails the gate when failed; only a commit with no archive run — no manifest input touched — compares against the previous commit's baseline. First green per-push drift-gate run 2026-11-08 (collect run 42474966366 on commit 404fe3abbee) — the first green collect since the Stage 3 switch. The 2026-11-08 review's F6 (R10 named files no gate compared) is resolved 2026-11-08 by the v2.4 narrowing plus the R53 `licenses-binary/` gate. Still open: a dependency change outside the archive workflow's path filter (any module pom, incl. `hadoop-project/pom.xml`) passes, because the gate then compares against the previous commit's baseline (F1, see R42) |
 | 20–24 | Implemented (licenseMerges, overrideUrl, includeOptional, excludedGroups, license-slugs.sh) |
 | 34 | Implemented — full `mvn install` reactor, no `-pl` scoping |
 | 25 | **Retired 2026-11-08** with the Stage 3 switch — its per-push slot is taken by R10 drift detection against the archive-derived manifest; the tooling (`check-licenses-parity.sh`) is deleted (record: `2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`). It was implemented and green from the 2026-11-07 curation pass until retirement |
@@ -329,8 +335,11 @@ open and what is in flight.
 | 12 | Partly — the THIRD-PARTY inventory is produced and published by every CI run (both workflows), not per release: `create-release` has no license step (see R44) |
 | 16 | Implemented — the generator is deterministic (self-check `test-generate-archive-manifest.py`, 11 tests) and the dist R40 gate regenerates `LICENSE-binary` from fresh archives and finds no diff (green on run 42519178850); the default path is offline (2026-11-08 review) |
 | 35–38 | Landed 2026-11-07 — `licenses-dist.yml` (weekly + `workflow_dispatch`), archive enumeration incl. WAR-nested jars, archive-completeness and archive-vs-inventory gates; validated by the first ground-truth run. 2026-11-08: the build-env image's unattended downloads were hardened with curl `--fail --retry` (`/root/.curlrc` written by all five Linux Dockerfiles) after three consecutive image builds died on transient CDN 503s / mid-transfer drops (spotbugs, boost, intel-isa-l, protobuf — one different download each attempt); `Dockerfile_ubuntu_24` added to the dist `paths:` filter as a gate input. The same failure class recurred on the hardened image 2026-11-08 (commit 404fe3abbee): dist-archive run 42474966167 and Build run 42474966726 both died on `curl: (22)` HTTP 504 from `pkg-resolver/install-protobuf.sh` (protobuf v3.25.5 GitHub archive) — a multi-minute 504 outage outlasts the ~30 s curlrc retry window; the dist step's cmake-compile failure and the Build Test jobs' Docker-pull failures were secondary fallout, and no gate logic or curation was implicated. Open follow-ups: script-level retry loop (5 attempts, 60 s sleep) in `install-protobuf.sh` — must ride a NEW commit, reruns replay the old image — and switching `licenses-dist.yml` to pull the GHCR-cached base image the Build workflow already pushes instead of rebuilding (~20 min per run). Both landed 2026-11-08 (record: `2026-11-08-1940-Dist-CI-Resilience-Retry-And-Image-Cache.md`): the protobuf/abseil downloads retry 5×60 s with `--fail`; the dist workflow caches the build-env image in GHCR under a content-addressed tag (hash of `Dockerfile_ubuntu_24` + `pkg-resolver/` + `hadoop_env_checks.sh`) — a cache hit is provably built from this commit's inputs, misses build-and-push, and `start-build-env.sh` skips its own build under `HADOOP_BUILD_ENV_PREBUILT=1`. Both real-image validations passed 2026-11-08: the manifest-denial rerun (42511445584) pushed the cache image successfully and the next dist run (42519178850, commit 71073d88145) showed `Cache hit` and was green, as was the same-push collect run (R10 gate satisfied against the same-commit archive run). The residual googletest exposure is CLOSED 2026-11-08 (record: `2026-11-08-2200-Googletest-Preseed-Offline-Native-Build.md`): the pinned googletest source (release-1.10.0, commit `703bd9ca`) is pre-seeded into the build-env image at `/opt/googletest-<commit>` by `pkg-resolver/install-googletest-preseed.sh` (script-level retry via the shared `download-with-retry.sh`), and libhdfspp's CMakeLists uses `FETCHCONTENT_SOURCE_DIR_GOOGLETEST` to consume it when present — the preseed path is derived from the CMakeLists' own `GOOGLETEST_COMMIT` pin, so bumping the pin falls back to the URL download rather than a stale tree. Remaining dist-build download exposure: Maven artifact resolution only (protected by Maven's built-in resolver retry). Gaps found by the 2026-11-08 review: the weekly `schedule` has never fired — GitHub runs schedules from the default branch only, and the workflow is not on trunk; every archive run so far came from a push or a dispatch (F2, R35 partly; see R43). R38 gates CI-built archives, not the release manager's tarballs (R38 partly; see R44) |
-| 39 | Implemented — exclusion justifications recorded (2026-11-07 curation record + README); the archive runs since 2026-11-07 confirm no curated exclusion ships. Same substring-matching hole as R2 (F4), caught only on an archive run (see R47) |
-| 41–54 | Open — proposed in v2.3 from the 2026-11-08 review; the source-release `LICENSE.txt` still names a nonexistent lz4 path and omits the nativetask lz4 sources (F5, reproduced; see R48) |
+| 39 | Implemented — exclusion justifications recorded (2026-11-07 curation record + README); the archive runs since 2026-11-07 confirm no curated exclusion ships. The substring-matching hole (F4) is fixed 2026-11-08 (see the R47 row) |
+| 47 | Implemented 2026-11-08 (review F4) — `excludedGroups` and `excludedArtifacts` written anchored, `^(?:...)(?=:)` and `(?<=:)(?:...)$`, because the plugin wraps each as `[^:]*(PATTERN)[^:]*` inside its g:a field (read from license-maven-plugin 2.5.0 `ArtifactFilters.toGaPattern`; the patterns were checked against that wrapping in jshell); the duplicate `junit-.*` dropped; `check-archive-licenses.sh` fails unless the artifact pattern has the anchored form or if an alternative repeats, and matches the alternatives as `^(...)$` |
+| 48 | Partly — 2026-11-08 (review F5): `check-asset-manifest.py` fails when a path `LICENSE.txt` names does not resolve (a `node_modules` entry resolves through its `package.json`) or when a path-style asset of `manifest-assets.txt` is missing from `LICENSE.txt`. Fixed with it: the removed hadoop-common lz4 path replaced by the nativetask lz4 sources, the moved `cJSON/` path, and libhdfspp's `third_party/uriparser2` (MIT, ships in the native client) added to both licence files. Open: the `licenses/` texts, and bundled code neither file knows about (libhdfspp `third_party/rapidxml-1.13` and `tr2`) |
+| 53 | Partly — 2026-11-08 (review F6): every `licenses-binary/LICENSE-<slug>.txt` must match a component `LICENSE-binary` lists, by slug (whole word) or the token in `licenses-binary-aliases`; per push, in `check-asset-manifest.py`. It removed 8 stale texts (angular, angular-nvd3, nvd3, hamcrest, junit, hsql, paranamer, azure-keyvault — none in either archive) and found 2 shipped Capacity Scheduler UI packages missing from the manifest (`class-variance-authority` 0.7.1, `react-hook-form` 7.59.0), now added and `LICENSE-binary` regenerated. Open: the missing-text direction and generating the texts from `texts/` (R13) |
+| 41–46, 49–52, 54 | Open — proposed in v2.3 from the 2026-11-08 review |
 | 40 | Integrated 2026-11-08 — the committed `LICENSE-binary` IS the generator's output (artifact of record), regenerated and drift-gated by the dist workflow per run; validated against run 42413534907 and the 42427570912/42427570914 pair (record: `2026-11-07-1730-R40-Generator.md`, switch record: `2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`). NOTICE-binary stays curated (attribution corpus is prose; protected by R10) |
 
 ## Review changelog
@@ -357,3 +366,7 @@ open and what is in flight.
   infrastructure), dependency-change coverage, baseline freshness, anchored
   curation patterns, source-release accuracy and gate self-tests. Status
   table corrected: 10, 12, 35 and 38 partly met; 16 implemented.
+- **v2.4** — requirement 10 narrowed to the files a gate can compare
+  (`LICENSE-binary`, `licenses-binary/`); the others are assigned to R6,
+  R48 and curation. Status: 47 implemented, 48 and 53 partly (review
+  findings F4, F5 and F6 fixed).

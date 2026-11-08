@@ -3,6 +3,7 @@
 apache	atlaskit/pragmatic-drag-and-drop 1.7.4
 apache	atlaskit/pragmatic-drag-and-drop-auto-scroll 2.1.1
 apache	atlaskit/pragmatic-drag-and-drop-hitbox 1.1.0
+apache	class-variance-authority 0.7.1
 apache	typescript 5.8.3
 bsd2	hadoop-mapreduce-project/hadoop-mapreduce-client/hadoop-mapreduce-client-nativetask/src/main/native/lz4/lz4.c
 bsd2	hadoop-hdfs-project/hadoop-hdfs-native-client/src/main/native/fuse-dfs/util/tree.h
@@ -14,6 +15,7 @@ bsd3	hadoop-common-project/hadoop-common/src/main/native/src/org/apache/hadoop/u
 bsd3	hadoop-tools/hadoop-sls/src/main/html/js/thirdparty/d3.v3.js
 bsd3	hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/d3-v4.1.1.min.js
 bsd3	leveldb v1.13
+mit	hadoop-hdfs-project/hadoop-hdfs-native-client/src/main/native/libhdfspp/third_party/uriparser2
 mit	hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/bootstrap-3.4.1
 mit	hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/dataTables.bootstrap.css
 mit	hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/dataTables.bootstrap.js
@@ -105,6 +107,7 @@ mit	immer 10.0.0
 mit	nanoid 5.1.5
 mit	prettier 3.5.0
 mit	react 19.1.0
+mit	react-hook-form 7.59.0
 mit	react-resizable-panels 3.0.3
 mit	sonner 2.0.5
 mit	tailwind-merge 3.3.1

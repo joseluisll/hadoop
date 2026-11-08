@@ -132,7 +132,16 @@ generated manifest (R10). Regenerate and commit — never hand-edit.
   `section<TAB>line`. `check-asset-manifest.py` gates every path-style
   entry against the source tree per push (requirement 7, fail-closed);
   package-style entries (`name vX.Y`) are validated by the archive-side
-  asset gate (open, requirement 7 stage C).
+  asset gate (open, requirement 7 stage C). The same script checks the
+  source-release `LICENSE.txt` (requirement 48: every path it names
+  resolves, and every path-style asset entry is listed in it) and
+  `licenses-binary/` (requirement 53, below).
+- `licenses-binary-aliases` — `slug<TAB>token` for the
+  `licenses-binary/LICENSE-<slug>.txt` texts whose slug is not the name
+  `LICENSE-binary` lists the component under. Every text must match a
+  listed component (by its slug or this token, whole word), so a text
+  for a component that no longer ships fails the per-push gate instead of
+  shipping in the tarball; a row whose text is gone fails too.
 
 ## Refinements after the first manual-vs-automated comparison
 
@@ -140,8 +149,9 @@ generated manifest (R10). Regenerate and commit — never hand-edit.
   (BSD 2-clause and 3-clause are intentionally kept separate)
 - `includeOptional=true` so optional deps that ship (e.g. checker-qual)
   are inventoried
-- `excludedGroups` drops Maven/Plexus/Sisu build tooling (note: the
-  plugin embeds the regex in a wider pattern — no `^`/`$` anchors)
+- `excludedGroups` drops Maven/Plexus/Sisu build tooling. The plugin
+  wraps the regex as `[^:]*(PATTERN)[^:]*:[^:]+`, so it is written
+  anchored, `^(?:...)(?=:)`, to match whole groupIds only (requirement 47)
 - `normalize-licenses.sh` renames texts to the `LICENSE-<name>.txt`
   convention
 - `resolve-licenses.sh` walks *every* leading license group of each
@@ -166,17 +176,23 @@ support dependencies (mockito, jersey-test-framework, junit-jupiter...)
 at compile+optional, and some upstream SDK POMs declare test tooling at
 compile (the aliyun SDK's jacoco agent, JMH's jopt-simple, the tencent
 SDK's ini4j). The scope filter cannot see these; only the tarball
-ground-truth (requirement 26) can confirm the remaining ones. The
-pattern matches bare artifactIds unanchored, so a new dependency whose
-artifactId contains one of these names (e.g. anything `junit-*`) is
-silently excluded too — re-audit the list whenever the dependency set
-changes.
+ground-truth (requirement 26) can confirm the remaining ones. The plugin
+wraps the pattern as `[^:]+:[^:]*(PATTERN)[^:]*`, which makes a bare
+alternative a substring match (`junit-.*` would also exclude
+`my-junit-extras`), so it is written anchored, `(?<=:)(?:alt|...)$`, and
+matches whole artifactIds only (requirement 47). The archive gate
+(`check-archive-licenses.sh`, requirement 39) reads the same element,
+fails unless it has that anchored form or if an alternative is listed
+twice, and matches the alternatives as `^(alt|...)$`.
 
 ## Not covered (yet)
 
-- Source-release `LICENSE.txt`/`licenses/` drift (the binary-side asset
-  curation is gated; the source-release file is still hand-maintained
-  prose — fixed alongside the binary curation, but not machine-checked).
+- The source-release `licenses/` texts, and `LICENSE.txt` entries for
+  bundled code the asset manifest does not know about (paths it names are
+  gated, requirement 48; e.g. libhdfspp's `third_party/rapidxml-1.13` and
+  `tr2` are listed in neither licence file).
+- Shipped texts that are missing: `licenses-binary/` is checked for stale
+  texts only, not for components that lack one (requirement 53).
 - Archive-side non-jar asset enumeration (requirement 7 stage C): the
   archive asset gate that matches the tarball's actual JS/CSS/native
   assets (and jar-embedded webapps) against `manifest-assets.txt`.

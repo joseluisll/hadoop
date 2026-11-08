@@ -1,0 +1,28 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+#
+# licenses-binary/LICENSE-<slug>.txt texts whose slug is not the name
+# LICENSE-binary lists the component under (requirement 53, gate in
+# check-asset-manifest.py). "slug<TAB>token": the token must appear in
+# LICENSE-binary as a whole word, case-insensitive. Texts not listed here
+# are matched by their slug. A row whose text is gone fails the gate.
+bloomfilter	util/bloom/
+cddl-gplv2-ce	CDDL 1.1 + GPLv2 with classpath exception
+checker-framework	org.checkerframework:checker-qual
+freebsd	container-executor/impl/compat/
+go	com.google.re2j:re2j
+jaf	jakarta.activation
+slicing-by-8	bulk_crc32_x86.c
+xtermjs	hadoop-yarn-server-nodemanager/src/main/resources/TERMINAL

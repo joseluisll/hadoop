@@ -211,6 +211,7 @@ The following components are included:
 atlaskit/pragmatic-drag-and-drop 1.7.4
 atlaskit/pragmatic-drag-and-drop-auto-scroll 2.1.1
 atlaskit/pragmatic-drag-and-drop-hitbox 1.1.0
+class-variance-authority 0.7.1
 typescript 5.8.3
 
 at.yawk.lz4:lz4-java:1.12.0
@@ -496,6 +497,7 @@ org.threeten:threetenbp:1.7.0
 MIT License
 -----------
 
+hadoop-hdfs-project/hadoop-hdfs-native-client/src/main/native/libhdfspp/third_party/uriparser2
 hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/bootstrap-3.4.1
 hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/dataTables.bootstrap.css
 hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/dataTables.bootstrap.js
@@ -587,6 +589,7 @@ immer 10.0.0
 nanoid 5.1.5
 prettier 3.5.0
 react 19.1.0
+react-hook-form 7.59.0
 react-resizable-panels 3.0.3
 sonner 2.0.5
 tailwind-merge 3.3.1
