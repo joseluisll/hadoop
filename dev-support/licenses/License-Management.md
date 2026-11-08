@@ -1,4 +1,4 @@
-# Automatic license management — requirements (v2.1)
+# Automatic license management — requirements (v2.2)
 
 Requirements for automating the collection, validation, and distribution of
 third-party license information in this repository. The implementation on the
@@ -223,7 +223,7 @@ audit (37 bundled-but-unlisted jars; jacoco/ini4j listed yet absent).
     construction. The graph-based inventory remains the early-warning
     gate; the archive-derived manifest is the artifact of record.
 
-## Implementation status (branch `feat/LICENSES`, v2.1)
+## Implementation status (branch `feat/LICENSES`, v2.2)
 
 Open work items, the transition plan, and in-flight CI verification are
 tracked in the claude-mem work state for this project (list
