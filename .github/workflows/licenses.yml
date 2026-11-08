@@ -123,6 +123,14 @@ jobs:
           fi
           echo "R10 drift gate: committed LICENSE-binary matches run $last_run"
 
+      # requirement 7 (stage B): every path-style entry in the curated
+      # non-jar asset manifest must still resolve in the source tree — a
+      # stale entry silently lists an absent asset and hides the asset
+      # that shipped in its place (see the 2026-11-08 R7 record).
+      - name: Curated asset manifest source-tree gate
+        if: always()
+        run: python3 dev-support/licenses/check-asset-manifest.py
+
       # optional, on demand only
       - name: Download license texts from the network
         if: always() && inputs.download

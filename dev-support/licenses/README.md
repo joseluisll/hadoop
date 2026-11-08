@@ -127,6 +127,12 @@ generated manifest (R10). Regenerate and commit — never hand-edit.
   absent). The archive gate promotes matching rows before any check;
   own `org.apache.hadoop` jars become exempt, third-party ones must be
   licensed.
+- `manifest-assets.txt` — the non-jar entries of `LICENSE-binary`
+  (bundled webapp JS/CSS, npm packages, native sources), as
+  `section<TAB>line`. `check-asset-manifest.py` gates every path-style
+  entry against the source tree per push (requirement 7, fail-closed);
+  package-style entries (`name vX.Y`) are validated by the archive-side
+  asset gate (open, requirement 7 stage C).
 
 ## Refinements after the first manual-vs-automated comparison
 
@@ -168,8 +174,12 @@ changes.
 
 ## Not covered (yet)
 
-- JavaScript/other non-Maven assets still need the hand-maintained files in
-  `licenses/`.
-- Wiring the generated texts into `hadoop-dist`/`hadoop-assemblies` so the
-  tarball ships them automatically.
+- Source-release `LICENSE.txt`/`licenses/` drift (the binary-side asset
+  curation is gated; the source-release file is still hand-maintained
+  prose — fixed alongside the binary curation, but not machine-checked).
+- Archive-side non-jar asset enumeration (requirement 7 stage C): the
+  archive asset gate that matches the tarball's actual JS/CSS/native
+  assets (and jar-embedded webapps) against `manifest-assets.txt`.
 - Whitelist/audit policy enforcement (allowed-license gating).
+- Wiring the generated texts into `hadoop-dist`/`hadoop-assemblies` so the
+  tarball ships them automatically (requirement 13).

@@ -231,6 +231,7 @@ audit (37 bundled-but-unlisted jars; jacoco/ini4j listed yet absent).
 | 5, 19, 33 | Implemented — `texts/` store + `resolve-licenses.sh`; download behind `workflow_dispatch` input |
 | 6 | Implemented via `failOnMissing` and `--strict` (HTML-junk rejection included) |
 | 8 | Existing (Apache RAT) |
+| 7 | Partial — stage A curation fix + stage B source-tree gate landed 2026-11-08 (stale nvd3/angular/d3-3.5.17/lz4 entries pruned, d3-v4.1.1 and nativetask lz4 added; `check-asset-manifest.py` gates `manifest-assets.txt` per-push; record: `2026-11-08-0930-R7-Assets-Stages-A-B.md`). Open: stage C archive-side asset gate (incl. jar-embedded webapps) |
 | 10 | Implemented for LICENSE-binary 2026-11-08 — the per-push gate diffs the committed file against the last successful dist run's generated manifest; the dist workflow diffs it against what its own archives generate (R40 drift gate) |
 | 20–24 | Implemented (licenseMerges, overrideUrl, includeOptional, excludedGroups, license-slugs.sh) |
 | 34 | Implemented — full `mvn install` reactor, no `-pl` scoping |
@@ -238,7 +239,7 @@ audit (37 bundled-but-unlisted jars; jacoco/ini4j listed yet absent).
 | 26–27 | Implemented and validated by the first ground-truth run 2026-11-07 (42374519973): the real tarball was enumerated (264 jars incl. the catalog webapp WAR's nested libs), R38 caught 47 unlicensed shipped jars, R36/R37 mapping curated; gate bugs found by the run were fixed (see the run record) |
 | 28–29 | **28 Done 2026-11-07** — curated multi-license policy (`Multi-License-Policy.md`: prefer Apache-2.0, then EDL, then EPL-2.0; jersey/hk2 keep their combined section) applied to the shipped manifest, two misplaced entries corrected (checker-qual → MIT, jakarta.activation-api → EDL; record: `2026-11-07-1630-R28-Policy-Application.md`). 29 Partially — override mechanism exists; disambiguation policy done, no-metadata justification coverage still partial |
 | 30–32 | Addressed by two 2026-11-07 passes: the curation pass (record: `2026-11-07-1150-...md` — malformed entries fixed, versions aligned, 30 stale entries pruned) and the archive-verified prune (record: `2026-11-07-1700-R32-Prune-Declared-Not-Shipped.md` — 10 declared-but-not-shipped entries pruned: kerby x8 non-embedded, jsr311-api, jersey-container-jdk-http; the manual manifest is now exact against the two distributed archives: 302 g:a, every one enumerated or recorded as shaded-embedded) |
-| 7, 9–14, 16 | Open |
+| 7, 9, 11–14, 16 | Open (7: archive-side asset gate — stages A+B landed 2026-11-08, see the R7 row) |
 | 35–38 | Landed 2026-11-07 — `licenses-dist.yml` (weekly + `workflow_dispatch`), archive enumeration incl. WAR-nested jars, archive-completeness and archive-vs-inventory gates; validated by the first ground-truth run |
 | 39 | Exclusion justifications recorded (2026-11-07 curation record + README); archive confirmation starts with the first dist run |
 | 40 | Integrated 2026-11-08 — the committed `LICENSE-binary` IS the generator's output (artifact of record), regenerated and drift-gated by the dist workflow per run; validated against run 42413534907 and the 42427570912/42427570914 pair (record: `2026-11-07-1730-R40-Generator.md`, switch record: `2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`). NOTICE-binary stays curated (attribution corpus is prose; protected by R10) |

@@ -211,7 +211,6 @@ Apache Software Foundation License 2.0
 --------------------------------------
 
 hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/util/LimitInputStream.java
-hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/nvd3-1.8.5.* (css and js files)
 hadoop-hdfs-project/hadoop-hdfs-rbf/src/main/java/org/apache/hadoop/hdfs/server/federation/metrics/JSON.java
 
 BSD 2-Clause
@@ -230,15 +229,12 @@ hadoop-common-project/hadoop-common/src/main/native/gtest/gtest-all.cc
 hadoop-common-project/hadoop-common/src/main/native/gtest/include/gtest/gtest.h
 hadoop-common-project/hadoop-common/src/main/native/src/org/apache/hadoop/util/bulk_crc32_x86.c
 hadoop-tools/hadoop-sls/src/main/html/js/thirdparty/d3.v3.js
-hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/d3-3.5.17.min.js
+hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/d3-v4.1.1.min.js
 
 
 MIT License
 -----------
 
-hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/angular-1.6.4.min.js
-hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/angular-nvd3-1.0.9.min.js
-hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/angular-route-1.6.4.min.js
 hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/bootstrap-3.4.1
 hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/dataTables.bootstrap.css
 hadoop-hdfs-project/hadoop-hdfs/src/main/webapps/static/dataTables.bootstrap.js
