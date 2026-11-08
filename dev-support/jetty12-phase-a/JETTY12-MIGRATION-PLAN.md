@@ -43,8 +43,10 @@ unit -1s whose own comment says the patch passed (#8891, #8903, #8947,
 #8704). HADOOP-19970's only patch-caused failure, `TestJettyClasspath`, is
 gone now that HADOOP-20014 is in trunk, and #8699's Build passes; the PR has
 not been rebased on the post-merge trunk yet. On 2026-11-08 #8891 got an
-empty trigger commit (`6a889ae8fd8`) and its fresh Build was still running,
-and #8894's Build rerun was still in progress. The bottleneck is review and
+empty trigger commit (`6a889ae8fd8`): its fresh Build passed and its fresh
+Yetus is still running, so the PR still shows the stale 11-07 pre-trigger
+vote; #8894's Build rerun has all jobs green but the last one. The
+bottleneck is review and
 merge capacity, and pan3793 and pjfanning are the committers engaged. See
 [Course of action](#course-of-action-proposal-of-2026-11-06).
 
@@ -123,8 +125,8 @@ the patch.
 | [HADOOP-20014](https://issues.apache.org/jira/browse/HADOOP-20014) | Resolved | Jose Luis López | [#8892](https://github.com/apache/hadoop/pull/8892), merged 11-05 | - | - | - | pan3793 |
 | [HADOOP-20015](https://issues.apache.org/jira/browse/HADOOP-20015) | In Progress | Jose Luis López | [#8893](https://github.com/apache/hadoop/pull/8893) | +1, 11-06 | Yes | Pass | pan3793, 11-05 |
 | [HADOOP-20012](https://issues.apache.org/jira/browse/HADOOP-20012) | In Progress | Jose Luis López | [#8890](https://github.com/apache/hadoop/pull/8890) | -1 (test4tests), 11-06 | Yes | Pass | pjfanning, 11-06 |
-| [HADOOP-20013](https://issues.apache.org/jira/browse/HADOOP-20013) | In Progress | Jose Luis López | [#8891](https://github.com/apache/hadoop/pull/8891) | -1 (branch SpotBugs + unit anomaly), 11-07 | No (trigger 11-08) | Running | None |
-| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | -1 (test4tests), 11-06 | Yes | Fail (flaky TestSSLHttpServerMTLS; rerun running) | None |
+| [HADOOP-20013](https://issues.apache.org/jira/browse/HADOOP-20013) | In Progress | Jose Luis López | [#8891](https://github.com/apache/hadoop/pull/8891) | -1 (branch SpotBugs + unit anomaly), 11-07, pre-trigger | No (trigger `6a889ae8fd8` 11-08) | Pass, 11-08 | None |
+| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | -1 (test4tests), 11-06 | Yes | Rerun running (all jobs green but the last), 11-08 | None |
 | [HADOOP-19970](https://issues.apache.org/jira/browse/HADOOP-19970) | In Progress | Jose Luis López | [#8699](https://github.com/apache/hadoop/pull/8699), draft | -1 (branch SpotBugs only), 11-06 | Yes | Pass | None |
 | [HADOOP-20049](https://issues.apache.org/jira/browse/HADOOP-20049) | Open | Jose Luis López | [#8903](https://github.com/apache/hadoop/pull/8903) | -1 (test4tests + unit anomaly), 11-06 | Yes | Pass | None |
 | [HADOOP-20003](https://issues.apache.org/jira/browse/HADOOP-20003) | Open | None | [#8945](https://github.com/apache/hadoop/pull/8945), draft | +1, 11-06 | Yes | Pass | None |
@@ -165,11 +167,14 @@ are still unassigned in JIRA.
   branch-side SpotBugs (trunk's 80 existing warnings) and a unit -1 whose own
   comment says the patch passed — the known anomaly; read the linked unit log
   before treating it as real (the listed failure is `TestYarnNativeServices`).
-  A fresh Yetus and Build started on the new head on 11-08; no approval yet.
+  A fresh Yetus and Build started on the new head on 11-08: the Build passed
+  (fork run 42507442420) and the fresh Yetus is still running, so the vote on
+  the PR is the stale 11-07 pre-trigger one. No approval yet.
 - **#8894 (20016):** the 11-06 Yetus on the current head is `test4tests` only.
   The branch is 4 commits behind trunk. The fork's Build on the generated
   `HADOOP-20016` branch failed on `TestSSLHttpServerMTLS` only (HADOOP-19997);
-  a rerun (fork run 42131124105) was still in progress on 2026-11-08.
+  the rerun (fork run 42131124105) was still in progress on 2026-11-08, all
+  jobs green but the last one.
   pan3793 questioned the module declarations on 2026-11-04 ("I would leverage
   Maven's built-in transitive dependency management"); the answer (the
   declarations are `optional`, downstream resolution is unchanged, and they
