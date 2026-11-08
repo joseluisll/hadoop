@@ -23,16 +23,20 @@ Status refresh 2026-11-08: "Where it stands", the PR tracking table, "What
 the red results mean", "Course of action" items 1-2 and the owner's open
 items were re-read from JIRA, GitHub and the fork on 2026-11-08 (trunk is
 still at the HADOOP-20014 merge). The rest of the body carries the
-2026-11-06 reading.
+2026-11-06 reading. Later on 2026-11-08 the owner decided stage 4: keep
+HADOOP-20008 (the catalog gets its own Jetty version) and drop
+HADOOP-19998 (no catalog retirement, so no `[DISCUSS]` mail). This
+document is updated to that decision.
 
 **Where it stands (2026-11-08):** HADOOP-20014 is the first subtask in trunk
 (merged 2026-11-05, approved by pan3793). Two more stage-1 PRs are approved:
 #8890 (20012, pjfanning, 11-06) and #8893 (20015, pan3793, 11-05) — #8893 is
 fully green on its final head (Yetus +1, 11-06; Build pass) and #8890's only
-red is the waived `test4tests`; both wait on merge. Every other subtask
-except HADOOP-19998 now has a PR: nine were opened on 2026-11-05 (20003 to
+red is the waived `test4tests`; both wait on merge. Every other subtask now
+has a PR: nine were opened on 2026-11-05 (20003 to
 20008, 19999, 20000, plus HADOOP-20048 outside the umbrella), so 16 PRs are
-open in the series. No red result left on any of them is caused by its
+open in the series; HADOOP-19998 was dropped on 2026-11-08 (stage-4 decision,
+see below) and has no PR by design. No red result left on any of them is caused by its
 patch: what remains is `test4tests` on pom-only changes, trunk's 80 SpotBugs
 warnings, flaky tests (HADOOP-19997, HADOOP-19982, HADOOP-20048), and the
 unit -1s whose own comment says the patch passed (#8891, #8903, #8947,
@@ -58,7 +62,9 @@ for trunk (3.6.0).
 
 The umbrella is done when:
 
-- no Jetty 9.4 artifact is left anywhere;
+- no Jetty 9.4 artifact is left anywhere, except inside the application
+  catalog, which keeps shipping its own Jetty 9.4 by the 2026-11-08 stage-4
+  decision (HADOOP-20008);
 - every daemon serves on Jetty 12;
 - the full test suite passes;
 - the release note lists every incompatible change.
@@ -74,7 +80,7 @@ so HADOOP-19972 shrinks to the port. The work runs in stages:
 | 1. One Jetty, declared where used | 20012 to 20016 | Cleans the classpaths and removes Jetty API that Jetty 12 drops | No intended change |
 | 2. One servlet API | 19970 | Moves to `javax.servlet-api` 4.0.1 | No intended change |
 | 3. Prepare for what Jetty 12 changes | 20049, 20003 to 20007 | Makes Hadoop independent of Jetty 12's differences, on 9.4 | Refusal details move to the body |
-| 4. App catalog | 20008 or 19998 | Takes the last Jetty 9.4 user out of the way | 19998 retires a module |
+| 4. App catalog | 20008 | Takes the last Jetty 9.4 user out of the way; the catalog keeps shipping its own Jetty 9.4 | No intended change |
 | 5. Port | 19972 | Jetty 12.1 on ee8 | Yes, incompatible |
 | Independent | 19999, 20000 | Guice 6, and drop `jsr311-api` | No intended change |
 
@@ -91,8 +97,9 @@ so HADOOP-19972 shrinks to the port. The work runs in stages:
 4. HADOOP-20003, then 20005, which is stacked on it (#8947 carries both
    commits). Then 20004, 20006 and 20007. 20004 and 20006 conflict in
    `TestHttpServer`.
-5. HADOOP-20008 or HADOOP-19998, not both. If 19998 retires the catalog,
-   20008 and the catalog part of 20012 are unnecessary.
+5. HADOOP-20008. The owner decided on 2026-11-08 to keep the catalog on its
+   own Jetty version and dropped HADOOP-19998 (retirement), so #8950 is the
+   only stage-4 PR.
 6. HADOOP-19972.
 
 HADOOP-19999 and HADOOP-20000 can land at any time.
@@ -126,13 +133,13 @@ the patch.
 | [HADOOP-20006](https://issues.apache.org/jira/browse/HADOOP-20006) | Open | None | [#8948](https://github.com/apache/hadoop/pull/8948), draft | +1, 11-06 | Yes | None yet | None |
 | [HADOOP-20007](https://issues.apache.org/jira/browse/HADOOP-20007) | Open | None | [#8949](https://github.com/apache/hadoop/pull/8949), draft | +1, 11-06 | Yes | Pass | None |
 | [HADOOP-20008](https://issues.apache.org/jira/browse/HADOOP-20008) | Open | None | [#8950](https://github.com/apache/hadoop/pull/8950), draft | -1 (test4tests), 11-06 | Yes | Pass | None |
-| [HADOOP-19998](https://issues.apache.org/jira/browse/HADOOP-19998) | Open | None | No PR | - | - | - | - |
+| [HADOOP-19998](https://issues.apache.org/jira/browse/HADOOP-19998) | Dropped 2026-11-08 | None | No PR | - | - | - | - |
 | [HADOOP-19999](https://issues.apache.org/jira/browse/HADOOP-19999) | Open | None | [#8944](https://github.com/apache/hadoop/pull/8944), draft | -1 (test4tests), 11-06 | Yes | Pass | None |
 | [HADOOP-20000](https://issues.apache.org/jira/browse/HADOOP-20000) | Open | None | [#8940](https://github.com/apache/hadoop/pull/8940) | -1 (test4tests), 11-05 | Yes | Pass | None |
 | [HADOOP-19972](https://issues.apache.org/jira/browse/HADOOP-19972) | Open | Jose Luis López | [#8704](https://github.com/apache/hadoop/pull/8704), draft | -1 (branch SpotBugs + unit anomaly), 11-06 | Yes | Pass | None |
 
 The nine PRs opened on 2026-11-05 come from the generated `<JIRA>` branches
-(one commit each on trunk `c815ec8e1e9`). 20003 to 20008 and 19998 to 20000
+(one commit each on trunk `c815ec8e1e9`). 20003 to 20008 and 19999 to 20000
 are still unassigned in JIRA.
 
 ### What the red results mean
@@ -306,14 +313,15 @@ share a classpath with Jetty 12.
 
 - **HADOOP-20008, give the catalog its own Jetty version.** New
   `solr.jetty.version`, set to 9.4.58.v20250814, decouples it from Hadoop's
-  Jetty. The build still ships Jetty 9.4 inside the catalog, so this alone
-  does not satisfy the umbrella's goal. Harmless on its own: app.war ships the
+  Jetty. The build still ships Jetty 9.4 inside the catalog; with the
+  retirement (19998) dropped, this is the accepted end state for the catalog.
+  Harmless on its own: app.war ships the
   same Jetty as today.
-- **HADOOP-19998, move the catalog off Solr 8 and Jetty 9.4.** The staged commit
-  retires the module. Solr 10 would need Java 21 and `jakarta`. Retiring needs
-  agreement on the dev list and a release note. The `[DISCUSS]` mail has not
-  been sent: common-dev has only the JIRA creation notices for 19998 and
-  20008.
+- **HADOOP-19998, move the catalog off Solr 8 and Jetty 9.4. DROPPED.** The
+  staged commit retired the module, but on 2026-11-08 the owner decided to
+  keep the catalog (HADOOP-20008 path) and drop the retirement: no dev-list
+  discussion is needed and the `[DISCUSS]` mail will not be sent. The
+  umbrella's "no Jetty 9.4 anywhere" goal no longer applies to the catalog.
 
 ### Stage 5: the port
 
@@ -528,9 +536,10 @@ order and keeps everything else off the reviewer's path.
    Yetus on #8947 and #8948; assign the six JIRAs. Ask for review only once
    #8699 is in review, so the reviewer sees one topic at a time. #8903
    (20049) goes right after 19970.
-7. **Decide stage 4 now:** send the `[DISCUSS]` mail on retiring the catalog
-   (HADOOP-19998). Independently, #8950 (20008) is harmless and can land any
-   time; if the list agrees to retire, close 20008 as Won't Fix instead.
+7. **Stage 4 is decided (owner, 2026-11-08):** HADOOP-20008 stays — the
+   catalog keeps shipping its own Jetty 9.4 under `solr.jetty.version` — and
+   HADOOP-19998 is dropped, so there is no `[DISCUSS]` mail to send.
+   #8950 (20008) is harmless and can land any time in the stage-2/3 queue.
 8. **HADOOP-19972:** wait for Yetus on `5c47e102dda` (the `jetty-schemas`
    fix); rebuild on the PR branches with step 3; keep it draft until 20049
    and stage 3 are in. File the Build-coverage JIRA from the 2026-11-05
@@ -555,7 +564,9 @@ Owner's actions (refreshed 2026-11-08):
 2. Confirm the fresh runs on #8891 (Yetus + Build, started 11-08) and the
    #8894 Build rerun; reviews are still missing on both.
 3. Reply to pan3793 on #8894 with the fallback (dependencyManagement only).
-4. Send the `[DISCUSS]` mail on retiring the catalog (HADOOP-19998).
+4. ~~Send the `[DISCUSS]` mail on retiring the catalog (HADOOP-19998).~~
+   Dropped 2026-11-08 with the retirement itself: the owner chose the
+   HADOOP-20008 path, so no mail is needed.
 5. OK the rebuild and force-push of `jetty-phase-a` and `jetty-phase-c`, and
    the next harness batch.
 6. Un-draft #8945, #8946, #8949, #8951 once their Build is green; get Yetus
@@ -564,7 +575,7 @@ Owner's actions (refreshed 2026-11-08):
 
 JIRA changes not yet made:
 
-- Assign 20003 to 20008 and 19998 to 20000.
+- Assign 20003 to 20008. (The 19998-to-20000 half is moot: 19998 is dropped.)
 - On HADOOP-19972: the description's "Depends on" list should name 20049
   and 20003 to 20008, 20012 to 20016 as JIRA links do.
 - File the Build-coverage improvement from
