@@ -49,7 +49,14 @@ if [ ! -e "${DOCKER_FILE}" ] ; then
   exit 1
 fi
 
-docker build "${DOCKER_PLATFORM_ARGS[@]}" -t hadoop-build -f "${DOCKER_FILE}" "${DOCKER_DIR}"
+# The caller may supply a prebuilt 'hadoop-build' image (e.g. CI pulling
+# a cached build-env image from a registry instead of rebuilding it);
+# HADOOP_BUILD_ENV_PREBUILT=1 skips the build below.
+if [ "${HADOOP_BUILD_ENV_PREBUILT:-0}" != "1" ]; then
+  docker build "${DOCKER_PLATFORM_ARGS[@]}" -t hadoop-build -f "${DOCKER_FILE}" "${DOCKER_DIR}"
+else
+  echo "HADOOP_BUILD_ENV_PREBUILT=1: skipping base image build, using existing 'hadoop-build' image"
+fi
 
 USER_NAME=${SUDO_USER:=$USER}
 USER_ID=$(id -u "${USER_NAME}")

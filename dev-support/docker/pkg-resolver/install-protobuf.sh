@@ -38,16 +38,42 @@ if [ "$version_to_install" != "3.25.5" ]; then
   version_to_install=$default_version
 fi
 
+# Retry a download: transient CDN outages (HTTP 503/504, mid-transfer
+# drops) have killed unattended image builds — the short curl --retry
+# window written into /root/.curlrc does not cover multi-minute outage
+# windows (observed: protobuf's GitHub archive, 2026-11-08). --fail makes
+# HTTP error codes fail the download instead of saving the error page as
+# the tarball. Attempts and delay are overridable for testing.
+download_with_retry() {
+  local url="$1" out="$2"
+  local attempts="${DOWNLOAD_RETRY_ATTEMPTS:-5}"
+  local delay="${DOWNLOAD_RETRY_DELAY:-60}"
+  local i
+  for i in $(seq 1 "$attempts"); do
+    rm -f "$out"
+    if curl -L -s -S --fail --connect-timeout 30 --max-time 600 "$url" -o "$out"; then
+      return 0
+    fi
+    if [ "$i" -lt "$attempts" ]; then
+      echo "WARN: download of $url failed (attempt $i/$attempts), retrying in ${delay}s" >&2
+      sleep "$delay"
+    fi
+  done
+  rm -f "$out"
+  echo "ERROR: download of $url failed after $attempts attempts" >&2
+  return 1
+}
+
 if [ "$version_to_install" == "3.25.5" ]; then
   # hadolint ignore=DL3003
   mkdir -p /opt/protobuf-src &&
-    curl -L -s -S \
+    download_with_retry \
       https://github.com/protocolbuffers/protobuf/archive/refs/tags/v3.25.5.tar.gz \
-      -o /opt/protobuf.tar.gz &&
+      /opt/protobuf.tar.gz &&
     tar xzf /opt/protobuf.tar.gz --strip-components 1 -C /opt/protobuf-src &&
-    curl -L -s -S \
+    download_with_retry \
       https://github.com/abseil/abseil-cpp/archive/refs/tags/20230802.1.tar.gz \
-      -o /opt/abseil-cpp.tar.gz &&
+      /opt/abseil-cpp.tar.gz &&
     tar xzf /opt/abseil-cpp.tar.gz --strip-components 1 -C /opt/protobuf-src/third_party/abseil-cpp &&
     cd /opt/protobuf-src &&
     cmake -S . -B build -DCMAKE_POSITION_INDEPENDENT_CODE=ON -Dprotobuf_BUILD_TESTS=OFF &&

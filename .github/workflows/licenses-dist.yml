@@ -36,7 +36,10 @@ on:
     paths:
       - '.github/workflows/licenses-dist.yml'
       - 'dev-support/licenses/**'
-      - 'dev-support/docker/Dockerfile_ubuntu_24'
+      # the whole build-env image tree is a gate input: its Dockerfiles
+      # and pkg-resolver scripts feed the content-addressed image cache
+      - 'dev-support/docker/**'
+      - 'start-build-env.sh'
       - 'LICENSE-binary'
       - 'pom.xml'
   schedule:
@@ -46,6 +49,10 @@ on:
 
 permissions:
   contents: read
+  # write: the job publishes the content-addressed build-env image cache
+  # to GHCR (see the pull/build step below); GITHUB_TOKEN-scoped packages
+  # stay private to this repository.
+  packages: write
 
 jobs:
   dist-archive-gate:
@@ -62,7 +69,45 @@ jobs:
       - name: Prepare bind-mount sources for the Docker build env
         run: mkdir -p "$HOME/.m2/repository" "$HOME/.gnupg"
 
-      # Same image the Hadoop CI uses, with the full native toolchain.
+      # The build-env image takes ~20 minutes to build (its pkg-resolver
+      # downloads are also the branch's main transient-failure point:
+      # CDN 503/504 windows have killed several runs). Cache it in GHCR
+      # under a CONTENT-ADDRESSED tag: the hash of every file the image
+      # build consumes (Dockerfile_ubuntu_24, the pkg-resolver scripts
+      # and manifests, hadoop_env_checks.sh). A cache hit therefore means
+      # the image was built from the exact inputs of THIS commit, and any
+      # input change produces a new tag — a stale image can never mask a
+      # Dockerfile or download-script change.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Pull the cached build-env image (build and push it on a miss)
+        run: |
+          set -euo pipefail
+          owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
+          image="ghcr.io/${owner}/hadoop-build-ubuntu_24"
+          hash="$(cat dev-support/docker/Dockerfile_ubuntu_24 \
+                       dev-support/docker/pkg-resolver/* \
+                       dev-support/docker/hadoop_env_checks.sh \
+             | sha256sum | cut -d' ' -f1)"
+          tag="${image}:cache-${hash}"
+          if docker pull -q "$tag"; then
+            echo "Cache hit: using ${tag}"
+            docker tag "$tag" hadoop-build
+          else
+            echo "Cache miss: building the build-env image, pushing ${tag}"
+            docker build --platform linux/amd64 -t hadoop-build \
+              -f dev-support/docker/Dockerfile_ubuntu_24 dev-support/docker
+            docker tag hadoop-build "$tag"
+            docker push -q "$tag"
+          fi
+
+      # Same image the Hadoop CI uses, with the full native toolchain —
+      # pulled from the GHCR cache above when its inputs are unchanged.
       # One reactor pass installs the modules (the aggregate goal resolves
       # artifacts from the local repository) and assembles the tarballs;
       # the direct goal invocation then builds the root THIRD-PARTY
@@ -70,6 +115,8 @@ jobs:
       # the cloud store SDKs into the cloud-storage dist so it is gated
       # like the main archive.
       - name: Build dist tarball and inventory (Docker build env)
+        env:
+          HADOOP_BUILD_ENV_PREBUILT: '1'
         run: >-
           DOCKER_INTERACTIVE_RUN= ./start-build-env.sh ubuntu_24 bash -c
           'mvn -B -ntp install -Pdist,native -DskipTests -Dtar
