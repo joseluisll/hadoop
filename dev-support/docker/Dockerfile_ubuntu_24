@@ -40,6 +40,13 @@ RUN chmod a+x pkg-resolver/*.sh pkg-resolver/*.py \
     && chmod a+r pkg-resolver/*.json
 
 ######
+# Retry transient download failures in the pkg-resolver installs below
+# (GitHub releases and similar hosts intermittently fail mid-transfer or
+# serve an HTML error page, which a bare curl saves as the tarball)
+######
+RUN printf 'fail\nretry = 5\nretry-delay = 5\nretry-all-errors\n' > /root/.curlrc
+
+######
 # Install packages from apt
 ######
 # hadolint ignore=DL3008,SC2046

@@ -36,6 +36,7 @@ on:
     paths:
       - '.github/workflows/licenses-dist.yml'
       - 'dev-support/licenses/**'
+      - 'dev-support/docker/Dockerfile_ubuntu_24'
       - 'LICENSE-binary'
       - 'pom.xml'
   schedule:
