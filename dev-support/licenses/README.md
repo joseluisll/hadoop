@@ -86,6 +86,15 @@ and gates each archive against:
 - the `shaded-jars` mapping (requirement 37) for graph entries shaded
   into top-level jars.
 
+The Docker build-env image comes from a GHCR cache under a
+content-addressed tag (the hash of the files the image build consumes),
+provided by `build-env-image.sh`. On a miss it waits while an earlier
+in-flight run of the workflow is building the image, and pulls it when it
+appears, so two pushes close together build it once; otherwise it builds
+and pushes it. The workflow has no concurrency group on purpose: GitHub
+would cancel queued runs, and a cancelled archive run fails that commit's
+per-push drift gate (requirement 10).
+
 The tools also run standalone against any tarball or exploded layout:
 
 ```bash

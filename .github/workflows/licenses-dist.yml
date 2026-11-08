@@ -53,6 +53,9 @@ permissions:
   # to GHCR (see the pull/build step below); GITHUB_TOKEN-scoped packages
   # stay private to this repository.
   packages: write
+  # read: on a cache miss, build-env-image.sh looks for an earlier
+  # in-flight run of this workflow that is building the same image
+  actions: read
 
 jobs:
   dist-archive-gate:
@@ -77,7 +80,11 @@ jobs:
       # and manifests, hadoop_env_checks.sh). A cache hit therefore means
       # the image was built from the exact inputs of THIS commit, and any
       # input change produces a new tag — a stale image can never mask a
-      # Dockerfile or download-script change.
+      # Dockerfile or download-script change. On a miss the script waits
+      # for an earlier in-flight run that is building the image (two
+      # pushes close together) instead of building it twice; no
+      # concurrency group, which would cancel queued runs and fail their
+      # R10 gate.
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
@@ -85,26 +92,11 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Pull the cached build-env image (build and push it on a miss)
-        run: |
-          set -euo pipefail
-          owner="$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')"
-          image="ghcr.io/${owner}/hadoop-build-ubuntu_24"
-          hash="$(cat dev-support/docker/Dockerfile_ubuntu_24 \
-                       dev-support/docker/pkg-resolver/* \
-                       dev-support/docker/hadoop_env_checks.sh \
-             | sha256sum | cut -d' ' -f1)"
-          tag="${image}:cache-${hash}"
-          if docker pull -q "$tag"; then
-            echo "Cache hit: using ${tag}"
-            docker tag "$tag" hadoop-build
-          else
-            echo "Cache miss: building the build-env image, pushing ${tag}"
-            docker build --platform linux/amd64 -t hadoop-build \
-              -f dev-support/docker/Dockerfile_ubuntu_24 dev-support/docker
-            docker tag hadoop-build "$tag"
-            docker push -q "$tag"
-          fi
+      - name: Provide the build-env image (GHCR cache, else wait or build)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_STEP: Provide the build-env image (GHCR cache, else wait or build)
+        run: dev-support/licenses/build-env-image.sh
 
       # Same image the Hadoop CI uses, with the full native toolchain —
       # pulled from the GHCR cache above when its inputs are unchanged.
