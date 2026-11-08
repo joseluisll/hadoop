@@ -21,8 +21,7 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
-pkg-resolver/check_platform.py "$1"
-if [ $? -eq 1 ]; then
+if ! pkg-resolver/check_platform.py "$1"; then
   echo "ERROR: Unsupported platform $1"
   exit 1
 fi
@@ -38,31 +37,7 @@ if [ "$version_to_install" != "3.25.5" ]; then
   version_to_install=$default_version
 fi
 
-# Retry a download: transient CDN outages (HTTP 503/504, mid-transfer
-# drops) have killed unattended image builds — the short curl --retry
-# window written into /root/.curlrc does not cover multi-minute outage
-# windows (observed: protobuf's GitHub archive, 2026-11-08). --fail makes
-# HTTP error codes fail the download instead of saving the error page as
-# the tarball. Attempts and delay are overridable for testing.
-download_with_retry() {
-  local url="$1" out="$2"
-  local attempts="${DOWNLOAD_RETRY_ATTEMPTS:-5}"
-  local delay="${DOWNLOAD_RETRY_DELAY:-60}"
-  local i
-  for i in $(seq 1 "$attempts"); do
-    rm -f "$out"
-    if curl -L -s -S --fail --connect-timeout 30 --max-time 600 "$url" -o "$out"; then
-      return 0
-    fi
-    if [ "$i" -lt "$attempts" ]; then
-      echo "WARN: download of $url failed (attempt $i/$attempts), retrying in ${delay}s" >&2
-      sleep "$delay"
-    fi
-  done
-  rm -f "$out"
-  echo "ERROR: download of $url failed after $attempts attempts" >&2
-  return 1
-}
+source "$(dirname "$0")/download-with-retry.sh"
 
 if [ "$version_to_install" == "3.25.5" ]; then
   # hadolint ignore=DL3003

@@ -118,12 +118,24 @@ include(FetchContent)
 # Install googletest
 # As per the approach documented in the GoogleTest repo -
 # https://github.com/google/googletest/blob/e649993a402d96afe25fbf3413749adf0f2947f6/googletest/README.md#incorporating-into-an-existing-cmake-project
+# The commit SHA in GOOGLETEST_COMMIT below corresponds to the
+# tag release-1.10.0 in the googletest repository.
+set(GOOGLETEST_COMMIT 703bd9caab50b139428cea1aaff9974ebee5742e)
+# CI builds may pre-seed the exact pinned source tree at
+# /opt/googletest-<commit> (the Hadoop build-env image does, see
+# dev-support/docker/pkg-resolver/install-googletest-preseed.sh); when it
+# is present, FetchContent uses it in place of the network download. The
+# preseed path is derived from GOOGLETEST_COMMIT, so bumping the pin
+# automatically moves the path and a stale preseed tree is never used.
+set(HADOOP_GOOGLETEST_PRESEED "/opt/googletest-${GOOGLETEST_COMMIT}" CACHE PATH
+    "Pre-seeded googletest source directory (skips the FetchContent download)")
+if(EXISTS "${HADOOP_GOOGLETEST_PRESEED}/CMakeLists.txt")
+  set(FETCHCONTENT_SOURCE_DIR_GOOGLETEST "${HADOOP_GOOGLETEST_PRESEED}")
+endif()
 FetchContent_Declare(
   googletest
-  URL https://github.com/google/googletest/archive/703bd9caab50b139428cea1aaff9974ebee5742e.zip
+  URL https://github.com/google/googletest/archive/${GOOGLETEST_COMMIT}.zip
 )
-# The commit SHA 703bd9caab50b139428cea1aaff9974ebee5742e in the URL above corresponds to the
-# tag release-1.10.0 in the googletest repository.
 # For Windows: Prevent overriding the parent project's compiler/linker settings
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(googletest)

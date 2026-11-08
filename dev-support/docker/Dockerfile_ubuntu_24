@@ -99,6 +99,7 @@ RUN pkg-resolver/install-maven.sh ubuntu:noble
 RUN pkg-resolver/install-spotbugs.sh ubuntu:noble
 RUN pkg-resolver/install-boost.sh ubuntu:noble
 RUN pkg-resolver/install-protobuf.sh ubuntu:noble
+RUN pkg-resolver/install-googletest-preseed.sh ubuntu:noble
 RUN pkg-resolver/install-hadolint.sh ubuntu:noble
 RUN pkg-resolver/install-intel-isa-l.sh ubuntu:noble
 
