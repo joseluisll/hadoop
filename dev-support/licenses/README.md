@@ -39,9 +39,6 @@ dev-support/licenses/resolve-licenses.sh \
   target/third-party/THIRD-PARTY.txt \
   dev-support/licenses/texts \
   target/licenses-resolved --strict
-dev-support/licenses/check-licenses-parity.sh \
-  target/third-party/THIRD-PARTY.txt LICENSE-binary \
-  dev-support/licenses/assembly-includes
 ```
 
 For a quick local iteration over a single module:
@@ -65,10 +62,12 @@ dev-support/licenses/normalize-licenses.sh target/licenses /tmp/downloaded
 
 `.github/workflows/licenses.yml` installs the full reactor (no skipped
 modules), builds the `THIRD-PARTY` inventory, resolves texts from the
-local store (`--strict`), runs the parity gate against the manual
-`LICENSE-binary` manifest, and uploads everything as workflow artifacts —
-all offline. Downloading from the network runs only when explicitly
-requested via the `workflow_dispatch` `download` input.
+local store (`--strict`), fails when the committed `LICENSE-binary`
+(the archive-derived artifact of record, requirement 40) drifts from
+the last ground-truth run's generated manifest (requirement 10), and
+uploads everything as workflow artifacts — all offline. Downloading
+from the network runs only when explicitly requested via the
+`workflow_dispatch` `download` input.
 
 ## Archive ground truth (weekly / on demand)
 
@@ -97,6 +96,23 @@ dev-support/licenses/check-archive-licenses.sh \
   target/third-party/THIRD-PARTY.txt
 ```
 
+The shipped `LICENSE-binary` itself is generated (requirement 40) from
+the archives' enumerations plus the inventory, with the multi-license
+policy of `Multi-License-Policy.md` applied in code. To regenerate it
+against a ground-truth run's artifacts:
+
+```bash
+python3 dev-support/licenses/generate-archive-manifest.py \
+  --inventory <run>/third-party/THIRD-PARTY.txt \
+  --archive-tsv <run>/archive-ground-truth/*/archive-jars.tsv \
+  --out LICENSE-binary
+```
+
+The dist workflow runs this generation itself and fails on any diff
+against the committed file (the R40 drift gate); the per-push workflow
+fails when the committed file drifts from the last successful run's
+generated manifest (R10). Regenerate and commit — never hand-edit.
+
 ## Curation files
 
 - `override-THIRD-PARTY.properties` — license overrides for dependencies
@@ -104,7 +120,7 @@ dev-support/licenses/check-archive-licenses.sh \
   (`groupId--artifactId--version=License Name`).
 - `assembly-includes` — `g:a` entries that ship via assembly includes but
   are absent from the Maven compile/runtime graph (e.g. hsqldb in
-  lib-examples). The parity gate treats them as expected absences and
+  lib-examples). The archive gate treats them as expected absences and
   fails if one shows up in the inventory (a stale exception).
 - `archive-jar-mappings` — filename stem to `g:a` for archive jars that
   resist automatic normalization (shaded jars whose own pom.properties is
@@ -126,9 +142,10 @@ dev-support/licenses/check-archive-licenses.sh \
   report line (a dependency can carry several licenses, and license names
   can themselves contain parentheses — a naive `\([^()]*\)` match
   silently drops both) and rejects HTML junk texts even without `--strict`
-- `check-licenses-parity.sh` gates the inventory against the manual
-  `LICENSE-binary` manifest (requirement 25): every `g:a` the manual
-  manifest tracks must appear in the generated inventory
+- the committed `LICENSE-binary` is generated from the archives by
+  `generate-archive-manifest.py` (requirement 40) and gated by drift
+  detection in both workflows (requirement 10) — the R25 parity gate
+  against a hand-maintained manifest is retired
 - `excludedGroups` also drops our own reactor artifacts
   (`org.apache.hadoop`) and the shaded `hadoop-thirdparty` jars — they are
   not third-party

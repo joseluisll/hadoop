@@ -144,15 +144,41 @@ jobs:
           fi
           exit "$status"
 
+      # R40: the committed LICENSE-binary is the artifact of record — the
+      # manifest each distributed archive must carry. Regenerate it from
+      # THIS run's archive enumerations and fail on any drift from the
+      # committed file: the shipped manifest may never silently diverge
+      # from what the archives actually contain.
+      - name: Regenerate the manifest from this run's archives (R40 drift gate)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tsvs=(target/archive-ground-truth/*/archive-jars.tsv)
+          if [[ "${#tsvs[@]}" -eq 0 ]]; then
+            echo "R40 FAILURE: no archive enumeration TSVs found" >&2
+            exit 1
+          fi
+          python3 dev-support/licenses/generate-archive-manifest.py \
+            --inventory target/third-party/THIRD-PARTY.txt \
+            --archive-tsv "${tsvs[@]}" \
+            --out target/generated-LICENSE-binary
+          if ! diff -u LICENSE-binary target/generated-LICENSE-binary; then
+            echo "R40 DRIFT: committed LICENSE-binary differs from the manifest generated from this run's archives — regenerate and commit it" >&2
+            exit 1
+          fi
+          echo "R40 drift gate: committed LICENSE-binary matches this run's archives"
+
       - name: Upload archive ground truth
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: archive-ground-truth
           # the extracted tarballs stay on the runner; upload only the
-          # evidence (enumeration TSVs, gate logs, inventory)
+          # evidence (enumeration TSVs, gate logs, inventory) plus the
+          # generated manifest the per-push drift gate compares against
           path: |
             target/third-party/**
             target/archive-ground-truth/*/archive-jars.tsv
             target/archive-ground-truth/*/gate.log
+            target/generated-LICENSE-binary
           if-no-files-found: warn

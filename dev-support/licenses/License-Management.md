@@ -231,16 +231,17 @@ audit (37 bundled-but-unlisted jars; jacoco/ini4j listed yet absent).
 | 5, 19, 33 | Implemented — `texts/` store + `resolve-licenses.sh`; download behind `workflow_dispatch` input |
 | 6 | Implemented via `failOnMissing` and `--strict` (HTML-junk rejection included) |
 | 8 | Existing (Apache RAT) |
+| 10 | Implemented for LICENSE-binary 2026-11-08 — the per-push gate diffs the committed file against the last successful dist run's generated manifest; the dist workflow diffs it against what its own archives generate (R40 drift gate) |
 | 20–24 | Implemented (licenseMerges, overrideUrl, includeOptional, excludedGroups, license-slugs.sh) |
 | 34 | Implemented — full `mvn install` reactor, no `-pl` scoping |
-| 25 | Implemented — `check-licenses-parity.sh` in CI, green since the 2026-11-07 curation pass; `assembly-includes` carries the justified off-graph exceptions |
+| 25 | **Retired 2026-11-08** with the Stage 3 switch — its per-push slot is taken by R10 drift detection against the archive-derived manifest; the tooling (`check-licenses-parity.sh`) is deleted (record: `2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`). It was implemented and green from the 2026-11-07 curation pass until retirement |
 | 26–27 | Implemented and validated by the first ground-truth run 2026-11-07 (42374519973): the real tarball was enumerated (264 jars incl. the catalog webapp WAR's nested libs), R38 caught 47 unlicensed shipped jars, R36/R37 mapping curated; gate bugs found by the run were fixed (see the run record) |
 | 28–29 | **28 Done 2026-11-07** — curated multi-license policy (`Multi-License-Policy.md`: prefer Apache-2.0, then EDL, then EPL-2.0; jersey/hk2 keep their combined section) applied to the shipped manifest, two misplaced entries corrected (checker-qual → MIT, jakarta.activation-api → EDL; record: `2026-11-07-1630-R28-Policy-Application.md`). 29 Partially — override mechanism exists; disambiguation policy done, no-metadata justification coverage still partial |
 | 30–32 | Addressed by two 2026-11-07 passes: the curation pass (record: `2026-11-07-1150-...md` — malformed entries fixed, versions aligned, 30 stale entries pruned) and the archive-verified prune (record: `2026-11-07-1700-R32-Prune-Declared-Not-Shipped.md` — 10 declared-but-not-shipped entries pruned: kerby x8 non-embedded, jsr311-api, jersey-container-jdk-http; the manual manifest is now exact against the two distributed archives: 302 g:a, every one enumerated or recorded as shaded-embedded) |
 | 7, 9–14, 16 | Open |
 | 35–38 | Landed 2026-11-07 — `licenses-dist.yml` (weekly + `workflow_dispatch`), archive enumeration incl. WAR-nested jars, archive-completeness and archive-vs-inventory gates; validated by the first ground-truth run |
 | 39 | Exclusion justifications recorded (2026-11-07 curation record + README); archive confirmation starts with the first dist run |
-| 40 | Landed for LICENSE-binary 2026-11-07 — `generate-archive-manifest.py` derives the manifest from the enumerated archives + inventory + R28 policy, fail-closed; validated against run 42413534907 (record: `2026-11-07-1730-R40-Generator.md`). NOTICE-binary stays curated (attribution corpus is prose; protected by R10) |
+| 40 | Integrated 2026-11-08 — the committed `LICENSE-binary` IS the generator's output (artifact of record), regenerated and drift-gated by the dist workflow per run; validated against run 42413534907 and the 42427570912/42427570914 pair (record: `2026-11-07-1730-R40-Generator.md`, switch record: `2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`). NOTICE-binary stays curated (attribution corpus is prose; protected by R10) |
 
 ## Transition plan: from the manual gate to archive-derived licensing
 
@@ -272,35 +273,33 @@ re-listed), and the manual manifest pruned to exactness against both
 archives (R32, 10 further entries). R25 still runs per-push because
 the manual file is still what release tarballs actually ship.
 
-**Stage 3 — archive-derived manifest (generator landed 2026-11-07,
-integration open).**
+**Stage 3 — archive-derived manifest (integrated 2026-11-08).**
 `generate-archive-manifest.py` derives `LICENSE-binary` from the
 archives' enumerated contents (R36 TSVs + collected inventory + the
 R28 policy in code + the shaded-jars and mapping curations), fail-closed,
-with an 11-case test suite; validated against run 42413534907 it
-reproduces the converged manual file exactly modulo documented classes
-(15 stale versions dropped, 4 enumerated version forms, two genuine
-section corrections the inventory surfaces: jacoco → EPL 2.0,
-reactive-streams → Public Domain). What remains for the final state:
+with an 11-case test suite; the independent fix-verification review
+completed green 2026-11-08. The design decision is resolved in favor of
+the committed generated file: the artifact of record is the committed
+`LICENSE-binary`, and the switch landed 2026-11-08
+(`2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`):
 
-- Wire the generator into the dist workflow: the shipped
-  `LICENSE-binary`/`NOTICE-binary` are generated from each archive's
-  own enumeration. Design decision pending: generate in-workflow and
-  repack the tarballs (compliant by construction, no drift window) vs
-  commit the generated file as the artifact of record and ship that.
-- The manual files are then deleted; there is nothing left to have
-  parity with, and R25 retires. Its per-push slot is taken by drift
-  detection (R10) against the last generated manifest — same
-  cheapness, better baseline. The 15 stale-version drops and 2 section
-  corrections the generator surfaced land with this switch.
+- The dist workflow regenerates the manifest from each run's own
+  enumeration and fails on any diff against the committed file (the
+  R40 drift gate) — the committed file can never silently diverge from
+  what the archives contain; the tarball ships the committed file.
+- The manual-parity basis is gone: `check-licenses-parity.sh` is
+  deleted and R25 is retired. Its per-push slot is taken by R10 drift
+  detection — the committed file vs the last successful dist run's
+  generated manifest. The 15 stale-version drops and 2 section
+  corrections the generator surfaced landed with the switch.
 - NOTICE-binary stays curated: its per-component attribution corpus is
-  prose that cannot be derived from jar metadata; it is protected by
-  the R10 drift gate.
+  prose that cannot be derived from jar metadata; its generation
+  remains open.
 - The dist-run gates remain the authoritative ones: archive vs the
-  manifest it generated (green by construction) and archive vs graph
-  (still meaningful — it catches jars that reach the tarball through
-  assembly includes the graph never saw, the `lib-examples`/hsqldb
-  class of bug).
+  manifest it generated (green by construction after the drift gate)
+  and archive vs graph (still meaningful — it catches jars that reach
+  the tarball through assembly includes the graph never saw, the
+  `lib-examples`/hsqldb class of bug).
 
 **Substitution summary:** R25 → R10 against a generated baseline,
 validated by R38. The manual gate is scaffolding for as long as the
@@ -317,8 +316,8 @@ both.
 | 2 | R39 justifications confirmed by first ground-truth run | Done 2026-11-07 — first run (42374519973) confirmed no curated exclusion ships, caught one that did (objenesis; un-excluded and re-listed); record: `2026-11-07-1430-Archive-Ground-Truth-First-Run.md` |
 | 2 | R32 pruning of stale manual entries | Done — two 2026-11-07 passes: the curation pass (30 stale entries; record: `2026-11-07-1150-...md`) and the archive-verified prune (10 declared-but-not-shipped entries; manifest exact against both archives at 302 g:a; record: `2026-11-07-1700-R32-Prune-Declared-Not-Shipped.md`) |
 | 2 | R28 multi-license policy | Done 2026-11-07 — `Multi-License-Policy.md` curated and applied (checker-qual → MIT, jakarta.activation-api → EDL; record: `2026-11-07-1630-R28-Policy-Application.md`) |
-| 3 | R40 generator (archive → `LICENSE-binary`) | Landed for LICENSE-binary 2026-11-07 — `generate-archive-manifest.py` (fail-closed, 11-case tests), validated against run 42413534907; record: `2026-11-07-1730-R40-Generator.md`. NOTICE-binary stays curated (attribution corpus is prose; protected by R10) |
-| 3 | Manual files deleted, R25 retired, R10 re-pointed at generated baseline | Open — next step: integration design (generate in-workflow + repack the tarballs vs commit the generated artifact of record); the generator's 15 stale-version drops and 2 section corrections land with this switch |
+| 3 | R40 generator (archive → `LICENSE-binary`) | Integrated 2026-11-08 — the committed `LICENSE-binary` is the generator's output (artifact of record), drift-gated by both workflows; fix-verification review green 2026-11-08; records: `2026-11-07-1730-R40-Generator.md`, `2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`. NOTICE-binary stays curated (attribution corpus is prose); its generation remains open |
+| 3 | Manual files deleted, R25 retired, R10 re-pointed at generated baseline | Done for LICENSE-binary 2026-11-08 — the hand-maintained manifest is replaced by the generated artifact of record (validated: g:a set identical at 302, diff fully classified); `check-licenses-parity.sh` deleted; per-push gate is now R10 drift vs the last dist run's generated manifest |
 
 ## Review changelog
 
