@@ -141,10 +141,17 @@ generated manifest (R10). Regenerate and commit — never hand-edit.
   `section<TAB>line`. `check-asset-manifest.py` gates every path-style
   entry against the source tree per push (requirement 7, fail-closed);
   package-style entries (`name vX.Y`) are validated by the archive-side
-  asset gate (open, requirement 7 stage C). The same script checks the
+  asset gate (`check-archive-assets.py`, requirement 7 stage C), which
+  also lets them cover their own installed `vendor/<name>/` or
+  `node_modules/<name>/` tree. The same script checks the
   source-release `LICENSE.txt` (requirement 48: every path it names
   resolves, and every path-style asset entry is listed in it) and
   `licenses-binary/` (requirement 53, below).
+- `archive-asset-allowlist` — archive asset paths exempt from manifest
+  coverage in the stage C gate: Hadoop-authored UI code, dist-built
+  `.gz` twins, third-party jars' about/license html. Component globs,
+  matched as a contiguous path subsequence; a row that matches no
+  shipped asset fails the gate (self-cleaning).
 - `licenses-binary-aliases` — `slug<TAB>token` for the
   `licenses-binary/LICENSE-<slug>.txt` texts whose slug is not the name
   `LICENSE-binary` lists the component under. Every text must match a
@@ -204,9 +211,11 @@ twice, and matches the alternatives as `^(alt|...)$`.
   `tr2` are listed in neither licence file).
 - Shipped texts that are missing: `licenses-binary/` is checked for stale
   texts only, not for components that lack one (requirement 53).
-- Archive-side non-jar asset enumeration (requirement 7 stage C): the
-  archive asset gate that matches the tarball's actual JS/CSS/native
-  assets (and jar-embedded webapps) against `manifest-assets.txt`.
+- Curation of the Ember YARN UI and Capacity Scheduler UI npm entries
+  against a `-Pyarn-ui` archive. The dist workflow now builds that
+  profile, as `create-release` does, and runs the archive asset gate
+  (`check-archive-assets.py`, requirement 7 stage C). Its first run is
+  the worklist. Record: `2026-11-09-0230-R7-Stage-C-Archive-Asset-Gate.md`.
 - Whitelist/audit policy enforcement (allowed-license gating).
 - Wiring the generated texts into `hadoop-dist`/`hadoop-assemblies` so the
   tarball ships them automatically (requirement 13).
