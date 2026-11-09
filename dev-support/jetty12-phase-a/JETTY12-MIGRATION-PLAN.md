@@ -12,6 +12,14 @@
   limitations under the License. See accompanying LICENSE file.
 -->
 
+> **RETIRED 2026-11-09.** The owner retired this plan document: live tracking
+> for the Jetty 12 migration (HADOOP-19912) is claude-mem work state, project
+> `jetty12-migration` (lists `jetty-migration`, `jetty-prs`, `jetty-coa`,
+> `jetty-owner`, `jetty-jira`), plus JIRA and the apache/hadoop PRs, which are
+> the source of truth. Everything below is a frozen snapshot as of 2026-11-09
+> and is no longer updated; it stays for the rationale, stage design and CI
+> analysis (see "What the red results mean").
+
 # Jetty 12 migration plan (HADOOP-19912)
 
 All status in this document was read from JIRA, GitHub and the fork on
