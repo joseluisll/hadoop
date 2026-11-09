@@ -109,6 +109,19 @@ jobs:
           IMAGE_STEP: Provide the build-env image (GHCR cache, else wait or build)
         run: dev-support/licenses/build-env-image.sh
 
+      # R13: the tarballs' licenses-binary/ directory is GENERATED from
+      # the committed LICENSE-binary and the versioned texts/ store —
+      # never hand-maintained (the repo no longer tracks it). The
+      # cloud-storage assembly copies it during the Maven build, so it
+      # must exist before the reactor runs; the main dist regenerates
+      # it again at layout-stitching time.
+      - name: Generate the license-text directory for the assemblies (R13)
+        run: |
+          rm -rf licenses-binary
+          python3 dev-support/licenses/generate-archive-manifest.py \
+            --emit-licenses-dir-only --manifest LICENSE-binary \
+            --licenses-dir licenses-binary
+
       # Same image the Hadoop CI uses, with the full native toolchain —
       # pulled from the GHCR cache above when its inputs are unchanged.
       # One reactor pass installs the modules (the aggregate goal resolves
@@ -230,6 +243,26 @@ jobs:
             exit 1
           fi
           echo "R40 drift gate: committed LICENSE-binary matches this run's archives"
+          # R53: the license texts the fresh manifest references must be
+          # exactly what each tarball ships (the shipped directory is
+          # the R13 emitter's output, derived from the committed
+          # manifest at build time — identical when R40 is green).
+          rm -rf target/licenses-binary-staged
+          python3 dev-support/licenses/generate-archive-manifest.py \
+            --emit-licenses-dir-only --manifest target/generated-LICENSE-binary \
+            --licenses-dir target/licenses-binary-staged
+          for d in target/archive-ground-truth/*/untarred; do
+            shipped="$(find "$d" -maxdepth 2 -type d -name licenses-binary -print -quit)"
+            if [[ -z "$shipped" ]]; then
+              echo "R53 FAILURE: $d ships no licenses-binary/ directory" >&2
+              exit 1
+            fi
+            if ! diff -r "$shipped" target/licenses-binary-staged; then
+              echo "R53 DRIFT: $(basename "$d") ships a licenses-binary/ that differs from the texts the generated manifest references" >&2
+              exit 1
+            fi
+          done
+          echo "R53 texts gate: every tarball ships exactly the referenced texts"
 
       - name: Upload archive ground truth
         if: always()

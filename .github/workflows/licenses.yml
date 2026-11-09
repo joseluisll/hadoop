@@ -176,10 +176,13 @@ jobs:
       #   place (see the 2026-11-08 R7 record);
       # - every path the source-release LICENSE.txt names must resolve,
       #   and every shipped asset path must be listed in it;
-      # - every text in licenses-binary/ must belong to a component
-      #   LICENSE-binary still lists (licenses-binary-aliases maps the
-      #   texts named differently).
-      - name: Source-tree licence gates (assets, LICENSE.txt, licenses-binary)
+      # - every component-specific text in the texts/ store must still
+      #   be referenced by LICENSE-binary — the tarball's licenses-binary/
+      #   directory is generated from the manifest and the store (R13),
+      #   so a stale text would ship for a component that is gone
+      #   (licenses-binary-aliases maps the texts named differently;
+      #   texts-generic lists resolve-store texts that never ship).
+      - name: Source-tree licence gates (assets, LICENSE.txt, texts store)
         if: always()
         run: python3 dev-support/licenses/check-asset-manifest.py
 

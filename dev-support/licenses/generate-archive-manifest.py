@@ -35,12 +35,20 @@ Usage (from anywhere; curated-file defaults resolve next to this
 script):
   generate-archive-manifest.py --inventory THIRD-PARTY.txt \
       --archive-tsv tsv1 [tsv2 ...] --out LICENSE-binary
+
+R13 text bundling — derive the tarball's licenses-binary/ directory
+from a manifest and the versioned texts/ store (fail-closed):
+  generate-archive-manifest.py --emit-licenses-dir-only \
+      --manifest LICENSE-binary --licenses-dir <dir>
+or pass --licenses-dir alongside the full-mode flags to emit the
+directory from the freshly generated manifest.
 """
 
 import argparse
 import collections
 import os
 import re
+import shutil
 import sys
 from typing import NoReturn
 
@@ -284,12 +292,179 @@ def load_embedded(path):
     return embedded
 
 
+# ---------------------------------------------------------------------------
+# R13: derive the shipped licenses-binary/ directory.
+#
+# The texts/ store (dev-support/licenses/texts) is the single home of the
+# license texts; the tarball's licenses-binary/ directory is GENERATED
+# from the manifest, never hand-maintained. A store text ships iff the
+# manifest references it: its slug (or the token recorded for it in
+# licenses-binary-aliases, which doubles as the ship-reference map)
+# appears in the manifest as a whole word, case-insensitive — the same
+# rule the per-push R53 gate applies. Texts listed in texts-generic are
+# resolve-store generics (apache-2.0, lgpl-2.1, ...) that the manifest
+# does not reference per component; they never ship. Fail-closed: an
+# empty store or manifest, a text whose file is missing or empty, an
+# output directory that is already populated, or a titled section no
+# shipped text covers is a hard error — a component whose license text
+# ships nowhere must fail the build, never pass silently.
+# ---------------------------------------------------------------------------
+
+def load_aliases(path):
+    """slug<TAB>kind<TAB>token rows (kind: component|section); returns
+    slug -> token. Section rows ship-when-referenced but are exempt
+    from the gate's staleness check; both kinds are emission inputs."""
+    aliases = {}
+    for lineno, raw in enumerate(open_or_fail(path, 'aliases file'), 1):
+        line = raw.rstrip('\n')
+        if not line.strip() or line.lstrip().startswith('#'):
+            continue
+        fields = line.split('\t')
+        if len(fields) == 2:  # legacy component row
+            fields = fields[:1] + ['component'] + fields[1:]
+        if len(fields) != 3:
+            fail('malformed line %d in %s (expected '
+                 'slug<TAB>component|section<TAB>token): %r'
+                 % (lineno, path, line))
+        slug, kind, token = fields
+        if kind not in ('component', 'section'):
+            fail('malformed line %d in %s (kind must be component or '
+                 'section, got %r)' % (lineno, path, kind))
+        token = token.strip()
+        # an empty token builds a vacuous whole-word pattern that
+        # matches anything — the gate would silently pass
+        if not token:
+            fail('empty token on line %d in %s' % (lineno, path))
+        if slug in aliases:
+            fail('duplicate slug %r in %s' % (slug, path))
+        aliases[slug] = token
+    return aliases
+
+
+def load_generic_texts(path):
+    """Slugs of resolve-store generics that never ship (no manifest
+    reference is expected for them)."""
+    generic = set()
+    for line in open_or_fail(path, 'texts-generic file'):
+        stripped = line.split('#')[0].strip()
+        if stripped:
+            generic.add(stripped)
+    return generic
+
+
+def store_slugs(store_dir):
+    """Sorted LICENSE-<slug>.txt slugs in the store; fail-closed on an
+    empty or missing store."""
+    if not os.path.isdir(store_dir):
+        fail('license-text store not found: %s' % store_dir)
+    slugs = sorted(
+        name[len('LICENSE-'):-len('.txt')]
+        for name in os.listdir(store_dir)
+        if name.startswith('LICENSE-') and name.endswith('.txt'))
+    if not slugs:
+        fail('no LICENSE-*.txt texts in the store %s' % store_dir)
+    return slugs
+
+
+def token_pattern(token):
+    """Whole-word, case-insensitive matcher for a reference token."""
+    return re.compile(r'(?<![a-z0-9])' + re.escape(token.lower())
+                      + r'(?![a-z0-9])', re.IGNORECASE)
+
+
+def parse_manifest_sections(manifest_path):
+    """Ordered (title, body_text) for every titled section of a
+    generated manifest: a title line followed by a dashed underline.
+    Everything before the first title (the Apache template and its
+    component list) is not a section here."""
+    lines = open_or_fail(manifest_path, 'manifest').read().splitlines()
+    if not any(line.strip() for line in lines):
+        fail('empty manifest %s' % manifest_path)
+    titles = []
+    for i, line in enumerate(lines):
+        underline = lines[i + 1].strip() if i + 1 < len(lines) else ''
+        if line.strip() and underline and len(underline) >= 4 \
+                and set(underline) == {'-'}:
+            titles.append((i, line.strip()))
+    sections = []
+    for idx, (line_no, title) in enumerate(titles):
+        end = titles[idx + 1][0] if idx + 1 < len(titles) else len(lines)
+        # body starts under the dashed underline
+        body = '\n'.join(lines[line_no + 2:end])
+        sections.append((title, body))
+    return sections
+
+
+def derive_shipped_slugs(manifest_path, store_dir, aliases, generic):
+    """The store slugs the manifest references (the R53 ship set)."""
+    with open_or_fail(manifest_path, 'manifest') as fh:
+        manifest_text = fh.read()
+    if not manifest_text.strip():
+        fail('empty manifest %s' % manifest_path)
+    slugs = store_slugs(store_dir)
+    unknown = sorted(set(aliases) - set(slugs))
+    if unknown:
+        fail('licenses-binary-aliases rows with no text in %s: %s'
+             % (store_dir, ', '.join(unknown)))
+    overlap = sorted(set(aliases) & set(generic))
+    if overlap:
+        fail('slugs both aliased and listed in texts-generic: %s'
+             % ', '.join(overlap))
+    unknown_generic = sorted(set(generic) - set(slugs))
+    if unknown_generic:
+        fail('texts-generic rows with no text in %s: %s'
+             % (store_dir, ', '.join(unknown_generic)))
+    shipped = set()
+    for slug in slugs:
+        if slug in generic:
+            continue
+        token = aliases.get(slug, slug)
+        if token_pattern(token).search(manifest_text):
+            shipped.add(slug)
+    # R53, fail-closed direction: every titled section of the
+    # manifest must have its license text shipped — covered by a text
+    # whose token matches the section title or any line of its body.
+    sections = parse_manifest_sections(manifest_path)
+    if not sections:
+        fail('manifest %s carries no titled license sections' % manifest_path)
+    for title, body in sections:
+        section_text = title + '\n' + body
+        if not any(
+                token_pattern(aliases.get(slug, slug)).search(section_text)
+                for slug in shipped):
+            fail('section %r has no shipped license text — every component '
+                 'listed under it ships with no text (add the section text '
+                 'to the store, or a licenses-binary-aliases row)'
+                 % title)
+    return shipped
+
+
+def emit_licenses_dir(manifest_path, store_dir, aliases_path, generic_path,
+                      out_dir):
+    """Copy the referenced texts from the store into a fresh out_dir."""
+    shipped = derive_shipped_slugs(manifest_path, store_dir,
+                                   load_aliases(aliases_path),
+                                   load_generic_texts(generic_path))
+    if os.path.exists(out_dir) and os.listdir(out_dir):
+        fail('licenses-dir %s exists and is not empty — refuse to '
+             'overwrite' % out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    for slug in sorted(shipped):
+        src = os.path.join(store_dir, 'LICENSE-%s.txt' % slug)
+        if not os.path.isfile(src) or os.path.getsize(src) == 0:
+            fail('store text for %r is missing or empty: %s' % (slug, src))
+        shutil.copyfile(src, os.path.join(out_dir,
+                                          'LICENSE-%s.txt' % slug))
+    print('emitted %d license text(s) into %s' % (len(shipped), out_dir))
+    return shipped
+
+
 def main():
     here = os.path.dirname(os.path.abspath(__file__))
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--inventory', required=True,
+    parser.add_argument('--inventory', default=None,
                         help='THIRD-PARTY.txt from the collected-licenses artifact')
-    parser.add_argument('--archive-tsv', required=True, nargs='+',
+    parser.add_argument('--archive-tsv', default=None, nargs='+',
                         help='archive-jars.tsv files (one or more archives)')
     parser.add_argument('--mappings',
                         default=os.path.join(here, 'archive-jar-mappings'),
@@ -301,8 +476,42 @@ def main():
     parser.add_argument('--template', default=os.path.join(here, 'manifest-template.txt'),
                         help='content emitted before the artifact lists '
                              '(ASF preamble + Apache-2.0 text + bundle wording)')
-    parser.add_argument('--out', required=True, help='output LICENSE-binary path')
+    parser.add_argument('--out', default=None, help='output LICENSE-binary path')
+    # R13: derive the shipped licenses-binary/ directory from a manifest
+    parser.add_argument('--emit-licenses-dir-only', action='store_true',
+                        help='emit only the licenses-binary/ directory '
+                             '(no manifest generation): derive the ship set '
+                             'from --manifest and copy the texts from the '
+                             'store')
+    parser.add_argument('--manifest', default=None,
+                        help='LICENSE-binary to derive the ship set from '
+                             '(--emit-licenses-dir-only, or --licenses-dir '
+                             'in full mode)')
+    parser.add_argument('--licenses-dir', default=None,
+                        help='output directory for the generated '
+                             'licenses-binary/ texts (must not exist or '
+                             'be empty)')
+    parser.add_argument('--store', default=os.path.join(here, 'texts'),
+                        help='the versioned license-text store')
+    parser.add_argument('--aliases',
+                        default=os.path.join(here, 'licenses-binary-aliases'),
+                        help='licenses-binary-aliases curation file '
+                             '(slug<TAB>manifest token)')
+    parser.add_argument('--generic', default=os.path.join(here, 'texts-generic'),
+                        help='texts-generic file (store slugs that never '
+                             'ship)')
     args = parser.parse_args()
+
+    if args.emit_licenses_dir_only:
+        if not args.manifest or not args.licenses_dir:
+            parser.error('--emit-licenses-dir-only requires --manifest '
+                         'and --licenses-dir')
+        emit_licenses_dir(args.manifest, args.store, args.aliases,
+                          args.generic, args.licenses_dir)
+        return
+    if not args.inventory or not args.archive_tsv or not args.out:
+        parser.error('manifest generation requires --inventory, '
+                     '--archive-tsv and --out')
 
     ga_versions = load_archive_ga_versions(args.archive_tsv, args.mappings)
     inventory = load_inventory(args.inventory)
@@ -367,6 +576,12 @@ def main():
           '%d sections' % (args.out, ga_count, version_count,
                            sum(len(v) for v in assets.values()),
                            len(sections)))
+    if args.licenses_dir:
+        # R13: emit the shipped license-text directory from the freshly
+        # generated manifest (must agree with what the committed manifest
+        # derives — the R40/R53 gates check both).
+        emit_licenses_dir(args.out, args.store, args.aliases,
+                          args.generic, args.licenses_dir)
 
 
 if __name__ == '__main__':

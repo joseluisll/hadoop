@@ -1,8 +1,11 @@
 # Automated license collection
 
 Prototype for automating the collection and distribution of third-party
-dependency licenses, complementing the hand-maintained `licenses/` and
-`licenses-binary/` directories and the Apache RAT header checks.
+dependency licenses, complementing the hand-maintained `licenses/`
+directory and the Apache RAT header checks. The binary distribution's
+license texts are NOT hand-maintained: `texts/` is the single home, and
+the tarball's `licenses-binary/` directory is generated from it and the
+manifest (requirement 13).
 
 ## How it works
 
@@ -20,12 +23,13 @@ The root `pom.xml` defines a `licenses` profile that wires in
 `resolve-licenses.sh`, which fails (with `--strict`) when a detected
 license has no local text. License names are normalized via
 `licenseMerges`; the canonical-name → file-slug mapping lives in
-`license-slugs.sh`, shared by both scripts. Store provenance:
-`bouncycastle` and `cddl-gplv2-ce` are copies of the repo's own
-`licenses-binary/` texts, `edl-1.0` is the canonical eclipse.org plain
-text, and `gplv2-ce` is the JMH project's COPYING (GPLv2 plus the
-Classpath Exception); the rest were seeded from SPDX and upstream
-sources.
+`license-slugs.sh`, shared by both scripts. Store provenance: the
+component-specific texts (`atlaskit`, `react`, `leveldb`, `re2j`, ...)
+are the former repo-root `licenses-binary/` texts, migrated here
+2026-11-09 when the tarball's directory became generated (requirement
+13); `edl-1.0` is the canonical eclipse.org plain text, and `gplv2-ce`
+is the JMH project's COPYING (GPLv2 plus the Classpath Exception); the
+generic resolve-store texts were seeded from SPDX and upstream sources.
 
 ## Usage
 
@@ -48,6 +52,22 @@ mvn -Plicenses -DskipTests \
   org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party \
   -pl hadoop-common-project/hadoop-common -am
 ```
+
+Regenerating the tarball's `licenses-binary/` directory (requirement 13;
+the dist workflow does this before the Maven build — the cloud-storage
+assembly copies the directory during the reactor — and
+`dist-layout-stitching` regenerates it again for the main dist):
+
+```bash
+python3 dev-support/licenses/generate-archive-manifest.py \
+  --emit-licenses-dir-only --manifest LICENSE-binary \
+  --licenses-dir <target-dir>
+```
+
+A store text ships when LICENSE-binary references it (its slug or its
+`licenses-binary-aliases` token, whole word). `texts-generic` lists the
+resolve-store texts that never ship; section-title alias rows make a
+section's generic text ship whenever the section is present.
 
 To refresh the local store from the network (rare, reviewed in a PR):
 

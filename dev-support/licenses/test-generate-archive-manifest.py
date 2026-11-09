@@ -173,6 +173,237 @@ def test_missing_file():
     assert code != 0 and 'FAIL:' in output, output
 
 
+# ---------------------------------------------------------------------------
+# R13: the licenses-binary/ emitter
+# ---------------------------------------------------------------------------
+
+# synthetic store texts (minimal license-text bodies)
+STORE_TEXTS = {
+    'comp-a': 'The Comp-A license.\nCopyright (c) Comp-A authors.\n',
+    'comp-b': 'The Comp-B license.\nCopyright (c) Comp-B authors.\n',
+    'mit': 'MIT license text.\n',
+    'generic-x': 'A resolve-store generic text that never ships.\n',
+}
+ALIASES_EMIT = (
+    'comp-b\tcomponent\tcomponent-b-full-name\n'
+    'mit\tsection\tMIT License\n'
+)
+GENERIC_EMIT = 'generic-x\n'
+# a synthetic generated manifest: one Apache component line, then a MIT
+# section carrying comp-a (by slug) and comp-b (by alias token)
+MANIFEST_EMIT = (
+    'template preamble\n'
+    '\nThe following components are included:\n'
+    '\norg.example:example:1.0\n'
+    '\nThis product bundles various third-party components under other open source\n'
+    'licenses. This section summarizes those components and their licenses.\n'
+    'See licenses-binary/ for text of these licenses.\n'
+    '\nMIT License\n------------\n'
+    '\norg.example:comp-a:1.0\n'
+    'component-b-full-name (org.example:comp-b:2.0)\n'
+)
+
+
+def run_emit_case(store=None, aliases=ALIASES_EMIT, generic=GENERIC_EMIT,
+                  manifest=MANIFEST_EMIT, out_exists=False, expect=0):
+    """Run the emitter in --emit-licenses-dir-only mode; return (exit,
+    output, set-of-emitted-slugs-or-None)."""
+    with tempfile.TemporaryDirectory() as tmp:
+        store_dir = os.path.join(tmp, 'store')
+        os.makedirs(store_dir)
+        for slug, text in (STORE_TEXTS if store is None else store).items():
+            with open(os.path.join(store_dir, 'LICENSE-%s.txt' % slug),
+                      'w') as fh:
+                fh.write(text)
+        aliases_path = os.path.join(tmp, 'aliases')
+        with open(aliases_path, 'w') as fh:
+            fh.write(aliases)
+        generic_path = os.path.join(tmp, 'texts-generic')
+        with open(generic_path, 'w') as fh:
+            fh.write(generic)
+        manifest_path = os.path.join(tmp, 'LICENSE-binary')
+        with open(manifest_path, 'w') as fh:
+            fh.write(manifest)
+        out_dir = os.path.join(tmp, 'out')
+        if out_exists:
+            os.makedirs(out_dir)
+            with open(os.path.join(out_dir, 'stale.txt'), 'w') as fh:
+                fh.write('x')
+        proc = subprocess.run(
+            [sys.executable, GEN, '--emit-licenses-dir-only',
+             '--manifest', manifest_path, '--licenses-dir', out_dir,
+             '--store', store_dir, '--aliases', aliases_path,
+             '--generic', generic_path],
+            capture_output=True, text=True)
+        emitted = None
+        if os.path.isdir(out_dir):
+            emitted = {name[len('LICENSE-'):-len('.txt')]
+                       for name in os.listdir(out_dir)
+                       if name.startswith('LICENSE-')}
+        return proc.returncode, proc.stdout + proc.stderr, emitted
+
+
+def test_emit_happy_path():
+    code, output, emitted = run_emit_case()
+    assert code == 0, output
+    # comp-a by slug, comp-b by alias token, mit by section-title alias;
+    # generic-x exempted
+    assert emitted == {'comp-a', 'comp-b', 'mit'}, emitted
+
+
+def test_emit_section_without_text_fails():
+    # a section whose components no shipped text matches is fail-closed
+    manifest = MANIFEST_EMIT.replace(
+        '\nMIT License\n------------\n'
+        '\norg.example:comp-a:1.0\n'
+        'component-b-full-name (org.example:comp-b:2.0)\n',
+        '\nSome License\n------------\n'
+        '\norg.example:comp-c:1.0\n')
+    code, output, _ = run_emit_case(manifest=manifest,
+                                    aliases='comp-b\tcomponent\tcomponent-b-full-name\n')
+    assert code != 0 and 'FAIL:' in output, output
+    assert 'no shipped license text' in output, output
+
+
+def test_emit_empty_store_fails():
+    code, output, _ = run_emit_case(store={})
+    assert code != 0 and 'FAIL:' in output, output
+
+
+def test_emit_populated_out_dir_fails():
+    code, output, _ = run_emit_case(out_exists=True)
+    assert code != 0 and 'FAIL:' in output, output
+    assert 'not empty' in output, output
+
+
+def test_emit_alias_without_text_fails():
+    aliases = ALIASES_EMIT + 'ghost\tcomponent\torg.example:ghost\n'
+    code, output, _ = run_emit_case(aliases=aliases)
+    assert code != 0 and 'FAIL:' in output, output
+    assert 'ghost' in output, output
+
+
+def test_emit_generic_row_without_text_fails():
+    code, output, _ = run_emit_case(generic=GENERIC_EMIT + 'ghost-generic\n')
+    assert code != 0 and 'FAIL:' in output, output
+
+
+def test_emit_alias_generic_overlap_fails():
+    code, output, _ = run_emit_case(
+        generic=GENERIC_EMIT + 'comp-b\n',
+        aliases='comp-b\tcomponent\tcomponent-b-full-name\n')
+    assert code != 0 and 'FAIL:' in output, output
+    assert 'both aliased and listed in texts-generic' in output, output
+
+
+def test_emit_bad_kind_fails():
+    aliases = 'comp-b\tbogus\tcomponent-b-full-name\n'
+    code, output, _ = run_emit_case(aliases=aliases)
+    assert code != 0 and 'FAIL:' in output, output
+    assert 'kind must be component or section' in output, output
+
+
+def test_emit_empty_token_fails():
+    # an empty token builds a vacuous whole-word pattern that matches
+    # anything — a stale text would ship silently (review finding)
+    aliases = 'ghost-stale\tcomponent\t\n'
+    code, output, _ = run_emit_case(aliases=aliases)
+    assert code != 0 and 'FAIL:' in output, output
+    assert 'empty token' in output, output
+
+
+def test_full_mode_emits_licenses_dir():
+    """Full mode with --licenses-dir: manifest + text directory from the
+    same manifest, and the section-coverage rule applies."""
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = {}
+        for name, content in [('tsv', TSV_OK), ('inv', INVENTORY),
+                              ('map', MAPPINGS), ('shaded', SHADED),
+                              ('assets', ASSETS), ('template', TEMPLATE)]:
+            paths[name] = os.path.join(tmp, name)
+            with open(paths[name], 'w') as handle:
+                handle.write(content)
+        out = os.path.join(tmp, 'LICENSE-binary')
+        ldir = os.path.join(tmp, 'licenses-binary-staged')
+        store_dir = os.path.join(tmp, 'store')
+        os.makedirs(store_dir)
+        with open(os.path.join(store_dir, 'LICENSE-comp-a.txt'), 'w') as fh:
+            fh.write('Comp-A license text.\n')
+        with open(os.path.join(store_dir, 'LICENSE-mit.txt'), 'w') as fh:
+            fh.write('MIT license text.\n')
+        aliases_path = os.path.join(tmp, 'aliases')
+        with open(aliases_path, 'w') as fh:
+            fh.write('mit\tsection\tMIT License\n')
+        generic_path = os.path.join(tmp, 'texts-generic')
+        with open(generic_path, 'w') as fh:
+            fh.write('')
+        proc = subprocess.run(
+            [sys.executable, GEN, '--inventory', paths['inv'],
+             '--archive-tsv', paths['tsv'], '--mappings', paths['map'],
+             '--shaded', paths['shaded'], '--assets', paths['assets'],
+             '--template', paths['template'], '--out', out,
+             '--licenses-dir', ldir, '--store', store_dir,
+             '--aliases', aliases_path, '--generic', generic_path],
+            capture_output=True, text=True)
+        combined = proc.stdout + proc.stderr
+        # the happy-path manifest has a mit section (some-npm asset) and
+        # a bsd2 section (hdrhistogram): mit ships by title alias, bsd2
+        # has no text and no alias -> the coverage rule must fail it
+        assert proc.returncode != 0, combined
+        assert 'FAIL:' in combined and 'no shipped license text' in combined, combined
+        assert not os.path.isdir(ldir), combined
+
+
+def test_full_mode_emits_licenses_dir_ok():
+    """Same, with a bsd-2-clause section row so every section is
+    covered: the directory must be emitted with exactly the referenced
+    texts."""
+    with tempfile.TemporaryDirectory() as tmp:
+        paths = {}
+        for name, content in [('tsv', TSV_OK), ('inv', INVENTORY),
+                              ('map', MAPPINGS), ('shaded', SHADED),
+                              ('assets', ASSETS), ('template', TEMPLATE)]:
+            paths[name] = os.path.join(tmp, name)
+            with open(paths[name], 'w') as handle:
+                handle.write(content)
+        out = os.path.join(tmp, 'LICENSE-binary')
+        ldir = os.path.join(tmp, 'licenses-binary-staged')
+        store_dir = os.path.join(tmp, 'store')
+        os.makedirs(store_dir)
+        for slug in ('mit', 'bsd-2-clause', 'epl-2.0', 'cddl-gplv2-ce'):
+            with open(os.path.join(store_dir,
+                                   'LICENSE-%s.txt' % slug), 'w') as fh:
+                fh.write('%s license text.\n' % slug)
+        aliases_path = os.path.join(tmp, 'aliases')
+        with open(aliases_path, 'w') as fh:
+            fh.write('mit\tsection\tMIT License\n'
+                     'bsd-2-clause\tsection\tBSD 2-Clause\n'
+                     'epl-2.0\tsection\tEclipse Public License (EPL) 2.0\n'
+                     'cddl-gplv2-ce\tcomponent\tCDDL + GPLv2 with classpath exception\n')
+        generic_path = os.path.join(tmp, 'texts-generic')
+        with open(generic_path, 'w') as fh:
+            fh.write('')
+        proc = subprocess.run(
+            [sys.executable, GEN, '--inventory', paths['inv'],
+             '--archive-tsv', paths['tsv'], '--mappings', paths['map'],
+             '--shaded', paths['shaded'], '--assets', paths['assets'],
+             '--template', paths['template'], '--out', out,
+             '--licenses-dir', ldir, '--store', store_dir,
+             '--aliases', aliases_path, '--generic', generic_path],
+            capture_output=True, text=True)
+        combined = proc.stdout + proc.stderr
+        assert proc.returncode == 0, combined
+        emitted = sorted(os.listdir(ldir))
+        # mit/bsd-2-clause/epl-2.0: section-title aliases (the bsd2
+        # section carries hdrhistogram, the epl2 section the jakarta
+        # dual — the dual's CDDL+GPLv2-CE license NAME never appears in
+        # the manifest, so cddl-gplv2-ce correctly does not ship here);
+        # comp-a never referenced by the synthetic manifest
+        assert emitted == ['LICENSE-bsd-2-clause.txt',
+                           'LICENSE-epl-2.0.txt',
+                           'LICENSE-mit.txt'], emitted
+
+
 def main():
     tests = [value for name, value in sorted(globals().items())
              if name.startswith('test_')]

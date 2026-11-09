@@ -23,12 +23,16 @@
    in the source tree, and every path-style entry of manifest-assets.txt
    must be covered by LICENSE.txt — what ships in the binary is also in the
    source release.
-3. R53 (licenses-binary part of R10): every text in licenses-binary/ must
-   belong to a component LICENSE-binary still lists. LICENSE-<slug>.txt is
-   tied to LICENSE-binary by its slug (case-insensitive, whole word) or by the
-   token recorded for it in licenses-binary-aliases; a text with no listed
-   component, or an alias row with no text, fails. Stale texts otherwise
-   ship in the tarball for components that are gone.
+3. R53 (licenses-binary part of R10): the texts/ store is the single home
+   of the license texts and the tarball's licenses-binary/ directory is
+   GENERATED from LICENSE-binary (R13, emitter in
+   generate-archive-manifest.py). Every component-specific store text —
+   anything not exempted in texts-generic — must still be referenced:
+   its slug (case-insensitive, whole word) or the token recorded for it
+   in licenses-binary-aliases must appear in LICENSE-binary, or the
+   generated directory would ship a text for a component that is gone.
+   An alias row with no text, a texts-generic row with no text, or a
+   slug both aliased and exempted fails.
 
 The checks below describe gate 1; gates 2 and 3 reuse its path resolution.
 
@@ -53,8 +57,8 @@ resolves when the package.json next to it exists.
 Usage: check-asset-manifest.py [repo-root] [manifest-assets.txt]
 Defaults: repo root two levels up from this script; manifest next to this
 script. Exit 0 when every gate passes; exit 1 listing every failure (fail
-closed: a missing LICENSE.txt, LICENSE-binary, licenses-binary/ or aliases
-file is a failure too).
+closed: a missing LICENSE.txt, LICENSE-binary, texts/ store, texts-generic
+or aliases file is a failure too).
 """
 
 import fnmatch
@@ -65,6 +69,10 @@ import sys
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MANIFEST = os.path.join(SCRIPT_DIR, "manifest-assets.txt")
 ALIASES = os.path.join(SCRIPT_DIR, "licenses-binary-aliases")
+TEXTS_STORE = os.path.join(SCRIPT_DIR, "texts")
+TEXTS_GENERIC = os.path.join(SCRIPT_DIR, "texts-generic")
+NOTICE_ALIASES = os.path.join(SCRIPT_DIR, "notice-aliases")
+NOTICE_EXCEPTIONS = os.path.join(SCRIPT_DIR, "notice-exceptions")
 
 # a LICENSE.txt line naming a bundled path: "hadoop-x/..." or "For hadoop-x/...:"
 LICENSE_TXT_PATH = re.compile(r"^(?:For )?(hadoop-[\w.-]+/\S+?):?$")
@@ -195,17 +203,21 @@ def check_license_txt(repo_root, manifest_paths):
     return failures
 
 
-def check_licenses_binary(repo_root, aliases_path):
-    """R53: every licenses-binary/ text belongs to a listed component."""
+def check_licenses_binary(repo_root, aliases_path, store_dir=TEXTS_STORE,
+                          generic_path=TEXTS_GENERIC):
+    """R53: every component-specific text in the texts/ store is still
+    referenced by LICENSE-binary (the tarball's licenses-binary/
+    directory is generated from the manifest and the store, R13)."""
     failures = []
     manifest_file = os.path.join(repo_root, "LICENSE-binary")
-    texts_dir = os.path.join(repo_root, "licenses-binary")
     if not os.path.isfile(manifest_file):
         sys.exit(f"FAIL: cannot read {manifest_file}")
-    if not os.path.isdir(texts_dir):
-        sys.exit(f"FAIL: no licenses-binary/ directory in {repo_root}")
+    if not os.path.isdir(store_dir):
+        sys.exit(f"FAIL: no texts/ store directory in {store_dir}")
     if not os.path.isfile(aliases_path):
         sys.exit(f"FAIL: cannot read {aliases_path}")
+    if not os.path.isfile(generic_path):
+        sys.exit(f"FAIL: cannot read {generic_path}")
     with open(manifest_file, encoding="utf-8") as fh:
         manifest = fh.read().lower()
     aliases = {}
@@ -214,37 +226,269 @@ def check_licenses_binary(repo_root, aliases_path):
             line = raw.rstrip("\n")
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
-            if "\t" not in line:
+            fields = line.split("\t")
+            if len(fields) == 2:  # legacy component row
+                fields = fields[:1] + ["component"] + fields[1:]
+            if len(fields) != 3:
                 sys.exit(f"FAIL: malformed line {lineno} in {aliases_path} "
-                         f"(expected slug<TAB>token): {line!r}")
-            slug, token = line.split("\t", 1)
+                         f"(expected slug<TAB>component|section<TAB>token): "
+                         f"{line!r}")
+            slug, kind, token = fields
+            if kind not in ("component", "section"):
+                sys.exit(f"FAIL: malformed line {lineno} in {aliases_path} "
+                         f"(kind must be component or section, got {kind!r})")
+            token = token.strip()
+            # an empty token builds a vacuous whole-word pattern that
+            # matches anything — the gate would silently pass
+            if not token:
+                sys.exit(f"FAIL: empty token on line {lineno} in "
+                         f"{aliases_path}")
             if slug in aliases:
                 sys.exit(f"FAIL: duplicate slug {slug!r} in {aliases_path}")
-            aliases[slug] = token.strip()
+            aliases[slug] = (kind, token)
+    generic = set()
+    with open(generic_path, encoding="utf-8") as fh:
+        for lineno, raw in enumerate(fh, 1):
+            line = raw.split("#")[0].strip()
+            if not line:
+                continue
+            if line in generic:
+                sys.exit(f"FAIL: duplicate slug {line!r} in {generic_path}")
+            generic.add(line)
     slugs = sorted(
         name[len("LICENSE-"):-len(".txt")]
-        for name in os.listdir(texts_dir)
+        for name in os.listdir(store_dir)
         if name.startswith("LICENSE-") and name.endswith(".txt")
     )
     if not slugs:
-        sys.exit(f"FAIL: no LICENSE-*.txt texts in {texts_dir}")
+        sys.exit(f"FAIL: no LICENSE-*.txt texts in {store_dir}")
+    slug_set = set(slugs)
+    both = sorted(set(aliases) & generic)
+    if both:
+        failures.append(
+            f"slugs both aliased and exempted in texts-generic: "
+            f"{', '.join(both)} — pick one (aliased texts must be "
+            "referenced; exempted texts never ship)")
+    for label, names in (("licenses-binary-aliases", set(aliases)),
+                         ("texts-generic", generic)):
+        for slug in sorted(names - slug_set):
+            failures.append(
+                f"{label}: {slug!r} has no LICENSE-{slug}.txt in the "
+                f"store ({store_dir}) — drop the row")
+    # staleness: a component-specific text the manifest no longer
+    # references would ship (via the R13 emitter) for a component that
+    # is gone — self-cleaning: delete the text, or record the listed
+    # component's name in licenses-binary-aliases. Section-kind rows
+    # (a section's generic text) are exempt: a section may legitimately
+    # vanish with the dependency set and reappear later.
+    checked = 0
     for slug in slugs:
-        token = aliases.get(slug, slug)
+        if slug in generic or aliases.get(slug, ("component", ""))[0] == "section":
+            continue
+        checked += 1
+        token = aliases.get(slug, ("component", slug))[1]
         # whole-word: a short slug (go, asm, tree) must not match inside
         # another word of the licence prose ("goodwill")
         word = r"(?<![a-z0-9])" + re.escape(token.lower()) + r"(?![a-z0-9])"
         if not re.search(word, manifest):
             failures.append(
-                f"licenses-binary/LICENSE-{slug}.txt: no component in "
-                f"LICENSE-binary matches {token!r} — delete the stale text, "
-                "or record the listed component's name in "
-                "licenses-binary-aliases")
-    for slug in sorted(set(aliases) - set(slugs)):
-        failures.append(f"licenses-binary-aliases: {slug!r} has no "
-                        f"licenses-binary/LICENSE-{slug}.txt — drop the row")
-    print(f"licenses-binary: {len(slugs)} texts checked against LICENSE-binary "
-          f"({len(aliases)} by alias)")
+                f"texts/LICENSE-{slug}.txt: no component or section in "
+                f"LICENSE-binary matches {token!r} — delete the stale "
+                "text, or record the listed component's (or section's) "
+                "name in licenses-binary-aliases")
+    print(f"texts store: {len(slugs)} texts ({checked} checked against "
+          f"LICENSE-binary, {len(generic)} exempted in texts-generic, "
+          f"{sum(1 for k, _ in aliases.values() if k == 'section')} section "
+          f"texts by title alias)")
     return failures
+
+
+def component_alias_tokens():
+    """slug -> reference token for COMPONENT-kind rows of the R53
+    aliases file (the same tokens the R13 emitter matches); section
+    rows are excluded — a section's generic text never attributes a
+    single component. Fails closed on an empty token (a vacuous
+    whole-word pattern would match anything)."""
+    tokens = {}
+    with open(ALIASES, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            fields = line.split("\t")
+            if len(fields) == 2:
+                kind, slug, token = "component", fields[0], fields[1]
+            elif len(fields) == 3:
+                slug, kind, token = fields
+            else:
+                sys.exit(f"FAIL: malformed row in {ALIASES}: {line!r}")
+            if kind not in ("component", "section"):
+                sys.exit(f"FAIL: bad kind {kind!r} in {ALIASES}: {line!r}")
+            token = token.strip()
+            if not token:
+                sys.exit(f"FAIL: empty token in {ALIASES}: {line!r}")
+            if kind == "component":
+                tokens[slug] = token
+    return tokens
+
+
+def check_notice_coverage(repo_root):
+    """R14: attribution-required licenses are reflected in the shipped
+    NOTICE file. Every component line of an attribution-required
+    LICENSE-binary section (all but the Public Domain section) is
+    covered when it is mentioned in NOTICE-binary, or a shipped
+    component license text that carries the copyright/attribution line
+    covers it, or a notice-exceptions row records why neither applies
+    (self-cleaning: an exception row whose component is no longer
+    uncovered is stale and must be dropped)."""
+    manifest_file = os.path.join(repo_root, "LICENSE-binary")
+    notice_file = os.path.join(repo_root, "NOTICE-binary")
+    if not os.path.isfile(manifest_file):
+        sys.exit(f"FAIL: cannot read {manifest_file}")
+    if not os.path.isfile(notice_file):
+        sys.exit(f"FAIL: cannot read {notice_file}")
+    with open(notice_file, encoding="utf-8") as fh:
+        notice = fh.read().lower()
+    notice_aliases = {}
+    if not os.path.isfile(NOTICE_ALIASES):
+        sys.exit(f"FAIL: cannot read {NOTICE_ALIASES}")
+    with open(NOTICE_ALIASES, encoding="utf-8") as fh:
+        for lineno, raw in enumerate(fh, 1):
+            line = raw.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if "\t" not in line:
+                sys.exit(f"FAIL: malformed line {lineno} in {NOTICE_ALIASES} "
+                         f"(expected token<TAB>notice-phrase): {line!r}")
+            token, phrase = line.split("\t", 1)
+            phrase = phrase.strip()
+            # an empty phrase builds a vacuous whole-word pattern that
+            # matches anything — an uncovered component would pass
+            if not phrase:
+                sys.exit(f"FAIL: empty notice-phrase on line {lineno} in "
+                         f"{NOTICE_ALIASES}")
+            if token in notice_aliases:
+                sys.exit(f"FAIL: duplicate token {token!r} in {NOTICE_ALIASES}")
+            notice_aliases[token] = phrase
+    exceptions = {}
+    if not os.path.isfile(NOTICE_EXCEPTIONS):
+        sys.exit(f"FAIL: cannot read {NOTICE_EXCEPTIONS}")
+    with open(NOTICE_EXCEPTIONS, encoding="utf-8") as fh:
+        for lineno, raw in enumerate(fh, 1):
+            line = raw.rstrip("\n")
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if "\t" not in line:
+                sys.exit(f"FAIL: malformed line {lineno} in "
+                         f"{NOTICE_EXCEPTIONS} (expected "
+                         f"token<TAB>justification): {line!r}")
+            token, why = line.split("\t", 1)
+            if token in exceptions:
+                sys.exit(f"FAIL: duplicate token {token!r} in "
+                         f"{NOTICE_EXCEPTIONS}")
+            if not why.strip():
+                sys.exit(f"FAIL: line {lineno} in {NOTICE_EXCEPTIONS} has "
+                         "no justification (requirement 52)")
+            exceptions[token] = why.strip()
+
+    # the component lines of every titled, attribution-required section
+    coord_re = re.compile(r"^[\w.\-]+:[\w.\-]+:[\w.\-]+$")
+    lines = open(manifest_file, encoding="utf-8").read().splitlines()
+    titles = []
+    for i, line in enumerate(lines):
+        underline = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if line.strip() and underline and len(underline) >= 4 \
+                and set(underline) == {"-"}:
+            titles.append((i, line.strip()))
+    if not titles:
+        sys.exit(f"FAIL: no titled sections parsed from {manifest_file}")
+    required = []  # (title, g:a:v)
+    for idx, (line_no, title) in enumerate(titles):
+        if title.lower() == "public domain":
+            continue  # no attribution required
+        end = titles[idx + 1][0] if idx + 1 < len(titles) else len(lines)
+        for line in lines[line_no + 2:end]:
+            stripped = line.strip()
+            if coord_re.match(stripped):
+                required.append((title, stripped))
+    if not required:
+        sys.exit("FAIL: no attribution-required components parsed from "
+                 f"{manifest_file}")
+
+    # shipped component texts that carry a copyright line: a component
+    # is covered by one when the text's reference token (slug or
+    # component-kind alias token) matches the component's manifest line
+    # (the same token the R13 emitter uses to decide the text ships)
+    alias_tokens = component_alias_tokens()
+    copyright_tokens = []
+    for name in sorted(os.listdir(TEXTS_STORE)):
+        if not (name.startswith("LICENSE-") and name.endswith(".txt")):
+            continue
+        slug = name[len("LICENSE-"):-len(".txt")]
+        path = os.path.join(TEXTS_STORE, name)
+        if os.path.getsize(path) == 0:
+            sys.exit(f"FAIL: empty store text: {path}")
+        with open(path, encoding="utf-8") as fh:
+            body = fh.read()
+        if not re.search(r"copyright", body, re.I):
+            continue
+        token = alias_tokens.get(slug, slug)
+        copyright_tokens.append(token)
+
+    def mentioned(token):
+        word = r"(?<![a-z0-9])" + re.escape(token.lower()) + r"(?![a-z0-9])"
+        return re.search(word, notice)
+
+    def text_covers(coord):
+        low = coord.lower()
+        for token in copyright_tokens:
+            word = (r"(?<![a-z0-9])" + re.escape(token.lower())
+                    + r"(?![a-z0-9])")
+            if re.search(word, low):
+                return True
+        return False
+
+    uncovered = []
+    initial_exceptions = len(exceptions)
+    for title, coord in required:
+        artifact = coord.split(":")[1]
+        tokens = [artifact]
+        if artifact in notice_aliases:
+            tokens.append(notice_aliases[artifact])
+        if any(mentioned(t) for t in tokens) or text_covers(coord):
+            continue
+        if artifact in exceptions:
+            exceptions.pop(artifact)  # consumed; stale otherwise
+            continue
+        uncovered.append((title, coord, artifact))
+    final_failures = []
+    for title, coord, artifact in uncovered:
+        final_failures.append(
+            f"[{title}] {coord}: not in NOTICE-binary, its shipped "
+            "license text carries no copyright line, and no "
+            f"notice-exceptions row covers {artifact!r} — add an "
+            "attribution to NOTICE-binary, a component text with the "
+            "copyright line, or a justified notice-exceptions row")
+    for token in sorted(exceptions):  # rows left unconsumed are stale
+        final_failures.append(
+            f"notice-exceptions: {token!r} covers no uncovered component "
+            "— the component gained NOTICE mention or a copyright-"
+            "carrying text; drop the row")
+    consumed = initial_exceptions - len(exceptions)
+    # notice-aliases rows are staleness-checked: their token is an
+    # artifactId LICENSE-binary lists; when the component is gone the
+    # row must be dropped (header promise, self-cleaning)
+    listed_artifacts = {coord.split(":")[1] for _, coord in required}
+    stale_alias_tokens = sorted(set(notice_aliases) - listed_artifacts)
+    for token in stale_alias_tokens:
+        final_failures.append(
+            f"notice-aliases: {token!r} is no longer a listed component — "
+            "drop the row")
+    print(f"NOTICE-binary: {len(required)} attribution-required components "
+          f"({len(required) - len(uncovered) - consumed} covered by mention "
+          f"or text, {consumed} exception rows used, "
+          f"{len(notice_aliases) - len(stale_alias_tokens)} notice aliases)")
+    return final_failures
 
 
 def main():
@@ -301,7 +545,8 @@ def main():
 
     for name, problems in (
         ("LICENSE.txt gate (R48)", check_license_txt(repo_root, path_entries)),
-        ("licenses-binary gate (R53)", check_licenses_binary(repo_root, ALIASES)),
+        ("texts-store gate (R53)", check_licenses_binary(repo_root, ALIASES)),
+        ("NOTICE-binary gate (R14)", check_notice_coverage(repo_root)),
     ):
         if problems:
             print(f"FAIL: {name}: {len(problems)} problem(s):", file=sys.stderr)
