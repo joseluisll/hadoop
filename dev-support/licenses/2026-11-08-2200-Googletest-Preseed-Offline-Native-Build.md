@@ -122,11 +122,16 @@ same latent bug, same class.
   source IS the preseed — content probe required, presence of output is
   not evidence.
 
-Real-image validation rides the next dist run: first run after this
-commit = expected one-time cache miss (build + push of the new image
-tag); the run after must show `Cache hit`, and the archive gate log
-should no longer show a googletest download inside the cmake-compile
-step.
+Real-image validation COMPLETE (2026-11-08, runs on the fork): the first
+archive run on this commit (42528156324, 22:02–22:38Z) was the expected
+one-time cache miss — it built and pushed the new image tag
+(`cache-08a4154…`, hash over the changed `pkg-resolver/`) and the image
+build log shows `Preseeded googletest 703bd9ca… at
+/opt/googletest-703bd9ca…`. Both subsequent archive runs (42532039456 on
+3fe9d0a5a, 42533828604 on ee8afe9cb) show `Cache hit` on that tag, and
+the cmake-compile step in the dist build shows no googletest download
+anymore. The last CDN single point in the dist run is closed; remaining
+build-time download exposure is Maven artifact resolution only.
 
 ## Independent review
 

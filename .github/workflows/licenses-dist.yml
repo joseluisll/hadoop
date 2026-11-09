@@ -41,9 +41,20 @@ on:
       - 'dev-support/docker/**'
       - 'start-build-env.sh'
       - 'LICENSE-binary'
+      # R42 (review F1): dependency versions live in hadoop-project/pom.xml
+      # and the module poms, and the shipped set is declared by the assembly
+      # descriptors — a change to any of them must be validated by an archive
+      # run, or the per-push R10 gate would compare against the previous
+      # commit's baseline and pass a new shipped dependency unchecked
       - 'pom.xml'
+      - '**/pom.xml'
+      - 'hadoop-assemblies/**'
   schedule:
-    # weekly, Sunday 03:00 UTC
+    # weekly, Sunday 03:00 UTC. INERT while this workflow is branch-only:
+    # GitHub runs schedule triggers from the default branch only, and the
+    # workflow is not on trunk (R43, review F2). Until it lands upstream the
+    # baseline is refreshed by pushes and manual dispatches only; the R10
+    # gate's failure message prints the exact dispatch command to recover.
     - cron: '0 3 * * 0'
   workflow_dispatch:
 
@@ -213,6 +224,13 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: archive-ground-truth
+          # R43: this artifact is the per-push R10 gate's baseline of record.
+          # Public repositories cap artifact retention at 90 days, so 90 is
+          # the maximum expressible here; expiry stays fail-closed — the R10
+          # gate prints the exact dispatch command to refresh the baseline.
+          # Upstream (apache/hadoop), the org's retention setting plus the
+          # weekly cron refresh make the cap a non-issue.
+          retention-days: 90
           # the extracted tarballs stay on the runner; upload only the
           # evidence (enumeration TSVs, gate logs, inventory) plus the
           # generated manifest the per-push drift gate compares against
