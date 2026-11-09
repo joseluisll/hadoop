@@ -1,9 +1,14 @@
-# Automatic license management — requirements (v2.7)
+# Automatic license management — requirements (v2.8)
 
 Requirements for automating the collection, validation, and distribution of
-third-party license information in this repository. The implementation on the
-`feat/LICENSES` branch (`licenses` Maven profile + `licenses.yml` workflow +
-`dev-support/licenses/` tooling) implements the collection core.
+third-party license information in this repository. The implementation
+on the `feat/LICENSES` branch (trunk-based; `licenses` Maven profile +
+`licenses.yml` workflow + `dev-support/licenses/` tooling) implements
+the collection core. The `feat/LICENSES-3.5` branch carries the same
+system ported to the branch-3.5 release line and validates it against
+the official 3.5.0 release artifacts (`analysis-3.5/` in that branch's
+root) — the evidence base for proposing adoption into the release
+procedure (R44).
 
 ## Goal
 
@@ -309,7 +314,7 @@ every dependency change, at release time, and in the precommit vote.
     (Dockerfiles, download retry, the googletest pre-seed) SHALL be proposed
     under their own JIRA, separately from the license tooling.
 
-## Implementation status (branch `feat/LICENSES`, v2.7)
+## Implementation status (branches `feat/LICENSES` and `feat/LICENSES-3.5`, v2.8)
 
 Open work items, the transition plan, and in-flight CI verification are
 tracked in the claude-mem work state for this project (list
@@ -344,7 +349,7 @@ open and what is in flight.
 | 42 | Implemented on the branch 2026-11-09 (review F1, the review's stopgap; record: `2026-11-09-0120-F1-F2-Dependency-Coverage-And-Baseline-Freshness.md`) — the dist workflow's push paths now cover `**/pom.xml` and `hadoop-assemblies/**` (plus the root `pom.xml`), so every dependency or assembly change triggers an archive run whose R38/R40 gates validate the shipped set; the R10 gate's assumption comment updated to match. The cheaper per-push generator comparison against the last enumeration remains the upstream option if the ~38-min archive run per pom change is too heavy (revisit under R41/F3); pull-request coverage waits for R41 |
 | 43 | Partly 2026-11-09 (review F2; record: `2026-11-09-0120-F1-F2-Dependency-Coverage-And-Baseline-Freshness.md`) — every R10 failure message (no baseline run, artifact download failure, missing generated manifest, drift) prints the exact dispatch command to recover, and the download is explicitly fail-checked. The baseline artifact sets `retention-days: 90` — the platform cap for a public repository (365 was rejected in review: GitHub limits artifacts to 1–90 days on public repos); expiry stays fail-closed behind the printed recovery command, and the cap is a non-issue upstream where the org's retention setting plus the weekly cron (R41) refresh the baseline. Open: the weekly cron stays inert until the workflow lands on the default branch (R41) — on the fork the baseline refreshes by push and dispatch only |
 | 41, 44–46, 49–52, 54 | Open — proposed in v2.3 from the 2026-11-08 review |
-| 40 | Integrated 2026-11-08 — the committed `LICENSE-binary` IS the generator's output (artifact of record), regenerated and drift-gated by the dist workflow per run; validated against run 42413534907 and the 42427570912/42427570914 pair (record: `2026-11-07-1730-R40-Generator.md`, switch record: `2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`). NOTICE-binary stays curated (attribution corpus is prose; protected by R10) |
+| 40 | Integrated 2026-11-08 — the committed `LICENSE-binary` IS the generator's output (artifact of record), regenerated and drift-gated by the dist workflow per run; validated against run 42413534907 and the 42427570912/42427570914 pair (record: `2026-11-07-1730-R40-Generator.md`, switch record: `2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`). Validated on the 3.5 release line too (`feat/LICENSES-3.5`): the committed manifest is derived from run 42682946618's own 3.5.1-SNAPSHOT archive enumeration + inventory (218 g:a, 123 asset lines, 9 sections), with same-inputs confirmation runs in flight (records: `2026-11-09-1930-T00019-3.5-Port-Triage-And-Emitter-Unblock.md`, `2026-11-09-2020-T00019-3.5-Archive-Derived-Manifest.md`). NOTICE-binary stays curated (attribution corpus is prose; protected by R10) |
 
 ## Review changelog
 
@@ -403,3 +408,24 @@ open and what is in flight.
   alias/texts-generic parsers were deduplicated with explicit
   empty-token rejection. Status: 13, 14 and 53 implemented (unchanged;
   this entry records the correction).
+- **v2.8** — the system validated on a release line (T00019,
+  `feat/LICENSES-3.5`, 2026-11-09): ported to branch-3.5 and validated
+  against the official 3.5.0 release. Three dist runs; the final one
+  (42682946618) built release-shaped (`-Pyarn-ui` restored, profiles in
+  the module poms) and the archive asset gate passed unmodified — every
+  trunk-derived npm pin validated against 3.5's UI lock files. The
+  committed `LICENSE-binary` became the manifest generated from that
+  run's own archive enumeration + inventory (R40 flow; 218 g:a, 123
+  asset lines, 9 sections, 66 shipped texts); the R53/R14/asset-manifest
+  gates are green after a self-cleaning curation pass (8 store texts for
+  components that no longer ship, 7 stale `notice-exceptions` rows
+  dropped, 1 added). R48 stays red by design: the manual source-release
+  files are the comparison baseline and their findings are report
+  material, not fixes. The automated-vs-manual comparison package
+  (`analysis-3.5/` on that branch — provenance-separated sources, three
+  separate deviation analyses, executive summary) is committed at
+  75d1b84101e and backs the proposal to adopt the system into Hadoop's
+  release procedure (R44); same-inputs confirmation dist runs were in
+  flight at commit time and are recorded in the work state. Status:
+  R40 gains 3.5-line validation evidence (row updated); no requirement
+  changed state.

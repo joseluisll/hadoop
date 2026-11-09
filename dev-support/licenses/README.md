@@ -7,6 +7,19 @@ license texts are NOT hand-maintained: `texts/` is the single home, and
 the tarball's `licenses-binary/` directory is generated from it and the
 manifest (requirement 13).
 
+**Branch context.** The tooling lives on `feat/LICENSES` (trunk-based);
+this branch (`feat/LICENSES-3.5`) carries the same system ported to the
+branch-3.5 release line and validated against the official 3.5.0
+release: the committed `LICENSE-binary` is derived from the
+3.5.1-SNAPSHOT archive's own enumeration (dist run 42682946618), and
+the release-gate runs that remain red do so by design against the
+untouched manual baseline. `analysis-3.5/` in the repository root holds
+the automated-vs-manual comparison package (provenance-separated
+sources, reproducible deviation analyses, executive summary) that backs
+the proposal to adopt this system into Hadoop's release procedure; the
+adoption requirements (trunk/PR operation, release gating, precommit
+vote, ASF infrastructure) are R41–R54 in `License-Management.md`.
+
 ## How it works
 
 The root `pom.xml` defines a `licenses` profile that wires in
@@ -82,7 +95,11 @@ dev-support/licenses/normalize-licenses.sh target/licenses /tmp/downloaded
 
 `.github/workflows/licenses.yml` installs the full reactor (no skipped
 modules), builds the `THIRD-PARTY` inventory, resolves texts from the
-local store (`--strict`), fails when the committed `LICENSE-binary`
+local store (`--strict`), runs `check-asset-manifest.py` (the asset
+manifest against the source tree, requirement 7 stage B; the
+source-release `LICENSE.txt`, requirement 48; the `texts/` store,
+requirement 53; NOTICE-binary coverage, requirement 14), fails when the
+committed `LICENSE-binary`
 (the archive-derived artifact of record, requirement 40) drifts from
 the last ground-truth run's generated manifest (requirement 10), and
 uploads everything as workflow artifacts — all offline. Downloading
@@ -104,7 +121,16 @@ and gates each archive against:
 - the root pom's `excludedArtifacts` curation (requirement 39: a curated
   exclusion that turns out to ship is a failure),
 - the `shaded-jars` mapping (requirement 37) for graph entries shaded
-  into top-level jars.
+  into top-level jars,
+- the archive's non-jar asset population — loose files and assets
+  embedded in jars/WARs — against `manifest-assets.txt` +
+  `archive-asset-allowlist` (`check-archive-assets.py`, requirement 7
+  stage C; the build is release-shaped, `-Pyarn-ui`, so the UI WAR
+  trees are enumerated too),
+- the shipped texts: the R40 step regenerates `LICENSE-binary` from the
+  run's own archives (fail on diff — requirement 40) and re-emits each
+  tarball's `licenses-binary/` from the fresh manifest, failing when it
+  differs from what the archive ships (requirement 53).
 
 The Docker build-env image comes from a GHCR cache under a
 content-addressed tag (the hash of the files the image build consumes),
@@ -123,7 +149,15 @@ python3 dev-support/licenses/enumerate-archive-jars.py \
 dev-support/licenses/check-archive-licenses.sh \
   archive-jars.tsv <extracted>/hadoop-<version>/LICENSE-binary \
   target/third-party/THIRD-PARTY.txt
+python3 dev-support/licenses/check-archive-assets.py \
+  <extracted>/hadoop-<version> . --tsv archive-assets.tsv
 ```
+
+Gate tooling has synthetic self-tests (not yet wired into per-push CI,
+requirement 49): `test-generate-archive-manifest.py` (happy paths plus
+every fail-closed path of the generator and emitter) and
+`test-check-archive-assets.py` (coverage matching, evidence tiers,
+self-cleaning allowlist rows).
 
 The shipped `LICENSE-binary` itself is generated (requirement 40) from
 the archives' enumerations plus the inventory, with the multi-license
@@ -228,14 +262,14 @@ twice, and matches the alternatives as `^(alt|...)$`.
 - The source-release `licenses/` texts, and `LICENSE.txt` entries for
   bundled code the asset manifest does not know about (paths it names are
   gated, requirement 48; e.g. libhdfspp's `third_party/rapidxml-1.13` and
-  `tr2` are listed in neither licence file).
-- Shipped texts that are missing: `licenses-binary/` is checked for stale
-  texts only, not for components that lack one (requirement 53).
-- Curation of the Ember YARN UI and Capacity Scheduler UI npm entries
-  against a `-Pyarn-ui` archive. The dist workflow now builds that
-  profile, as `create-release` does, and runs the archive asset gate
-  (`check-archive-assets.py`, requirement 7 stage C). Its first run is
-  the worklist. Record: `2026-11-09-0230-R7-Stage-C-Archive-Asset-Gate.md`.
-- Whitelist/audit policy enforcement (allowed-license gating).
-- Wiring the generated texts into `hadoop-dist`/`hadoop-assemblies` so the
-  tarball ships them automatically (requirement 13).
+  `tr2` are listed in neither licence file). On this branch the manual
+  source-release files are the comparison baseline and are never edited:
+  the R48 findings against them are report material in `analysis-3.5/`.
+- Whitelist/audit policy enforcement (allowed-license gating,
+  requirements 9 and 46).
+- Upstream adoption (requirements 41–46, 49–52, 54): trunk and
+  pull-request operation, a scheduled default-branch archive run,
+  wiring the gates into `create-release` and the precommit vote, ASF
+  infrastructure compliance, and per-push self-tests. These are the
+  subject of the release-procedure proposal this branch's
+  `analysis-3.5/` package supports.
