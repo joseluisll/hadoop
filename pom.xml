@@ -971,8 +971,21 @@ xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/x
                    (objenesis via the yarn dist, jacoco+ini4j via the
                    cloud SDK trees once -Dhadoop-*-package is on) —
                    archive ground truth runs 42374519973/42405080846,
-                   R39 -->
-              <excludedArtifacts>(?&lt;=:)(?:mockito-.*|junit-.*|opentest4j|apiguardian-api|byte-buddy(-agent)?|hamcrest(-.*)?|jersey-test-framework-.*|jopt-simple)$</excludedArtifacts>
+                   R39.
+                   The kerby/jmh/jsr311-api/kfs/jersey-container-jdk-http
+                   alternatives (2026-11-09 worklist curation, run
+                   42543652715, -Pyarn-ui shape) are the same class:
+                   compile(+optional)/test scope of modules the dist
+                   never ships (hadoop-minikdc, hadoop-client-minicluster,
+                   hadoop-benchmark, the hbase test-support module) or
+                   transitives of already-excluded test tooling
+                   (jersey-container-jdk-http via
+                   jersey-test-framework-provider-jdk-http). None of them
+                   ships in either distributed archive, and none is
+                   embedded in a shipping jar (the auth-chain kerby jars
+                   kerb-core/util/crypto and kerby-asn1/pkix DO ship
+                   standalone and stay out of this list) -->
+              <excludedArtifacts>(?&lt;=:)(?:mockito-.*|junit-.*|opentest4j|apiguardian-api|byte-buddy(-agent)?|hamcrest(-.*)?|jersey-test-framework-.*|jopt-simple|jmh-.*|jsr311-api|kfs|jersey-container-jdk-http|kerb-admin|kerb-client|kerb-common|kerb-identity|kerb-server|kerb-simplekdc|kerby-xdr|token-provider)$</excludedArtifacts>
               <licenseMerges>
                 <!-- variants observed in the full-reactor run (44 detected
                      collapsed to 33, these merges target the remainder);

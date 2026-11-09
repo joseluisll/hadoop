@@ -21,8 +21,17 @@
 # - hadoop-client-runtime relocates protobuf into
 #   org.apache.hadoop.thirdparty.protobuf (embedded
 #   hadoop-shaded-protobuf_3_25 pom.properties) and embeds a large set of
-#   unrelocated runtime deps (kerby, jline, jetty, avro, jackson, gson,
-#   nimbus, dnsjava, jsch, ...) whose standalone jars then do not ship.
+#   unrelocated runtime deps (jline, jetty, avro, jackson, gson,
+#   nimbus, dnsjava, jsch, ...) whose standalone jars still ship for the
+#   modules that need them. Correction 2026-11-09 (run 42543652715
+#   worklist curation): kerby is only PARTLY embedded — the auth-chain
+#   jars kerb-core/kerb-util/kerb-crypto/kerby-asn1/kerby-pkix ship
+#   standalone; the kerby artifacts pulled only by hadoop-minikdc and
+#   hadoop-client-minicluster (kerb-admin/client/common/identity/server/
+#   simplekdc, kerby-xdr, token-provider) are NOT in the runtime shade
+#   set and exist nowhere in the archive — they are curated out of the
+#   inventory via the root pom's excludedArtifacts, not listed here.
 
 com.google.protobuf:protobuf-java # embedded in hadoop-client-runtime — shaded/relocated to org.apache.hadoop.thirdparty.protobuf via hadoop-shaded-protobuf_3_25 (embedded pom.properties evidence)
 com.google.protobuf:protobuf-java-util # embedded in hadoop-client-runtime — shaded/relocated with protobuf-java
+io.opentelemetry:opentelemetry-common # embedded in hadoop-gcp — shaded/relocated to com.google.cloud.hadoop.repackaged.ossgcs.io.opentelemetry (upstream pom: opentelemetry-bom 1.59.0 import + io.opentelemetry.** shade include; the inventory resolves 1.59.0 only through hadoop-gcp's graph, and no standalone 1.59.0 jar ships)
