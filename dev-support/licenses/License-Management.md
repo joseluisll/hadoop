@@ -1,4 +1,4 @@
-# Automatic license management — requirements (v2.6)
+# Automatic license management — requirements (v2.7)
 
 Requirements for automating the collection, validation, and distribution of
 third-party license information in this repository. The implementation on the
@@ -309,7 +309,7 @@ every dependency change, at release time, and in the precommit vote.
     (Dockerfiles, download retry, the googletest pre-seed) SHALL be proposed
     under their own JIRA, separately from the license tooling.
 
-## Implementation status (branch `feat/LICENSES`, v2.6)
+## Implementation status (branch `feat/LICENSES`, v2.7)
 
 Open work items, the transition plan, and in-flight CI verification are
 tracked in the claude-mem work state for this project (list
@@ -332,7 +332,7 @@ open and what is in flight.
 | 28–29 | **28 Done 2026-11-07** — curated multi-license policy (`Multi-License-Policy.md`: prefer Apache-2.0, then EDL, then EPL-2.0; jersey/hk2 keep their combined section) applied to the shipped manifest, two misplaced entries corrected (checker-qual → MIT, jakarta.activation-api → EDL; record: `2026-11-07-1630-R28-Policy-Application.md`). 29 Partially — override mechanism exists; disambiguation policy done, no-metadata justification coverage still partial |
 | 30–32 | Addressed by two 2026-11-07 passes: the curation pass (record: `2026-11-07-1150-...md` — malformed entries fixed, versions aligned, 30 stale entries pruned) and the archive-verified prune (record: `2026-11-07-1700-R32-Prune-Declared-Not-Shipped.md` — 10 declared-but-not-shipped entries pruned: kerby x8 non-embedded, jsr311-api, jersey-container-jdk-http; the manual manifest is now exact against the two distributed archives: 302 g:a, every one enumerated or recorded as shaded-embedded) |
 | 9, 11 | Open (7 implemented 2026-11-09 — stages A+B+C complete, see the R7 row) |
-| 14 | Implemented 2026-11-09 (owner-scoped coverage gate; record: `2026-11-09-1120-R14-Notice-Coverage-Gate.md`) — `check-asset-manifest.py` fails when a component in an attribution-required LICENSE-binary section (all but Public Domain) is neither mentioned in NOTICE-binary, nor covered by a shipped component text carrying the copyright line, nor recorded in `notice-exceptions` with a justification (36 rows, one per legacy gap; a `notice-aliases` map absorbs NOTICE prose-name mismatches). Rows self-clean both directions: a stale row fails the gate, and so does an uncovered component without one — so every NEW component is enforced immediately and the legacy gaps burn down as component texts land. A strict mention-only gate was probed first and rejected by the owner: 71 of 75 attribution-required components had no NOTICE mention, so enforcing it literally required authoring that attribution corpus by hand |
+| 14 | Implemented 2026-11-09 (owner-scoped coverage gate; record: `2026-11-09-1120-R14-Notice-Coverage-Gate.md`) — `check-asset-manifest.py` fails when a component in an attribution-required LICENSE-binary section (all but Public Domain) is neither mentioned in NOTICE-binary, nor covered by a shipped component text carrying the copyright line, nor recorded in `notice-exceptions` with a justification (39 rows: 36 legacy gaps + 3 added by the round-2 review; a `notice-aliases` map absorbs NOTICE prose-name mismatches). Rows self-clean both directions: a stale row fails the gate, and so does an uncovered component without one — so every NEW component is enforced immediately and the legacy gaps burn down as component texts land. A round-2 independent review (2026-11-09) caught the gate fail-open — a never-shipping `texts-generic` text (JSON.org `json`, which false-matches `javax.json` coordinates) was credited as coverage for 3 components — fixed by restricting coverage texts to the R13 emitter's ship set; verified the fixed gate fails on exactly those 3 components without their rows. A strict mention-only gate was probed first and rejected by the owner: 71 of 75 attribution-required components had no NOTICE mention, so enforcing it literally required authoring that attribution corpus by hand |
 | 13 | Implemented 2026-11-09 — the tarball's `licenses-binary/` directory is generated from the versioned `texts/` store and the manifest, replacing the hand-kept repo-root directory (66 texts migrated into `texts/`, `go` renamed `re2j`; section-title alias rows ship each present section's generic text; `texts-generic` exempts resolve-store texts that never ship). Emitter: `generate-archive-manifest.py --emit-licenses-dir-only` (fail-closed: empty store/manifest, populated output dir, missing/empty text, section with no shipped text). Wiring: `dist-layout-stitching` regenerates the directory for the main dist, a pre-build step generates it for the cloud-storage assembly, and the R40 drift step re-emits from the fresh manifest and diffs both tarballs' shipped directories (R53, dist side). Manual maintenance retired; record: `2026-11-09-1110-R13-Text-Bundling-Store-Migration.md` |
 | 12 | Partly — the THIRD-PARTY inventory is produced and published by every CI run (both workflows), not per release: `create-release` has no license step (see R44) |
 | 16 | Implemented — the generator is deterministic (self-check `test-generate-archive-manifest.py`, 11 tests) and the dist R40 gate regenerates `LICENSE-binary` from fresh archives and finds no diff (green on run 42519178850); the default path is offline (2026-11-08 review) |
@@ -394,3 +394,12 @@ open and what is in flight.
   NOTICE-binary, covered by a copyright-carrying component text, or
   recorded in `notice-exceptions` with a justification (36 legacy-gap
   rows, self-cleaning). Status: 13, 14 and 53 implemented.
+- **v2.7** — R14 gate fail-open fixed 2026-11-09 (round-2 independent
+  review of T00005/T00006, pre-push): the coverage check credited
+  never-shipping `texts-generic` texts (JSON.org `json` false-matching
+  `javax.json` coordinates) and section-kind texts as attribution
+  coverage; coverage texts are now restricted to the R13 emitter's ship
+  set, 3 `notice-exceptions` rows added (36 → 39), and the shared
+  alias/texts-generic parsers were deduplicated with explicit
+  empty-token rejection. Status: 13, 14 and 53 implemented (unchanged;
+  this entry records the correction).

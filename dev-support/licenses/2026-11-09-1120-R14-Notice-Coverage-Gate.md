@@ -91,6 +91,36 @@ justifications).
   alias-parser call, notice-alias staleness implemented as the header
   promised, comment/code alignment) are also in.
 
+## Post-landing independent review (round 2, 2026-11-09)
+
+A second fresh-context review of the landed diff (empirical, /tmp
+probes) found one fail-open hole, fixed before push:
+
+- `text_covers()` built its copyright-token list from EVERY store text
+  containing a copyright line, including texts `texts-generic` marks
+  never-shipping and section-kind texts. The JSON.org `LICENSE-json.txt`
+  (excluded from shipping precisely because the bare word `json`
+  false-matches inside `javax.json` coordinates — the same reason the
+  R53 gate exempts it) was credited as attribution coverage for 3 real
+  components with no NOTICE mention and no exception row:
+  `org.glassfish:javax.json:1.1.4`, `jakarta.json:jakarta.json-api:1.1.6`,
+  `org.glassfish.jersey.media:jersey-media-json-jettison:2.46`. The gate
+  passed on the committed tree only because of this flaw.
+- Fix: coverage texts are now restricted to the R13 emitter's ship set —
+  texts-generic slugs and section-kind alias slugs are skipped (a
+  section's generic text attributes the section, never a single
+  component). Verified both ways: without the new exception rows the
+  fixed gate fails on exactly those 3 components; the empty-token and
+  duplicate-slug guards of the shared alias parser were probed
+  synthetic-reject.
+- Curation: 3 `notice-exceptions` rows added (one per component, same
+  justifications as their section/family peers), 36 → 39 rows; the gate
+  now reports 36 covered by mention or text + 39 exception rows, all
+  four per-push gates exit 0. The alias/texts-generic parsers were
+  deduplicated into `parse_binary_aliases()`/`load_texts_generic()` and
+  the notice-aliases/notice-exceptions parsers gained explicit
+  empty-token rejection (previously only accidentally fail-closed).
+
 ## Deliberately out of scope
 
 - NOTICE-binary itself stays curated prose (no generation — its

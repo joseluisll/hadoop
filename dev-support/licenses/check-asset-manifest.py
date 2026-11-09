@@ -246,15 +246,7 @@ def check_licenses_binary(repo_root, aliases_path, store_dir=TEXTS_STORE,
             if slug in aliases:
                 sys.exit(f"FAIL: duplicate slug {slug!r} in {aliases_path}")
             aliases[slug] = (kind, token)
-    generic = set()
-    with open(generic_path, encoding="utf-8") as fh:
-        for lineno, raw in enumerate(fh, 1):
-            line = raw.split("#")[0].strip()
-            if not line:
-                continue
-            if line in generic:
-                sys.exit(f"FAIL: duplicate slug {line!r} in {generic_path}")
-            generic.add(line)
+    generic = load_texts_generic()
     slugs = sorted(
         name[len("LICENSE-"):-len(".txt")]
         for name in os.listdir(store_dir)
@@ -303,15 +295,13 @@ def check_licenses_binary(repo_root, aliases_path, store_dir=TEXTS_STORE,
     return failures
 
 
-def component_alias_tokens():
-    """slug -> reference token for COMPONENT-kind rows of the R53
-    aliases file (the same tokens the R13 emitter matches); section
-    rows are excluded — a section's generic text never attributes a
-    single component. Fails closed on an empty token (a vacuous
-    whole-word pattern would match anything)."""
-    tokens = {}
+def parse_binary_aliases():
+    """slug -> (kind, token) for EVERY row of the R53 aliases file
+    (the same tokens the R13 emitter matches). Fails closed on an
+    empty token (a vacuous whole-word pattern would match anything)."""
+    rows = {}
     with open(ALIASES, encoding="utf-8") as fh:
-        for raw in fh:
+        for lineno, raw in enumerate(fh, 1):
             line = raw.rstrip("\n")
             if not line.strip() or line.lstrip().startswith("#"):
                 continue
@@ -321,15 +311,35 @@ def component_alias_tokens():
             elif len(fields) == 3:
                 slug, kind, token = fields
             else:
-                sys.exit(f"FAIL: malformed row in {ALIASES}: {line!r}")
+                sys.exit(f"FAIL: malformed line {lineno} in {ALIASES}: {line!r}")
             if kind not in ("component", "section"):
-                sys.exit(f"FAIL: bad kind {kind!r} in {ALIASES}: {line!r}")
+                sys.exit(f"FAIL: bad kind {kind!r} on line {lineno} in "
+                         f"{ALIASES}: {line!r}")
             token = token.strip()
             if not token:
-                sys.exit(f"FAIL: empty token in {ALIASES}: {line!r}")
-            if kind == "component":
-                tokens[slug] = token
-    return tokens
+                sys.exit(f"FAIL: empty token on line {lineno} in {ALIASES}: "
+                         f"{line!r}")
+            if slug in rows:
+                sys.exit(f"FAIL: duplicate slug {slug!r} on line {lineno} in "
+                         f"{ALIASES}")
+            rows[slug] = (kind, token)
+    return rows
+
+
+def load_texts_generic():
+    """The texts-generic slugs: store texts that NEVER ship (kept in
+    the store only for license-NAME resolution). Fails closed on a
+    duplicate row."""
+    generic = set()
+    with open(TEXTS_GENERIC, encoding="utf-8") as fh:
+        for raw in fh:
+            line = raw.split("#")[0].strip()
+            if not line:
+                continue
+            if line in generic:
+                sys.exit(f"FAIL: duplicate slug {line!r} in {TEXTS_GENERIC}")
+            generic.add(line)
+    return generic
 
 
 def check_notice_coverage(repo_root):
@@ -361,6 +371,13 @@ def check_notice_coverage(repo_root):
                 sys.exit(f"FAIL: malformed line {lineno} in {NOTICE_ALIASES} "
                          f"(expected token<TAB>notice-phrase): {line!r}")
             token, phrase = line.split("\t", 1)
+            token = token.strip()
+            # an empty token never matches a real artifactId, but it is
+            # malformed input — reject it rather than rely on the
+            # lookup's accidental fail-closed behavior
+            if not token:
+                sys.exit(f"FAIL: empty token on line {lineno} in "
+                         f"{NOTICE_ALIASES}")
             phrase = phrase.strip()
             # an empty phrase builds a vacuous whole-word pattern that
             # matches anything — an uncovered component would pass
@@ -383,6 +400,10 @@ def check_notice_coverage(repo_root):
                          f"{NOTICE_EXCEPTIONS} (expected "
                          f"token<TAB>justification): {line!r}")
             token, why = line.split("\t", 1)
+            token = token.strip()
+            if not token:
+                sys.exit(f"FAIL: empty token on line {lineno} in "
+                         f"{NOTICE_EXCEPTIONS}")
             if token in exceptions:
                 sys.exit(f"FAIL: duplicate token {token!r} in "
                          f"{NOTICE_EXCEPTIONS}")
@@ -393,7 +414,8 @@ def check_notice_coverage(repo_root):
 
     # the component lines of every titled, attribution-required section
     coord_re = re.compile(r"^[\w.\-]+:[\w.\-]+:[\w.\-]+$")
-    lines = open(manifest_file, encoding="utf-8").read().splitlines()
+    with open(manifest_file, encoding="utf-8") as fh:
+        lines = fh.read().splitlines()
     titles = []
     for i, line in enumerate(lines):
         underline = lines[i + 1].strip() if i + 1 < len(lines) else ""
@@ -418,13 +440,28 @@ def check_notice_coverage(repo_root):
     # shipped component texts that carry a copyright line: a component
     # is covered by one when the text's reference token (slug or
     # component-kind alias token) matches the component's manifest line
-    # (the same token the R13 emitter uses to decide the text ships)
-    alias_tokens = component_alias_tokens()
+    # (the same token the R13 emitter uses to decide the text ships).
+    # Only texts the emitter would SHIP may attribute: a texts-generic
+    # text never ships (its slug can false-match a coordinate word —
+    # 'json' inside 'javax.json' — while the text is absent from the
+    # tarball), and a section text attributes the section, never a
+    # single component.
+    if not os.path.isfile(ALIASES):
+        sys.exit(f"FAIL: cannot read {ALIASES}")
+    if not os.path.isfile(TEXTS_GENERIC):
+        sys.exit(f"FAIL: cannot read {TEXTS_GENERIC}")
+    alias_rows = parse_binary_aliases()
+    alias_tokens = {slug: token for slug, (kind, token)
+                    in alias_rows.items() if kind == "component"}
+    generic_slugs = load_texts_generic()
     copyright_tokens = []
     for name in sorted(os.listdir(TEXTS_STORE)):
         if not (name.startswith("LICENSE-") and name.endswith(".txt")):
             continue
         slug = name[len("LICENSE-"):-len(".txt")]
+        if (slug in generic_slugs
+                or alias_rows.get(slug, ("component", ""))[0] == "section"):
+            continue
         path = os.path.join(TEXTS_STORE, name)
         if os.path.getsize(path) == 0:
             sys.exit(f"FAIL: empty store text: {path}")

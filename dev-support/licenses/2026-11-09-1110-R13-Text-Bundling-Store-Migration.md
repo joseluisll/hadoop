@@ -94,7 +94,7 @@ so it ships again if one appears.
 
 ## Validation
 
-- Synthetic: `test-generate-archive-manifest.py` extended to 21 tests —
+- Synthetic: `test-generate-archive-manifest.py` extended to 22 tests —
   emitter happy path (slug, alias-token, section-alias, generic
   exemption), every fail-closed path (empty store, populated output
   dir, alias without text, texts-generic without text, alias/generic
