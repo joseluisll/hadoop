@@ -34,7 +34,11 @@ read-out (`3a7e0114c6d`) then updated "Where it stands", the #8891 and
 review on 2026-11-08 aligned the plan with JIRA and GitHub: the #8950
 conflict with #8890 on `solr-test-framework`, HADOOP-19998's JIRA state,
 the done-criteria amendment, the stale Yetus wait on #8704, the
-HADOOP-19999 status and the commit count of the 11-05 PRs.
+HADOOP-19999 status and the commit count of the 11-05 PRs. On 2026-11-09
+the #8894 Build-rerun hang was investigated (PR table note and
+"Where it stands"), the fork's Build template gained
+`-DenableProcessChecker=all` (fork commit `9391a186b19`), and an
+instrumented probe run went up on the probe branch `HADOOP-20016-PROBE`.
 
 **Where it stands (2026-11-08):** HADOOP-20014 is the first subtask in trunk
 (merged 2026-11-05, approved by pan3793). Two more stage-1 PRs are approved:
@@ -53,7 +57,16 @@ gone now that HADOOP-20014 is in trunk, and #8699's Build passes; the PR has
 not been rebased on the post-merge trunk yet. On 2026-11-08 #8891 got an
 empty trigger commit (`6a889ae8fd8`): its fresh Build passed and its fresh
 Yetus is still running, so the PR still shows the stale 11-07 pre-trigger
-vote; #8894's Build rerun has all jobs green but the last one. The
+vote; #8894's Build rerun (attempt 2 of run 42131124105) was cancelled at
+the 6-hour job timeout: its `Test common` passed (the 11-06 failure was
+the flaky `TestSSLHttpServerMTLS`), but `Test yarn-server-rm` hung both
+attempts at `TestFairSchedulerPlanFollower`. Investigation on 2026-11-09
+exonerated the patch: the RM test classpath is byte-identical to the
+11-04 green Build's tree, the test passes locally on the exact head, and
+22 of 24 CI executions of the job in ten days are green — the silence
+lasted 5h11m because surefire's fork watchdog cannot act on a hung or
+dead fork (SUREFIRE-1722; `enableProcessChecker` is off by default).
+An instrumented probe run is in flight on `HADOOP-20016-PROBE`. The
 bottleneck is review and
 merge capacity, and pan3793 and pjfanning are the committers engaged. See
 [Course of action](#course-of-action-proposal-of-2026-11-06).
@@ -136,7 +149,7 @@ the patch.
 | [HADOOP-20015](https://issues.apache.org/jira/browse/HADOOP-20015) | In Progress | Jose Luis López | [#8893](https://github.com/apache/hadoop/pull/8893) | +1, 11-06 | Yes | Pass | pan3793, 11-05 |
 | [HADOOP-20012](https://issues.apache.org/jira/browse/HADOOP-20012) | In Progress | Jose Luis López | [#8890](https://github.com/apache/hadoop/pull/8890) | -1 (test4tests), 11-06 | Yes | Pass | pjfanning, 11-06 |
 | [HADOOP-20013](https://issues.apache.org/jira/browse/HADOOP-20013) | In Progress | Jose Luis López | [#8891](https://github.com/apache/hadoop/pull/8891) | -1 (branch SpotBugs + unit anomaly), 11-07, pre-trigger | No (trigger `6a889ae8fd8` 11-08) | Pass, 11-08 | None |
-| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | -1 (test4tests), 11-06 | Yes | Rerun running (all jobs green but the last), 11-08 | None |
+| [HADOOP-20016](https://issues.apache.org/jira/browse/HADOOP-20016) | In Progress | Jose Luis López | [#8894](https://github.com/apache/hadoop/pull/8894) | -1 (test4tests), 11-06 | Yes | Rerun cancelled on a `yarn-server-rm` hang (triaged: infra, not the patch); instrumented probe run in flight, 11-09 | None |
 | [HADOOP-19970](https://issues.apache.org/jira/browse/HADOOP-19970) | In Progress | Jose Luis López | [#8699](https://github.com/apache/hadoop/pull/8699), draft | -1 (branch SpotBugs only), 11-06 | Yes | Pass | None |
 | [HADOOP-20049](https://issues.apache.org/jira/browse/HADOOP-20049) | Open | Jose Luis López | [#8903](https://github.com/apache/hadoop/pull/8903) | -1 (test4tests + unit anomaly), 11-06 | Yes | Pass | None |
 | [HADOOP-20003](https://issues.apache.org/jira/browse/HADOOP-20003) | Open | None | [#8945](https://github.com/apache/hadoop/pull/8945), draft | +1, 11-06 | Yes | Pass | None |
@@ -184,8 +197,19 @@ are still unassigned in JIRA.
 - **#8894 (20016):** the 11-06 Yetus on the current head is `test4tests` only.
   The branch is 4 commits behind trunk. The fork's Build on the generated
   `HADOOP-20016` branch failed on `TestSSLHttpServerMTLS` only (HADOOP-19997);
-  the rerun (fork run 42131124105) was still in progress on 2026-11-08, all
-  jobs green but the last one.
+  that test passed on the rerun. The rerun (fork run 42131124105) itself was
+  cancelled at the 6-hour job timeout: `Test yarn-server-rm` hung both
+  attempts at `TestFairSchedulerPlanFollower` (~49 min into the job, then
+  5h11m of total silence, watchdog unable to act — SUREFIRE-1722, checker
+  off by default since surefire 3.0.0-M4). Triaged 2026-11-09 as
+  infrastructure, not the patch: the RM test classpath is byte-identical
+  (artifacts and order) to the 11-04 green Build's tree, the test passes
+  locally on the exact head, the same test passed on `HADOOP-20012-upstream`
+  the same day, 22 of 24 CI executions of the job in ten days are green, and
+  the head tree equals the green Build head plus an empty trigger commit.
+  An instrumented probe run (with `-DenableProcessChecker=all`) is in
+  flight on the probe branch `HADOOP-20016-PROBE`; a third hang would now
+  fail with a surefire dump within the 900 s fork timeout.
   pan3793 questioned the module declarations on 2026-11-04 ("I would leverage
   Maven's built-in transitive dependency management"); the answer (the
   declarations are `optional`, downstream resolution is unchanged, and they
@@ -524,7 +548,10 @@ order and keeps everything else off the reviewer's path.
    and #8894 (20016). On 11-08 both heads were made fresh: #8891 via an
    empty trigger commit (`6a889ae8fd8`, fresh Yetus and Build in flight) and
    #8894 via the Build rerun for the flaky `TestSSLHttpServerMTLS`
-   (HADOOP-19997); merge-nudge comments were posted on both PRs on 11-08.
+   (HADOOP-19997; that test passed on the rerun, but the rerun was cancelled
+   on the `yarn-server-rm` hang — triaged as infrastructure on 11-09, see
+   the PR note, with an instrumented probe run on `HADOOP-20016-PROBE`).
+   Merge-nudge comments were posted on both PRs on 11-08.
    Make sure each PR shows only `test4tests` or trunk's SpotBugs before the
    ask, and justify `test4tests` in the PR body where it applies. On #8894,
    decide the open point now rather than let it stall: if pan3793 still
@@ -570,7 +597,16 @@ order and keeps everything else off the reviewer's path.
    pending" will outlast most Yetus runs. Options: cancel the queued runs of
    branches with no PR, or trigger Build only on `feat/` pushes that are
    about to become a PR. This is an owner decision; the plan assumes Yetus
-   is the vote reviewers read.
+   is the vote reviewers read. Separately, since fork commit `9391a186b19`
+   (2026-11-09, on `feat/HARNESS`) the fork's Build template always passes
+   `-DenableProcessChecker=all`, so a hung or dead test fork fails with a
+   dump within the 900 s fork watchdog instead of sleeping to the 6-hour job
+   timeout (the #8894 rerun did exactly that twice). Note the limits of
+   that change: Build runs on `HADOOP-*-upstream` PR branches use the
+   apache-carried template on the branch, so PR-branch runs keep the old
+   behaviour until upstream takes the flag or a probe branch carries it
+   (the `HADOOP-20016-PROBE` pattern); folding the flag into the
+   Build-coverage JIRA below is the upstreamable one-liner.
 10. **HADOOP-19395 and HADOOP-19971:** no action. #8703 is green (Yetus +1,
     2026-11-04) and independent, but asking for its review now competes with
     stage 1 for the same reviewer, and the 2026-10-05 position was to revisit
@@ -583,7 +619,9 @@ Owner's actions (refreshed 2026-11-08):
 1. Ask for merge of #8890 (pjfanning, 11-06) and #8893 (pan3793, 11-05) —
    approvals are in hand; #8890 first.
 2. Confirm the fresh runs on #8891 (Yetus + Build, started 11-08) and the
-   #8894 Build rerun; reviews are still missing on both.
+   instrumented probe run on `HADOOP-20016-PROBE` (the #8894 Build rerun was
+   cancelled on the triaged `yarn-server-rm` hang); reviews are still missing
+   on both.
 3. Reply to pan3793 on #8894 with the fallback (dependencyManagement only).
 4. ~~Send the `[DISCUSS]` mail on retiring the catalog (HADOOP-19998).~~
    Dropped 2026-11-08 with the retirement itself: the owner chose the
