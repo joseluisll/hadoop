@@ -1,0 +1,270 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied.  See the License for the specific
+# language governing permissions and limitations under the License.
+
+# Archive ground truth for the license inventory (requirements 35-38 of
+# dev-support/licenses/License-Management.md). Assembling the binary
+# tarball needs the Docker native-build environment and hours-scale time
+# the per-push budget does not have, so this runs as its own concern:
+# weekly, manual dispatch, and on pushes that change the archive tooling
+# itself. It complements the per-push graph gate (licenses.yml) — neither
+# replaces the other.
+#
+# The paths-filtered push trigger also exists for a GitHub limitation:
+# workflow_dispatch only reaches workflows registered from the default
+# branch; a workflow that has run via push gets registered, so the filter
+# (tooling paths only) both enables dispatch and re-validates the archive
+# whenever this tooling changes.
+name: Archive license ground truth
+
+on:
+  push:
+    branches:
+      - feat/LICENSES-3.5
+    paths:
+      - '.github/workflows/licenses-dist.yml'
+      - 'dev-support/licenses/**'
+      # the whole build-env image tree is a gate input: its Dockerfiles
+      # and pkg-resolver scripts feed the content-addressed image cache
+      - 'dev-support/docker/**'
+      - 'start-build-env.sh'
+      - 'LICENSE-binary'
+      # R42 (review F1): dependency versions live in hadoop-project/pom.xml
+      # and the module poms, and the shipped set is declared by the assembly
+      # descriptors — a change to any of them must be validated by an archive
+      # run, or the per-push R10 gate would compare against the previous
+      # commit's baseline and pass a new shipped dependency unchecked
+      - 'pom.xml'
+      - '**/pom.xml'
+      - 'hadoop-assemblies/**'
+  schedule:
+    # weekly, Sunday 03:00 UTC. INERT while this workflow is branch-only:
+    # GitHub runs schedule triggers from the default branch only, and the
+    # workflow is not on trunk (R43, review F2). Until it lands upstream the
+    # baseline is refreshed by pushes and manual dispatches only; the R10
+    # gate's failure message prints the exact dispatch command to recover.
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  # write: the job publishes the content-addressed build-env image cache
+  # to GHCR (see the pull/build step below); GITHUB_TOKEN-scoped packages
+  # stay private to this repository.
+  packages: write
+  # read: on a cache miss, build-env-image.sh looks for an earlier
+  # in-flight run of this workflow that is building the same image
+  actions: read
+
+jobs:
+  dist-archive-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # A fresh runner has no ~/.m2: Docker would create the bind-mount
+      # source root-owned, and the in-container user (uid 1001) then
+      # cannot create the local Maven repository — pre-create it as the
+      # runner user instead (same for ~/.gnupg, also bind-mounted).
+      - name: Prepare bind-mount sources for the Docker build env
+        run: mkdir -p "$HOME/.m2/repository" "$HOME/.gnupg"
+
+      # The build-env image takes ~20 minutes to build (its pkg-resolver
+      # downloads are also the branch's main transient-failure point:
+      # CDN 503/504 windows have killed several runs). Cache it in GHCR
+      # under a CONTENT-ADDRESSED tag: the hash of every file the image
+      # build consumes (Dockerfile_ubuntu_24, the pkg-resolver scripts
+      # and manifests, hadoop_env_checks.sh). A cache hit therefore means
+      # the image was built from the exact inputs of THIS commit, and any
+      # input change produces a new tag — a stale image can never mask a
+      # Dockerfile or download-script change. On a miss the script waits
+      # for an earlier in-flight run that is building the image (two
+      # pushes close together) instead of building it twice; no
+      # concurrency group, which would cancel queued runs and fail their
+      # R10 gate.
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Provide the build-env image (GHCR cache, else wait or build)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          IMAGE_STEP: Provide the build-env image (GHCR cache, else wait or build)
+        run: dev-support/licenses/build-env-image.sh
+
+      # R13: the tarball's licenses-binary/ directory is GENERATED from
+      # the committed LICENSE-binary and the versioned texts/ store —
+      # never hand-maintained. The main dist regenerates it again at
+      # layout-stitching time; this root-level run exists so the step's
+      # inputs are exercised before the Docker build.
+      - name: Generate the license-text directory for the assemblies (R13)
+        run: |
+          rm -rf licenses-binary
+          python3 dev-support/licenses/generate-archive-manifest.py \
+            --emit-licenses-dir-only --manifest LICENSE-binary \
+            --licenses-dir licenses-binary
+
+      # Same image the Hadoop CI uses, with the full native toolchain —
+      # pulled from the GHCR cache above when its inputs are unchanged.
+      # One reactor pass installs the modules (the aggregate goal resolves
+      # artifacts from the local repository) and assembles the tarball;
+      # the direct goal invocation then builds the root THIRD-PARTY
+      # inventory, as in licenses.yml. The branch-3.5 pom has no cloud
+      # -Dhadoop-*-package profiles (a trunk feature) — none are passed.
+      # -Pyarn-ui packages the YARN UI as WARs where the profile exists:
+      # without UI WARs the ground truth lacks the UI trees and their
+      # bundled assets (R7 stage C npm probes). branch-3.5 has no
+      # yarn-ui profile, so Maven skips it with a warning; the archive
+      # curation pass consumes the resulting findings.
+      - name: Build dist tarball and inventory (Docker build env)
+        env:
+          HADOOP_BUILD_ENV_PREBUILT: '1'
+        run: >-
+          DOCKER_INTERACTIVE_RUN= ./start-build-env.sh ubuntu_24 bash -c
+          'mvn -B -ntp install -Pdist,native -DskipTests -Dtar
+          -Dmaven.javadoc.skip=true -Dcheckstyle.skip=true -Drat.skip=true
+          -Dspotbugs.skip=true
+          && mvn -B -ntp -Plicenses -DskipTests
+          org.codehaus.mojo:license-maven-plugin:aggregate-add-third-party'
+
+      # R36: enumerate every jar in the assembled archive, then gate it
+      # against the LICENSE-binary it actually ships (R38), the graph
+      # inventory (R26/R27) and the curated exclusions (R39). The dist
+      # build produces hadoop-dist/target/hadoop-<version>.tar.gz.
+      # branch-3.5 port: the main distribution only — the cloud-storage
+      # dist packaging (dir-format assembly + -Dhadoop-*-package
+      # profiles) is a trunk feature this comparison branch does not
+      # exercise, though 3.5's reactor still builds the module.
+      - name: Enumerate archives and run the archive gates
+        run: |
+          set -euo pipefail
+          mkdir -p target/archive-ground-truth
+          status=0
+          found=0
+          # distribution tarball only: the dist build also leaves module
+          # staging tars under */target (hadoop-common-<v>.tar.gz and
+          # friends) that are build intermediates, not distributed
+          # archives — they carry no jars and must not be gated.
+          dists=()
+          for t in hadoop-dist/target/*.tar.gz; do
+            if [[ -e "$t" && "$t" != *-src.tar.gz ]]; then
+              dists+=("$t")
+            fi
+          done
+          for tar in "${dists[@]}"; do
+            found=1
+            name="$(basename "$tar" .tar.gz)"
+            dir="target/archive-ground-truth/$name"
+            mkdir -p "$dir/untarred"
+            echo "::group::$name"
+            tar -xzf "$tar" -C "$dir/untarred"
+            python3 dev-support/licenses/enumerate-archive-jars.py \
+              "$dir/untarred" -o "$dir/archive-jars.tsv"
+            lb="$(find "$dir/untarred" -maxdepth 2 -name LICENSE-binary -print -quit)"
+            if [[ -n "$lb" ]]; then
+              dev-support/licenses/check-archive-licenses.sh \
+                "$dir/archive-jars.tsv" \
+                "$lb" \
+                target/third-party/THIRD-PARTY.txt \
+                . | tee "$dir/gate.log" || status=1
+            else
+              echo "R38 FAILURE: $tar ships no LICENSE-binary — every jar in it is unlicensed" | tee "$dir/gate.log"
+              status=1
+            fi
+            # R7 stage C: non-jar assets (loose and jar/WAR-embedded)
+            # against manifest-assets.txt + archive-asset-allowlist.
+            python3 dev-support/licenses/check-archive-assets.py \
+              "$dir/untarred" . --tsv "$dir/archive-assets.tsv" \
+              2>&1 | tee "$dir/assets.log" || status=1
+            echo "::endgroup::"
+          done
+          if [[ "$found" -eq 0 ]]; then
+            echo "no distribution tarball produced by the build" >&2
+            exit 1
+          fi
+          exit "$status"
+
+      # R40: the committed LICENSE-binary is the artifact of record — the
+      # manifest each distributed archive must carry. Regenerate it from
+      # THIS run's archive enumerations and fail on any drift from the
+      # committed file: the shipped manifest may never silently diverge
+      # from what the archives actually contain.
+      - name: Regenerate the manifest from this run's archives (R40 drift gate)
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          tsvs=(target/archive-ground-truth/*/archive-jars.tsv)
+          if [[ "${#tsvs[@]}" -eq 0 ]]; then
+            echo "R40 FAILURE: no archive enumeration TSVs found" >&2
+            exit 1
+          fi
+          python3 dev-support/licenses/generate-archive-manifest.py \
+            --inventory target/third-party/THIRD-PARTY.txt \
+            --archive-tsv "${tsvs[@]}" \
+            --out target/generated-LICENSE-binary
+          if ! diff -u LICENSE-binary target/generated-LICENSE-binary; then
+            echo "R40 DRIFT: committed LICENSE-binary differs from the manifest generated from this run's archives — regenerate and commit it" >&2
+            exit 1
+          fi
+          echo "R40 drift gate: committed LICENSE-binary matches this run's archives"
+          # R53: the license texts the fresh manifest references must be
+          # exactly what each tarball ships (the shipped directory is
+          # the R13 emitter's output, derived from the committed
+          # manifest at build time — identical when R40 is green).
+          rm -rf target/licenses-binary-staged
+          python3 dev-support/licenses/generate-archive-manifest.py \
+            --emit-licenses-dir-only --manifest target/generated-LICENSE-binary \
+            --licenses-dir target/licenses-binary-staged
+          for d in target/archive-ground-truth/*/untarred; do
+            shipped="$(find "$d" -maxdepth 2 -type d -name licenses-binary -print -quit)"
+            if [[ -z "$shipped" ]]; then
+              echo "R53 FAILURE: $d ships no licenses-binary/ directory" >&2
+              exit 1
+            fi
+            if ! diff -r "$shipped" target/licenses-binary-staged; then
+              echo "R53 DRIFT: $(basename "$d") ships a licenses-binary/ that differs from the texts the generated manifest references" >&2
+              exit 1
+            fi
+          done
+          echo "R53 texts gate: every tarball ships exactly the referenced texts"
+
+      - name: Upload archive ground truth
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: archive-ground-truth
+          # R43: this artifact is the per-push R10 gate's baseline of record.
+          # Public repositories cap artifact retention at 90 days, so 90 is
+          # the maximum expressible here; expiry stays fail-closed — the R10
+          # gate prints the exact dispatch command to refresh the baseline.
+          # Upstream (apache/hadoop), the org's retention setting plus the
+          # weekly cron refresh make the cap a non-issue.
+          retention-days: 90
+          # the extracted tarballs stay on the runner; upload only the
+          # evidence (enumeration TSVs, gate logs, inventory) plus the
+          # generated manifest the per-push drift gate compares against
+          path: |
+            target/third-party/**
+            target/archive-ground-truth/*/archive-jars.tsv
+            target/archive-ground-truth/*/gate.log
+            target/archive-ground-truth/*/archive-assets.tsv
+            target/archive-ground-truth/*/assets.log
+            target/generated-LICENSE-binary
+          if-no-files-found: warn

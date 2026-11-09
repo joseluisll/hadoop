@@ -120,8 +120,14 @@ run cd "hadoop-${VERSION}"
 run cp -p "${ROOT}/LICENSE.txt" .
 run cp -p "${ROOT}/NOTICE.txt" .
 run cp -p "${ROOT}/LICENSE-binary" .
+# R13: the license texts are GENERATED from the versioned store
+# (dev-support/licenses/texts) and the committed LICENSE-binary — the
+# tarball's licenses-binary/ directory is never hand-maintained.
+# Emitted into a staging directory, then copied into the layout.
+run rm -rf "${ROOT}/target/licenses-binary-staged"
+run python3 "${ROOT}/dev-support/licenses/generate-archive-manifest.py" --emit-licenses-dir-only --manifest "${ROOT}/LICENSE-binary" --licenses-dir "${ROOT}/target/licenses-binary-staged"
 run mkdir licenses-binary
-run cp -p "${ROOT}/licenses-binary"/* licenses-binary/
+run cp -p "${ROOT}/target/licenses-binary-staged"/* licenses-binary/
 run cp -p "${ROOT}/NOTICE-binary" .
 run cp -p "${ROOT}/README.txt" .
 
