@@ -355,6 +355,7 @@ io.opentelemetry.contrib:opentelemetry-gcp-resources:1.37.0-alpha
 io.opentelemetry.semconv:opentelemetry-semconv:1.29.0-alpha
 io.opentelemetry:opentelemetry-api:1.47.0
 io.opentelemetry:opentelemetry-api:1.49.0
+io.opentelemetry:opentelemetry-common:1.59.0
 io.opentelemetry:opentelemetry-context:1.47.0
 io.opentelemetry:opentelemetry-context:1.49.0
 io.opentelemetry:opentelemetry-sdk:1.47.0

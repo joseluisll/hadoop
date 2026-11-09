@@ -122,3 +122,25 @@ upstream-vendored pom.xml grows.
   mismatches (inventory claims 1.38.0/1.59.0 where the archive ships
   1.47.0/1.49.0) are the R31 warning class — informational, untouched
   here.
+
+## Addendum 2026-11-09 ~09:1x: the R40 drift gate caught the generator side
+
+The push (1e408d2ca09) failed the dist workflow's R40 drift gate with
+exactly one diff line: `+io.opentelemetry:opentelemetry-common:1.59.0`.
+Expected in hindsight — the R40 generator lists embedded-only
+`shaded-jars` coordinates in LICENSE-binary (merging the
+inventory-resolved version; the protobuf 2.5.0/3.25.5 precedent), so
+adding the Class 1 shaded-jars entry necessarily adds the artifact to
+the manifest. The offline validation had exercised
+`check-archive-licenses.sh` but not the generator/regeneration step;
+the drift gate did its job.
+
+Resolution (validated against run 42581012895's own artifacts): adopted
+the run's `generated-LICENSE-binary` byte-identically as the committed
+LICENSE-binary — the sole delta is that one line, placed in the sorted
+Apache-2.0 section (no NOTICE change: Apache-2.0 carries no attribution
+requirement). Re-verified locally: both archive gates pass with the new
+manifest (manifest 303 g:a, no R31 warnings, no R39 failure),
+`test-generate-archive-manifest.py` 11/11 pass. The collect rerun
+failed again on the same Yarn-download 504 (window persisting); that is
+the T00016 hardening question, independent of this fix.
