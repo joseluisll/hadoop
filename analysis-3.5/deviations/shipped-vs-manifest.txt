@@ -1,0 +1,188 @@
+shipped jars (TSV rows): 628
+promoted from partial rows: 128  unpromoted: 0
+distinct shipped third-party g:a: 215  (own org.apache.hadoop jars excluded: 78)
+manual LICENSE-binary g:a entries: 271
+
+== SHIPPED BUT NOT LISTED in the manual LICENSE-binary: 52
+   of which COORDINATE DRIFT (artifact listed under another group): 6
+   com.google.inject.extensions:guice-servlet  ships; manual lists: com.google:guice-servlet
+   com.google.inject:guice  ships; manual lists: com.google:guice
+   com.googlecode.json-simple:json-simple  ships; manual lists: com.google.json-simple:json-simple
+   commons-digester:commons-digester  ships; manual lists: org.apache.commons:commons-digester
+   commons-validator:commons-validator  ships; manual lists: org.apache.commons:commons-validator
+   jakarta.ws.rs:jakarta.ws.rs-api  ships; manual lists: jakarta.ws.rs-api:jakarta.ws.rs-api
+   NOT LISTED UNDER ANY COORDINATE: 46
+   com.google.android:annotations  (ships at: 4.1.1.4)
+   com.google.code.findbugs:jsr305  (ships at: 3.0.2)
+   com.google.code.gson:gson  (ships at: 2.9.0)
+   com.sun.activation:jakarta.activation  (ships at: 1.2.2)
+   com.sun.codemodel:codemodel  (ships at: 2.6)
+   com.sun.istack:istack-commons-runtime  (ships at: 3.0.12)
+   commons-lang:commons-lang  (ships at: 2.6)
+   commons-logging:commons-logging  (ships at: 1.3.0)
+   io.dropwizard.metrics:metrics-core  (ships at: 3.2.4)
+   io.netty:netty-handler-ssl-ocsp  (ships at: 4.1.130.Final)
+   io.perfmark:perfmark-api  (ships at: 0.27.0)
+   jakarta.annotation:jakarta.annotation-api  (ships at: 1.3.5)
+   jakarta.json:jakarta.json-api  (ships at: 1.1.6)
+   jakarta.validation:jakarta.validation-api  (ships at: 2.0.2)
+   javax.websocket:javax.websocket-client-api  (ships at: 1.0)
+   org.apache.hbase:hbase-shaded-client-byo-hadoop  (ships at: 2.6.3-hadoop3)
+   org.apache.httpcomponents:httpmime  (ships at: 4.5.13)
+   org.apache.zookeeper:zookeeper-jute  (ships at: 3.6.2, 3.8.6)
+   org.eclipse.jetty.http2:http2-client  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty.http2:http2-common  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty.http2:http2-hpack  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty.http2:http2-http-client-transport  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty.websocket:websocket-api  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty.websocket:websocket-client  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty.websocket:websocket-common  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty.websocket:websocket-server  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty.websocket:websocket-servlet  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty:jetty-alpn-client  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty:jetty-alpn-java-client  (ships at: 9.4.58.v20250814)
+   org.eclipse.jetty:jetty-client  (ships at: 9.4.58.v20250814)
+   org.eclipse.persistence:org.eclipse.persistence.asm  (ships at: 9.6.0)
+   org.eclipse.persistence:org.eclipse.persistence.core  (ships at: 2.7.14.v20231208-d05cebc9b0)
+   org.eclipse.persistence:org.eclipse.persistence.moxy  (ships at: 2.7.14.v20231208-d05cebc9b0)
+   org.glassfish.hk2.external:aopalliance-repackaged  (ships at: 2.6.1)
+   org.glassfish.hk2.external:jakarta.inject  (ships at: 2.6.1)
+   org.glassfish.hk2:hk2-api  (ships at: 2.6.1)
+   org.glassfish.hk2:hk2-locator  (ships at: 2.6.1)
+   org.glassfish.hk2:hk2-utils  (ships at: 2.6.1)
+   org.glassfish.hk2:osgi-resource-locator  (ships at: 1.0.3)
+   org.glassfish.jaxb:txw2  (ships at: 2.3.9)
+   org.glassfish:javax.json  (ships at: 1.1.4)
+   org.hdrhistogram:hdrhistogram  (ships at: 2.1.12)
+   org.javassist:javassist  (ships at: 3.30.2-GA)
+   org.jsonschema2pojo:jsonschema2pojo-core  (ships at: 1.0.2)
+   org.jspecify:jspecify  (ships at: 1.0.0)
+   org.slf4j:jcl-over-slf4j  (ships at: 1.7.36)
+
+== VERSION DRIFT between manual manifest and shipped jars: 10 stale + 6 enumerated-form-only
+   com.google.api.grpc:proto-google-common-protos: manual ['1.0.0', '2.55.2'] vs shipped ['2.48.0']
+   com.google.errorprone:error_prone_annotations: manual ['2.32.0', '2.36.0'] vs shipped ['2.30.0']
+   com.google.guava:failureaccess: manual ['1.0', '1.0.2'] vs shipped ['1.0.3']
+   commons-beanutils:commons-beanutils: manual ['1.9.4'] vs shipped ['1.9.2']
+   io.grpc:grpc-util: manual ['1.70.0'] vs shipped ['1.69.0']
+   io.opentelemetry:opentelemetry-api: manual ['1.59.0'] vs shipped ['1.49.0']
+   io.opentelemetry:opentelemetry-context: manual ['1.59.0'] vs shipped ['1.49.0']
+   org.apache.yetus:audience-annotations: manual ['0.5.0'] vs shipped ['0.12.0']
+   org.ow2.asm:asm-commons: manual ['6.0'] vs shipped ['9.7.1']
+   org.ow2.asm:asm-tree: manual ['6.0'] vs shipped ['9.7.1']
+   com.google.j2objc:j2objc-annotations: manual ['1.3', '3.0.0'] vs shipped ['3.0.0'] (subset/form)
+   io.grpc:grpc-api: manual ['1.69.0', '1.70.0'] vs shipped ['1.69.0'] (subset/form)
+   io.grpc:grpc-context: manual ['1.69.0', '1.70.0'] vs shipped ['1.69.0'] (subset/form)
+   io.grpc:grpc-core: manual ['1.69.0', '1.70.0'] vs shipped ['1.69.0'] (subset/form)
+   io.grpc:grpc-protobuf: manual ['1.69.0', '1.70.0'] vs shipped ['1.69.0'] (subset/form)
+   io.grpc:grpc-stub: manual ['1.69.0', '1.70.0'] vs shipped ['1.69.0'] (subset/form)
+
+== LISTED BUT NOT SHIPPED (declared-but-not-shipped): 107  (+1 embedded-only/shaded entries, expected)
+   com.aliyun.oss:aliyun-sdk-oss
+   com.aliyun:aliyun-java-core
+   com.aliyun:aliyun-java-sdk-core
+   com.aliyun:aliyun-java-sdk-kms
+   com.aliyun:aliyun-java-sdk-ram
+   com.aliyun:aliyun-java-sdk-sts
+   com.aliyun:java-trace-api
+   com.cedarsoftware:java-util
+   com.cedarsoftware:json-io
+   com.github.stephenc.jcip:jcip-annotations
+   com.google.api-client:google-api-client
+   com.google.api.grpc:gapic-google-cloud-storage-v2
+   com.google.api.grpc:grpc-google-cloud-storage-v2
+   com.google.api.grpc:proto-google-cloud-monitoring-v3
+   com.google.api.grpc:proto-google-cloud-storage-v2
+   com.google.api.grpc:proto-google-iam-v1
+   com.google.api:api-common
+   com.google.api:gax
+   com.google.api:gax-grpc
+   com.google.api:gax-httpjson
+   com.google.apis:google-api-services-storage
+   com.google.auth:google-auth-library-credentials
+   com.google.auth:google-auth-library-oauth2-http
+   com.google.auto.value:auto-value-annotations
+   com.google.cloud.opentelemetry:exporter-metrics
+   com.google.cloud:google-cloud-core
+   com.google.cloud:google-cloud-core-grpc
+   com.google.cloud:google-cloud-core-http
+   com.google.cloud:google-cloud-monitoring
+   com.google.http-client:google-http-client
+   com.google.http-client:google-http-client-apache-v2
+   com.google.http-client:google-http-client-appengine
+   com.google.http-client:google-http-client-gson
+   com.google.http-client:google-http-client-jackson2
+   com.google.json-simple:json-simple
+   com.google.oauth-client:google-oauth-client
+   com.google:guice
+   com.google:guice-servlet
+   com.huaweicloud:esdk-obs-java
+   com.microsoft.azure:azure-data-lake-store-sdk
+   com.sun.xml.bind:jaxb-impl
+   com.thoughtworks.paranamer:paranamer
+   com.volcengine:ve-tos-java-sdk-hadoop
+   io.grpc:grpc-alts
+   io.grpc:grpc-auth
+   io.grpc:grpc-googleapis
+   io.grpc:grpc-grpclb
+   io.grpc:grpc-inprocess
+   io.grpc:grpc-netty-shaded
+   io.grpc:grpc-opentelemetry
+   io.grpc:grpc-rls
+   io.grpc:grpc-services
+   io.grpc:grpc-xds
+   io.opencensus:opencensus-api
+   io.opencensus:opencensus-contrib-grpc-metrics
+   io.opencensus:opencensus-contrib-http-util
+   io.opentelemetry.contrib:opentelemetry-gcp-resources
+   io.opentelemetry:opentelemetry-sdk
+   io.opentelemetry:opentelemetry-sdk-common
+   io.opentelemetry:opentelemetry-sdk-extension-autoconfigure-spi
+   io.opentelemetry:opentelemetry-sdk-logs
+   io.opentelemetry:opentelemetry-sdk-metrics
+   io.opentelemetry:opentelemetry-sdk-trace
+   io.opentracing:opentracing-api
+   io.opentracing:opentracing-noop
+   io.opentracing:opentracing-util
+   jakarta.ws.rs-api:jakarta.ws.rs-api
+   javax.servlet.jsp:jsp-api
+   junit:junit
+   net.minidev:accessors-smart
+   org.apache.commons:commons-digester
+   org.apache.commons:commons-validator
+   org.apache.hbase:hbase-annotations
+   org.apache.hbase:hbase-client
+   org.apache.hbase:hbase-common
+   org.apache.hbase:hbase-protocol
+   org.apache.htrace:htrace-core
+   org.apache.htrace:htrace-core4
+   org.apache.httpcomponents.client5:httpclient5
+   org.apache.httpcomponents.core5:httpcore5
+   org.apache.kerby:kerb-admin
+   org.apache.kerby:kerb-client
+   org.apache.kerby:kerb-common
+   org.apache.kerby:kerb-identity
+   org.apache.kerby:kerb-server
+   org.apache.kerby:kerb-simplekdc
+   org.apache.kerby:kerby-xdr
+   org.apache.kerby:token-provider
+   org.apache.sshd:sshd-common
+   org.apache.sshd:sshd-core
+   org.apache.sshd:sshd-sftp
+   org.checkerframework:checker-qual
+   org.conscrypt:conscrypt-openjdk-uber
+   org.dom4j:dom4j
+   org.glassfish.jersey.test-framework.providers:jersey-test-framework-provider-jetty
+   org.glassfish.jersey.test-framework:jersey-test-framework-core
+   org.hamcrest:hamcrest-core
+   org.hsqldb:hsqldb
+   org.ini4j:ini4j
+   org.jacoco:org.jacoco.agent
+   org.jdom:jdom2
+   org.jruby.joni:joni
+   org.ow2.asm:asm
+   org.reactivestreams:reactive-streams
+   org.threeten:threetenbp
+   ro.isdc.wro4j:wro4j-maven-plugin
+   software.amazon.awssdk:bundle
+

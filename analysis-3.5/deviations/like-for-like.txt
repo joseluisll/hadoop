@@ -1,0 +1,13 @@
+shipped jars (TSV rows): 630
+promoted from partial rows: 130  unpromoted: 0
+distinct shipped third-party g:a: 215  (own org.apache.hadoop jars excluded: 78)
+manual LICENSE-binary g:a entries: 218
+
+== SHIPPED BUT NOT LISTED in the manual LICENSE-binary: 0
+   of which COORDINATE DRIFT (artifact listed under another group): 0
+   NOT LISTED UNDER ANY COORDINATE: 0
+
+== VERSION DRIFT between manual manifest and shipped jars: 0 stale + 0 enumerated-form-only
+
+== LISTED BUT NOT SHIPPED (declared-but-not-shipped): 0  (+3 embedded-only/shaded entries, expected)
+
