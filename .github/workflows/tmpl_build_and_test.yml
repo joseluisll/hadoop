@@ -58,6 +58,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # HADOOP-20016 CI probe: -DenableProcessChecker=all added so a hung or dead test
+  # fork fails loudly with a dump within the 900s fork timeout instead of sitting
+  # silent until the 6h job timeout (SUREFIRE-1722 blind spot; checker is off by
+  # default since surefire 3.0.0-M4).
   MAVEN_ARGS:
     --batch-mode
     --no-transfer-progress
@@ -70,6 +74,7 @@ env:
     -Drequire.valgrind
     -Dmaven.test.failure.ignore=false
     -Dsurefire.rerunFailingTestsCount=2
+    -DenableProcessChecker=all
 
 jobs:
   # TODO: use common composite actions in .github/actions/
