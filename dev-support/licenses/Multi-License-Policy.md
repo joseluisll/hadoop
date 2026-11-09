@@ -51,5 +51,9 @@ this directory).
      section, which by policy covers the CDDL family (1.0/1.1, with or
      without the GPLv2-CE companion)
 
-The R40 archive-derived manifest generator (Stage 3) must apply this
-same table when it assigns sections.
+The R40 archive-derived manifest generator (Stage 3) applies this
+same table when it assigns sections (`NAME_TO_SECTION` +
+`section_for` in `generate-archive-manifest.py`, fail-closed on
+unknown license names). Both branch manifests — trunk's and the
+`feat/LICENSES-3.5` port — were produced by it, so the generated
+output and this policy cannot drift.

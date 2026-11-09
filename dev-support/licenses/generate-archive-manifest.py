@@ -106,6 +106,11 @@ NAME_TO_SECTION = {
     'Revised BSD': 'bsd3',
     'The Go license': 'bsd3',  # Google's BSD-3-clause-style Go license (re2j)
     'MIT License': 'mit',
+    # the license-maven-plugin truncates the closing paren when the
+    # POM's license name itself ends in a paren group (3.5's
+    # azure-keyvault-core POM declares 'The MIT License (MIT)'):
+    # THIRD-PARTY.txt carries 'The MIT License (MIT'
+    'The MIT License (MIT': 'mit',
     'Bouncy Castle Licence': 'mit',
     'CDDL + GPLv2 with classpath exception': 'cddl',
     'EDL 1.0': 'edl',
