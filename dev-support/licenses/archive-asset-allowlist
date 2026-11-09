@@ -73,6 +73,27 @@ theme.html
 partials/*.html
 # --- 2. dist-built gzip twins of webapp static files ---
 *.gz
+# --- 2b. the release-shaped YARN UIs (-Pyarn-ui): compiled bundle output
+# of each module's lock-pinned dependency set (see ui-archive-trees). The
+# per-package license statements are the manifest's package-style entries,
+# validated against the modules' committed lock files; the bundle files
+# themselves (hashed chunks, sourcemaps, compiled css, bundled fonts and
+# images, ember/vite build output) are that build's artifacts, not
+# individually curated assets. Hadoop-authored support files below.
+# A dependency change re-renders these paths but is caught by the lock
+# evidence check on the package entries; upstream REMOVING a UI makes
+# these rows stale and fails the gate until pruned.
+webapps/ui2/assets/*
+webapps/ui2/fonts/*
+webapps/ui2/config/configs.env
+webapps/ui2/crossdomain.xml
+webapps/scheduler-ui/assets/*
+webapps/scheduler-ui/mock/*
+webapps/scheduler-ui/mockServiceWorker.js
+webapps/scheduler-ui/favicon.ico
+# WAR packaging metadata of the exploded UI WARs (jar-side licensing)
+WEB-INF/classes/META-INF/LICENSE.txt
+WEB-INF/classes/META-INF/NOTICE.txt
 # --- 3. third-party jars' self-description pages ---
 about.html
 license.html

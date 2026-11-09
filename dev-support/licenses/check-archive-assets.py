@@ -41,14 +41,25 @@ Checks:
    pinned "name@version" (or banner/lockfile-style) string in some
    shipped asset; (c) for a package whose installed tree ships but
    carries no version (a lone font file), an EXACT pin (no range) of that
-   name in a source-tree package.json. A miss lists the versions the
-   shipped manifests do carry, so the fix is in the message.
+   name in a source-tree package.json; (d) a pin in the shipping module's
+   committed LOCK FILE (package-lock.json / yarn.lock / bower.json) while
+   the module's built UI tree ships in the archive — the dist build
+   installs from those locks, so the pin IS what ships; minified bundles
+   carry no probeable version string, the lock is the archive-equivalent
+   evidence. bower has no lock file, so a bower range whose floor equals
+   the pin is accepted as the strongest available evidence. Entries whose
+   content is compiled into a jar with no probeable string (native
+   leveldb inside leveldbjni-all) are recorded in
+   archive-asset-pin-exceptions — self-cleaning in both directions.
+   A miss lists the versions the shipped manifests do carry, so the fix
+   is in the message.
    A package-style entry also COVERS (check 1) the files of its own
    installed tree, vendor/<name>/** or node_modules/<name>/** (scoped
    names without the '@'), so npm-installed trees copied into a WAR need
    no path-style entry the source tree cannot resolve.
 4. Allowlist self-cleaning: an allowlist entry that matches no shipped
-   asset fails, exactly like assembly-includes.
+   asset fails, exactly like assembly-includes. The ui-archive-trees map
+   self-cleans too: a row whose module dir or archive tree is gone fails.
 
 Coverage matching: a manifest/allowlist entry's path components (after
 src/main[.resources] stripping, brace expansion, note stripping) must
@@ -85,6 +96,8 @@ sys.dont_write_bytecode = True  # importlib load below must not litter the tree
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_MANIFEST = os.path.join(SCRIPT_DIR, "manifest-assets.txt")
 DEFAULT_ALLOWLIST = os.path.join(SCRIPT_DIR, "archive-asset-allowlist")
+DEFAULT_UI_TREES = os.path.join(SCRIPT_DIR, "ui-archive-trees")
+DEFAULT_PIN_EXCEPTIONS = os.path.join(SCRIPT_DIR, "archive-asset-pin-exceptions")
 
 # load the shared parsing helpers from the stage-B gate (filename has a
 # dash, so import via importlib) — one source of truth for brace
@@ -229,6 +242,144 @@ def source_exact_pins(repo):
     return pins
 
 
+def norm_pkg(name):
+    """Scoped npm names arrive in the manifest without the leading '@'
+    (radix-ui/react-accordion for @radix-ui/react-accordion); normalize
+    both sides by stripping it."""
+    return name.lstrip("@")
+
+
+def lock_exact_pins(module_dir):
+    """{npm name: {exact versions}} from a module's committed LOCK FILES —
+    the dist build installs from these, so a pin here is what ships.
+
+    package-lock.json: every resolved position (the bundle ships all of
+    them — a nested transitive pin is as present in the compiled output
+    as the top-level one; the manifest may name either).
+    yarn.lock: every resolved block (a name may legitimately resolve to
+    two versions for two in-tree consumers).
+    bower.json: exact pins, plus the floor of a ~/^ range — bower has no
+    lock file, so the floor is the strongest available version evidence.
+    Prerelease versions (1.0.0-beta.1) are indexed nowhere: a manifest
+    pinning one must carry probe or shipped-manifest evidence instead.
+    """
+    pins = {}
+    for dp, _dn, fn in os.walk(module_dir):
+        if "node_modules" in dp.split(os.sep):
+            continue
+        if "package-lock.json" in fn:
+            try:
+                doc = json.load(open(os.path.join(dp, "package-lock.json"),
+                                     encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            pkgs = doc.get("packages") or {}
+            if pkgs:  # lockfileVersion 2/3
+                for key, info in pkgs.items():
+                    if not key.startswith("node_modules/"):
+                        continue
+                    rest = key[len("node_modules/"):]
+                    # nested position: .../node_modules/@scope/pkg — the
+                    # package name is the LAST node_modules segment
+                    if "node_modules/" in rest:
+                        rest = rest.rsplit("node_modules/", 1)[1]
+                    v = (info or {}).get("version")
+                    if isinstance(v, str) and EXACT_PIN.match(v):
+                        pins.setdefault(norm_pkg(rest), set()).add(v)
+            else:  # lockfileVersion 1: top-level "dependencies" entries
+                for name, info in (doc.get("dependencies") or {}).items():
+                    v = (info or {}).get("version")
+                    if isinstance(v, str) and EXACT_PIN.match(v):
+                        pins.setdefault(norm_pkg(name), set()).add(v)
+        if "yarn.lock" in fn:
+            try:
+                text = open(os.path.join(dp, "yarn.lock"), encoding="utf-8").read()
+            except OSError:
+                continue
+            # key line: 'name@range, name@range2:' — each spec may be
+            # individually quoted (the canonical yarn.lock form for scoped
+            # packages: '"@scope/pkg@^1.0.0", "@scope/pkg@~1.0.0":'); a
+            # name may resolve for several in-tree consumers
+            for m in re.finditer(
+                r'^([^:\n]+):\n  version "([^"]+)"', text, re.M
+            ):
+                spec = m.group(1).split(",")[0].strip().strip('"')
+                # spec forms: name@range, @scope/name@range; every spec on
+                # a key line belongs to the SAME package name (yarn.lock
+                # groups one name's resolutions), so the first spec names
+                # the block — if that invariant ever changes, versions
+                # would be silently dropped here
+                if spec.startswith("@"):
+                    name = "@" + spec[1:].split("@")[0]
+                else:
+                    name = spec.split("@")[0]
+                if EXACT_PIN.match(m.group(2)):
+                    pins.setdefault(norm_pkg(name), set()).add(m.group(2))
+        if "bower.json" in fn:
+            try:
+                doc = json.load(open(os.path.join(dp, "bower.json"),
+                                     encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            for key in ("dependencies", "devDependencies"):
+                for name, spec in (doc.get(key) or {}).items():
+                    if not isinstance(spec, str):
+                        continue
+                    m = re.match(r"^[~^]?v?(\d+\.\d+\.\d+)", spec.strip())
+                    if m:  # exact, or the floor of a ~/^ range
+                        pins.setdefault(norm_pkg(name), set()).add(m.group(1))
+    return pins
+
+
+def parse_ui_trees(path, repo):
+    """[(module_relpath, module_dir, tree_comps)] from ui-archive-trees.
+    Self-cleaning: a row whose module dir does not exist in the repo is a
+    failure; a row whose tree ships nowhere is caught after enumeration."""
+    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+        sys.exit(f"FAIL: cannot read curated UI-module map ({path})")
+    out, failures = [], []
+    with open(path, encoding="utf-8") as fh:
+        for lineno, raw in enumerate(fh, 1):
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            parts = line.split()
+            if len(parts) != 2:
+                sys.exit(f"FAIL: malformed line {lineno} in {path} "
+                         f"(expected <module-path> <archive-tree>): {line!r}")
+            module_rel, tree = parts
+            module_dir = os.path.join(repo, module_rel)
+            if not os.path.isdir(module_dir):
+                failures.append(f"line {lineno}: module dir missing: {module_rel}")
+                continue
+            out.append((module_rel, module_dir, comps(tree)))
+    if failures:
+        for f in failures:
+            print(f"  STALE UI-MAP {f} — drop the row", file=sys.stderr)
+        sys.exit("FAIL: ui-archive-trees rows reference missing modules")
+    return out
+
+
+def parse_pin_exceptions(path):
+    """{norm_pkg_name: {versions}} exempt from version evidence, from
+    archive-asset-pin-exceptions. Self-cleaning: a row with no matching
+    manifest entry fails after the manifest is parsed."""
+    if not os.path.isfile(path) or os.path.getsize(path) == 0:
+        sys.exit(f"FAIL: cannot read curated pin exceptions ({path})")
+    out = {}
+    with open(path, encoding="utf-8") as fh:
+        for lineno, raw in enumerate(fh, 1):
+            line = raw.split("#", 1)[0].strip()
+            if not line:
+                continue
+            toks = line.split()
+            if len(toks) != 2:
+                sys.exit(f"FAIL: malformed line {lineno} in {path} "
+                         f"(expected <name> <version>): {line!r}")
+            out.setdefault(norm_pkg(toks[0]), set()).add(toks[1].lstrip("v"))
+    return out
+
+
 def is_asset(relpath):
     """File-level or jar-entry path that the asset gate must account for."""
     p = relpath.replace("\\", "/")
@@ -311,6 +462,8 @@ def main():
     ap.add_argument("repo_root", nargs="?")
     ap.add_argument("--manifest", default=DEFAULT_MANIFEST)
     ap.add_argument("--allowlist", default=DEFAULT_ALLOWLIST)
+    ap.add_argument("--ui-trees", default=DEFAULT_UI_TREES)
+    ap.add_argument("--pin-exceptions", default=DEFAULT_PIN_EXCEPTIONS)
     ap.add_argument("--tsv", default=None)
     args = ap.parse_args()
 
@@ -328,6 +481,10 @@ def main():
             package_entries.append((section, entry.strip()))
         else:
             path_entries.append((section, entry.strip()))
+    if not path_entries and not package_entries:
+        sys.exit(f"FAIL: no entries parsed from {args.manifest} — a "
+                 "comments-only or empty manifest is a broken input, not "
+                 "a passing gate")
     matchers = []
     archivable = []
     for section, entry in path_entries:
@@ -337,6 +494,27 @@ def main():
                 archivable.append((section, entry, c))
     allow = parse_allowlist(args.allowlist)
     allow_comps = [c for _ln, c in allow]
+    pin_exceptions = parse_pin_exceptions(args.pin_exceptions)
+    # every exception row must still name a manifest entry — a stale row
+    # means the entry was pruned and the exemption must go with it; a
+    # name may legitimately appear twice with different versions (e.g.
+    # bootstrap 3.4.1 for one UI, 3.3.7 for the catalog WAR), so the
+    # (name, version) PAIR is what must match
+    manifest_pkg_index = {}
+    for _s, e in package_entries:
+        toks = e.split()
+        manifest_pkg_index.setdefault(norm_pkg(toks[0]), set()).add(
+            toks[-1].lstrip("v"))
+    stale_exceptions = [
+        (n, v) for n, vs in pin_exceptions.items() for v in vs
+        if v not in manifest_pkg_index.get(n, ())
+    ]
+    if stale_exceptions:
+        for n, v in stale_exceptions:
+            print(f"  STALE PIN-EXCEPTION: {n} {v} names no manifest entry "
+                  "— drop the row", file=sys.stderr)
+        sys.exit("FAIL: archive-asset-pin-exceptions rows with no matching "
+                 "manifest entry")
 
     # --- enumerate the archive -------------------------------------------
     file_level, embedded, jars, pkg_json = enumerate_assets(archive_root)
@@ -444,17 +622,43 @@ def main():
         except (ValueError, AttributeError):
             continue
         if isinstance(v, str) and v:
-            shipped_versions.setdefault(pkg_name(comps(key)), set()).add(v)
+            shipped_versions.setdefault(
+                norm_pkg(pkg_name(comps(key))), set()
+            ).add(v)
     blobs = [(k, b) for k, b in blobs if k not in pkg_json]
-    shipped_trees = {pkg_name(comps(key)) for key in all_assets} - {None}
+    shipped_trees = set()
+    for key in all_assets:
+        pn = pkg_name(comps(key))
+        if pn is not None:
+            shipped_trees.add(norm_pkg(pn))
     pins = None  # (c) source exact pins, loaded only when needed
+
+    # (d) lock-file evidence: the UI modules whose built trees ship in
+    # this archive; pins are read lazily per module
+    ui_modules = parse_ui_trees(args.ui_trees, repo)
+    ui_state = [
+        (module_rel, tree_c,
+         any(subsequence_match(tree_c, comps(key)) for key in all_assets))
+        for module_rel, _dir, tree_c in ui_modules
+    ]
+    lock_cache = {}  # module dir -> pins; one walk per module per run
+
+    def ui_lock_pins(module_dir):
+        if module_dir not in lock_cache:
+            lock_cache[module_dir] = lock_exact_pins(module_dir)
+        return lock_cache[module_dir]
 
     probe_failures = []
     for section, entry in package_entries:
         toks = entry.split()
         name, version = toks[0], toks[-1]
         bare = version.lstrip("v")
-        if bare in shipped_versions.get(name, ()):
+        if pin_exceptions.get(norm_pkg(name), ()) and \
+                bare in pin_exceptions[norm_pkg(name)]:
+            print(f"  probe ok: {entry} -> pin exception (compiled into a "
+                  "listed jar, no probeable string)")
+            continue
+        if bare in shipped_versions.get(norm_pkg(name), ()):
             print(f"  probe ok: {entry} -> shipped {name}/package manifest")
             continue
         needles = probe_needles(name, version)
@@ -467,14 +671,27 @@ def main():
                     break
             if hit:
                 break
-        if not hit and name in shipped_trees and name not in shipped_versions:
+        if not hit and norm_pkg(name) in shipped_trees and \
+                name not in shipped_versions:
             if pins is None:
                 pins = source_exact_pins(repo)
-            if bare in pins.get(name, ()):
+            if bare in pins.get(norm_pkg(name), ()):
                 hit = ("source package.json", f"exact pin {bare}")
         if not hit:
+            # (d) the module's committed lock file pins this exact version
+            # AND the module's built UI tree ships in this archive
+            for module_rel, tree_c, tree_ships in ui_state:
+                if not tree_ships:
+                    continue
+                module_dir = os.path.join(repo, module_rel)
+                lp = ui_lock_pins(module_dir)
+                if bare in lp.get(norm_pkg(name), ()):
+                    hit = (f"{module_rel} lock", f"lock pin {bare}")
+                    break
+        if not hit:
             probe_failures.append(
-                (section, entry, sorted(shipped_versions.get(name, ())))
+                (section, entry,
+                 sorted(shipped_versions.get(norm_pkg(name), ())))
             )
         else:
             print(f"  probe ok: {entry} -> {hit[0]} ({hit[1]!r})")
@@ -501,6 +718,17 @@ def main():
         )
         for lineno, entry in stale_allow:
             print(f"  STALE ALLOWLIST line {lineno}: {entry}", file=sys.stderr)
+
+    # ui-archive-trees self-cleaning: a mapped module whose built tree no
+    # longer ships can provide no lock evidence — drop the row
+    for module_rel, tree_c, tree_ships in ui_state:
+        if not tree_ships:
+            failures.append(
+                f"ui-archive-trees row {module_rel!r}: archive tree "
+                f"{'/'.join(tree_c)!r} ships nowhere — drop the row"
+            )
+            print(f"  STALE UI-TREE: {module_rel} -> {'/'.join(tree_c)}",
+                  file=sys.stderr)
 
     # --- report -----------------------------------------------------------
     print(
