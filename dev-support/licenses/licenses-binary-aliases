@@ -34,7 +34,6 @@
 # must not appear here. A row whose text is gone fails the gate.
 bloomfilter	component	util/bloom/
 cddl-gplv2-ce	component	CDDL 1.1 + GPLv2 with classpath exception
-checker-framework	component	org.checkerframework:checker-qual
 freebsd	component	container-executor/impl/compat/
 jaf	component	jakarta.activation
 slicing-by-8	component	bulk_crc32_x86.c
@@ -48,4 +47,3 @@ epl-1.0	section	Eclipse Public License 1.0
 epl-2.0	section	Eclipse Public License (EPL) 2.0
 gplv2-ce	section	GNU General Public License (GPL), Version 2, With Classpath Exception
 public-domain	section	Public Domain
-hsql	component	hsqldb
