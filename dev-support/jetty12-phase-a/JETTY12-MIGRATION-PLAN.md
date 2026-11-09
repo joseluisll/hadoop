@@ -39,15 +39,18 @@ the #8894 Build-rerun hang was investigated (PR table note and
 "Where it stands"), the fork's Build template gained
 `-DenableProcessChecker=all` (fork commit `9391a186b19`), and an
 instrumented probe run went up on the probe branch `HADOOP-20016-PROBE`.
+On 2026-11-09 #8940 (HADOOP-20000) was merged by pan3793 (merge commit
+`28c018cdafe`), the third subtask in trunk (after 20014 and 20015).
 
-**Where it stands (2026-11-08):** HADOOP-20014 is the first subtask in trunk
-(merged 2026-11-05, approved by pan3793). Two more stage-1 PRs are approved:
+**Where it stands (2026-11-09):** HADOOP-20014 is the first subtask in trunk
+(merged 2026-11-05, approved by pan3793) and #8940 (HADOOP-20000) followed on
+2026-11-09 (merge commit `28c018cdafe`). Two more stage-1 PRs are approved:
 #8890 (20012, pjfanning, 11-06) and #8893 (20015, pan3793, 11-05) — #8893 is
 fully green on its final head (Yetus +1, 11-06; Build pass) and #8890's only
 red is the waived `test4tests`; both wait on merge. Every other subtask now
 has a PR: nine were opened on 2026-11-05 (20003 to
-20008, 19999, 20000, plus HADOOP-20048 outside the umbrella), so 16 PRs are
-open in the series; HADOOP-19998 was dropped on 2026-11-08 (stage-4 decision,
+20008, 19999, 20000, plus HADOOP-20048 outside the umbrella); with #8940
+merged, 15 of those PRs remain open; HADOOP-19998 was dropped on 2026-11-08 (stage-4 decision,
 see below) and has no PR by design. No red result left on any of them is caused by its
 patch: what remains is `test4tests` on pom-only changes, trunk's 80 SpotBugs
 warnings, flaky tests (HADOOP-19997, HADOOP-19982, HADOOP-20048), and the
@@ -127,7 +130,8 @@ so HADOOP-19972 shrinks to the port. The work runs in stages:
    where #8890 declares Solr's exclusions, so the two conflict there.
 6. HADOOP-19972.
 
-HADOOP-19999 and HADOOP-20000 can land at any time.
+HADOOP-19999 can land at any time. HADOOP-20000 has landed: #8940 was merged
+on 2026-11-09 (merge commit `28c018cdafe`).
 
 ## PR tracking
 
@@ -160,7 +164,7 @@ the patch.
 | [HADOOP-20008](https://issues.apache.org/jira/browse/HADOOP-20008) | Open | None | [#8950](https://github.com/apache/hadoop/pull/8950), draft | -1 (test4tests), 11-06 | Yes | Pass | None |
 | [HADOOP-19998](https://issues.apache.org/jira/browse/HADOOP-19998) | Open (dropped by the owner 2026-11-08; to resolve as Won't Fix) | None | No PR | - | - | - | - |
 | [HADOOP-19999](https://issues.apache.org/jira/browse/HADOOP-19999) | Open | None | [#8944](https://github.com/apache/hadoop/pull/8944), draft | -1 (test4tests), 11-06 | Yes | Pass | None |
-| [HADOOP-20000](https://issues.apache.org/jira/browse/HADOOP-20000) | Open | None | [#8940](https://github.com/apache/hadoop/pull/8940) | -1 (test4tests), 11-05 | Yes | Pass | None |
+| [HADOOP-20000](https://issues.apache.org/jira/browse/HADOOP-20000) | Resolved | None | [#8940](https://github.com/apache/hadoop/pull/8940), merged 11-09 | - | - | - | None (merged by pan3793) |
 | [HADOOP-19972](https://issues.apache.org/jira/browse/HADOOP-19972) | Open | Jose Luis López | [#8704](https://github.com/apache/hadoop/pull/8704), draft | -1 (branch SpotBugs + unit anomaly), 11-06 | Yes | Pass | None |
 
 The nine PRs opened on 2026-11-05 come from the generated `<JIRA>` branches
@@ -237,8 +241,9 @@ are still unassigned in JIRA.
   branch Build failed on `TestZKDelegationTokenSecretManager` (20005) and on
   `TestNamenodeCapacityReport` and `TestDFSInputStreamBlockLocations` (20006),
   all flaky and unrelated.
-- **#8950 (20008), #8940 (20000):** `test4tests` only; both are pom changes.
-  Both Build checks pass.
+- **#8950 (20008):** `test4tests` only; a pom change; its Build check passes.
+  **#8940 (20000)** had the same `test4tests` red on a pom change; it was
+  merged on 2026-11-09.
 - **#8704 (19972):** build 34 (2026-11-05 15:03, on `bf9bf372ffd`) was the
   first -1 the patch caused since the full-suite run of 2026-10-31:
   `shadedclient` failed because commit `bf9bf372ffd` excluded `jetty-schemas`
@@ -396,7 +401,8 @@ share a classpath with Jetty 12.
   #8944, draft, Yetus `test4tests` only (11-06, on head); Build passes.
 - **HADOOP-20000, remove `jsr311-api`.** It duplicates JAX-RS 2.1 on the
   classpath of `hadoop-yarn-server-timelineservice-hbase-tests`. #8940, Yetus
-  `test4tests` only.
+  `test4tests` only. Merged on 2026-11-09 (merge commit `28c018cdafe`); JIRA
+  resolved as Fixed for 3.5.1 and 3.6.0.
 
 ## Related issues
 
