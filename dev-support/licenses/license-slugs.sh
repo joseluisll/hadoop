@@ -24,6 +24,11 @@ license_slug() {
   case "$name" in
     "the apache software license, version 2.0") echo "apache-2.0" ;;
     "mit license")                              echo "mit" ;;
+    # azure-keyvault-core's POM declares 'The MIT License (MIT)': this
+    # extractor balances parens, so the resolver sees the FULL name
+    # (the Python generator's parser sees the truncated
+    # 'The MIT License (MIT' — mapped in generate-archive-manifest.py)
+    "the mit license (mit)")                     echo "mit" ;;
     "bsd 2-clause license")                     echo "bsd-2-clause" ;;
     # generic "BSD License" carriers in this repo (stax2-api, dom4j,
     # jdom2, jline) are all 3-clause BSD
