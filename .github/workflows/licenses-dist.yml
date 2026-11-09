@@ -128,17 +128,17 @@ jobs:
       # the direct goal invocation then builds the root THIRD-PARTY
       # inventory, as in licenses.yml. The branch-3.5 pom has no cloud
       # -Dhadoop-*-package profiles (a trunk feature) — none are passed.
-      # -Pyarn-ui packages the YARN UI as WARs where the profile exists:
-      # without UI WARs the ground truth lacks the UI trees and their
-      # bundled assets (R7 stage C npm probes). branch-3.5 has no
-      # yarn-ui profile, so Maven skips it with a warning; the archive
-      # curation pass consumes the resulting findings.
+      # -Pyarn-ui activates the yarn-ui profiles in the hadoop-yarn-ui
+      # and hadoop-yarn-capacity-scheduler-ui MODULE poms (packaging=war
+      # + the node/yarn frontend build): the official 3.5.0 release
+      # ships both UI WARs, so the ground truth must include them or
+      # every bundled npm entry and UI tree reads as stale (R7 stage C).
       - name: Build dist tarball and inventory (Docker build env)
         env:
           HADOOP_BUILD_ENV_PREBUILT: '1'
         run: >-
           DOCKER_INTERACTIVE_RUN= ./start-build-env.sh ubuntu_24 bash -c
-          'mvn -B -ntp install -Pdist,native -DskipTests -Dtar
+          'mvn -B -ntp install -Pdist,native,yarn-ui -DskipTests -Dtar
           -Dmaven.javadoc.skip=true -Dcheckstyle.skip=true -Drat.skip=true
           -Dspotbugs.skip=true
           && mvn -B -ntp -Plicenses -DskipTests
