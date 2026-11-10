@@ -57,6 +57,8 @@ R38/R40/R53 gates fail the build on any future drift.
 
 | Path | Provenance | What it is |
 |---|---|---|
+| `rm-runbook.md` | — | the release procedure from the release manager's operator viewpoint, with the evidence the claims rest on |
+| `adoption-proposal.md` | — | the two-increment adoption path: optional secret-free GHA workflows (evidence + RC-bundle tooling) first, enforcement inside create-release second |
 | `sources/tarball/LICENSE-binary`, `NOTICE-binary`, `LICENSE.txt`, `NOTICE.txt`, `licenses-binary/` (74) | TARBALL | the license files shipped in the official 3.5.0 binary |
 | `sources/branch-3.5/*` | BRANCH | the same files as hand-maintained on the branch |
 | `sources/system/THIRD-PARTY.txt` | SYSTEM | the automated dependency inventory: 295 coordinates with resolved license names + versions, collected from the full reactor |
