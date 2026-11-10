@@ -1,4 +1,4 @@
-# Automatic license management — requirements (v2.8)
+# Automatic license management — requirements (v2.9)
 
 Requirements for automating the collection, validation, and distribution of
 third-party license information in this repository. The implementation
@@ -313,8 +313,23 @@ every dependency change, at release time, and in the precommit vote.
 54. **Upstream change split** — build-environment resilience changes
     (Dockerfiles, download retry, the googletest pre-seed) SHALL be proposed
     under their own JIRA, separately from the license tooling.
+55. **Upstream evidence provenance** — every claim made to upstream
+    (HADOOP-20078 and follow-ups) SHALL be reproducible from published,
+    provenance-labeled sources (`analysis-3.5/` on `feat/LICENSES-3.5`) and
+    SHALL be verified against FINAL released artifacts — the final release
+    tags in the ASF repository and the published, checksum-verified tarballs —
+    never against RC tags or branch proxies (the GitHub mirror of
+    apache/hadoop carries only the RC tags; the final tags live in ASF
+    gitbox as `rel/release-*`).
+56. **Release-history monitoring** — for each new upstream release, the
+    changes to the license files since the previous release SHALL be
+    analyzed and recorded (commits touching them, file-level diffs between
+    the release tags, and how the release tarballs distribute the files and
+    the license-text directories), keeping the adoption evidence current and
+    re-measuring drift against the latest release. First pass 2026-11-10
+    (T00023): 3.4.2, 3.4.3 and 3.5.0.
 
-## Implementation status (branches `feat/LICENSES` and `feat/LICENSES-3.5`, v2.8)
+## Implementation status (branches `feat/LICENSES` and `feat/LICENSES-3.5`, v2.9)
 
 Open work items, the transition plan, and in-flight CI verification are
 tracked in the claude-mem work state for this project (list
@@ -349,6 +364,8 @@ open and what is in flight.
 | 42 | Implemented on the branch 2026-11-09 (review F1, the review's stopgap; record: `2026-11-09-0120-F1-F2-Dependency-Coverage-And-Baseline-Freshness.md`) — the dist workflow's push paths now cover `**/pom.xml` and `hadoop-assemblies/**` (plus the root `pom.xml`), so every dependency or assembly change triggers an archive run whose R38/R40 gates validate the shipped set; the R10 gate's assumption comment updated to match. The cheaper per-push generator comparison against the last enumeration remains the upstream option if the ~38-min archive run per pom change is too heavy (revisit under R41/F3); pull-request coverage waits for R41 |
 | 43 | Partly 2026-11-09 (review F2; record: `2026-11-09-0120-F1-F2-Dependency-Coverage-And-Baseline-Freshness.md`) — every R10 failure message (no baseline run, artifact download failure, missing generated manifest, drift) prints the exact dispatch command to recover, and the download is explicitly fail-checked. The baseline artifact sets `retention-days: 90` — the platform cap for a public repository (365 was rejected in review: GitHub limits artifacts to 1–90 days on public repos); expiry stays fail-closed behind the printed recovery command, and the cap is a non-issue upstream where the org's retention setting plus the weekly cron (R41) refresh the baseline. Open: the weekly cron stays inert until the workflow lands on the default branch (R41) — on the fork the baseline refreshes by push and dispatch only |
 | 41, 44–46, 49–52, 54 | Open — proposed in v2.3 from the 2026-11-08 review |
+| 55 | Met for the filed proposal 2026-11-10 — every number in HADOOP-20078 traces to `analysis-3.5/`; the supporting release-history analysis (T00023) was verified against the FINAL release tags (`rel/release-3.4.3`, `rel/release-3.5.0` in ASF gitbox) and the published, sha512-verified 3.5.0 tarball, not RC proxies |
+| 56 | First pass done 2026-11-10 (T00023, details in the work state): final release tag == last RC commit for both 3.4.3 and 3.5.0 — no release-only license commits exist; the tarball's LICENSE-binary is byte-identical to the repo file at the release commit and its `licenses-binary/` dir matches the repo dir at the tag. Maintenance happens entirely during development: 69/12/15 LICENSE-binary commits per cycle (3.4.3→3.5.0 / 3.4.2→3.4.3 / 3.4.1→3.4.2), almost all ride-alongs with dependency/CVE-upgrade PRs (~2 dedicated); 3.4.3→3.5.0 content delta = 68 version bumps, 70 new components, 8 removed; text dir 43→74 (+31, YARN UI v2 npm stack); NOTICE-binary byte-identical between the two releases. Refresh due at each upstream release |
 | 40 | Integrated 2026-11-08 — the committed `LICENSE-binary` IS the generator's output (artifact of record), regenerated and drift-gated by the dist workflow per run; validated against run 42413534907 and the 42427570912/42427570914 pair (record: `2026-11-07-1730-R40-Generator.md`, switch record: `2026-11-08-0800-Stage3-Switch-Generated-Manifest.md`). Validated on the 3.5 release line too (`feat/LICENSES-3.5`): the committed manifest is derived from run 42682946618's own 3.5.1-SNAPSHOT archive enumeration + inventory (218 g:a, 123 asset lines, 9 sections), with same-inputs confirmation runs in flight (records: `2026-11-09-1930-T00019-3.5-Port-Triage-And-Emitter-Unblock.md`, `2026-11-09-2020-T00019-3.5-Archive-Derived-Manifest.md`). NOTICE-binary stays curated (attribution corpus is prose; protected by R10) |
 
 ## Review changelog
@@ -429,3 +446,16 @@ open and what is in flight.
   flight at commit time and are recorded in the work state. Status:
   R40 gains 3.5-line validation evidence (row updated); no requirement
   changed state.
+- **v2.9** — +55–56 from the upstream release-history analysis (T00023,
+  2026-11-10, for the HADOOP-20078 production proposal): verified against
+  the final release tags (`rel/release-3.4.3`, `rel/release-3.5.0`, ASF
+  gitbox) and the published 3.5.0 tarball that no release-only license
+  commits exist (final tag == last RC commit for both releases; the
+  tarball's files are byte-identical to the repo at the release commit),
+  and that license-file maintenance happens entirely during development
+  (69/12/15 commits per cycle, riding dependency-upgrade PRs) — which is
+  where the measured drift accumulates and why a release-time
+  generate-and-verify step (R44) is the right adoption slot. R55 pins the
+  evidence provenance (final artifacts, not RC proxies), R56 makes the
+  per-release license-history analysis a standing duty. Status: no
+  existing requirement changed state.
