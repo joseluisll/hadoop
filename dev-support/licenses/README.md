@@ -147,6 +147,37 @@ directory, artifacts shipped at several versions, and the same jar
 copied into several lib directories, with the on-disk bytes the extra
 copies take.
 
+A pruning dry run follows the gates in its own step (report only,
+`continue-on-error`, so it can never turn the run red; it changes
+nothing):
+
+- `unused-jar-candidates.py` writes `unused-jar-candidates.txt` per
+  archive: the third-party jars nothing in the archive refers to. It
+  starts from Hadoop's own jars, each WAR's `WEB-INF/classes` and the
+  class names in `etc/`, `bin/`, `sbin/` and `libexec/`, and follows the
+  class names in class-file constant pools (types, signatures, string
+  constants) and text resources, plus `META-INF/services` providers and
+  resource paths named in string constants (`a/b/schema.xsd`, so a jar
+  shipped only for its resources counts as used).
+  Pure Python: `jdeps` aborts on Hadoop's modular jars. It is
+  conservative (any reference counts as use), so a candidate has no
+  reference at all; jars with no class files are listed apart, and
+  `unused-jar-keep` moves jars known to be loaded by a name the scan
+  cannot see out of the candidates.
+- `archive-delta.py` writes `archive-delta.txt`: the third-party jars
+  added, removed, re-versioned or copied into other lib directories
+  against the last successful run of this workflow on the branch (the R10
+  gate's lookup), with where each changed version ships. Archives are
+  matched without their release version, so a trunk version bump still
+  compares like for like. It shows what a pruning change did to the
+  archive.
+
+The step goes on when one report fails (a warning per failure) and
+fails only at its end, still without turning the run red.
+
+Both land in the artifact and the job summary. Why a jar is in the
+archive (its dependency path) is not reported yet.
+
 The Docker build-env image comes from a GHCR cache under a
 content-addressed tag (the hash of the files the image build consumes),
 provided by `build-env-image.sh`. On a miss it waits while an earlier
@@ -168,13 +199,18 @@ python3 dev-support/licenses/check-archive-assets.py \
   <extracted>/hadoop-<version> . --tsv archive-assets.tsv
 python3 dev-support/licenses/jar-layout-report.py \
   archive-jars.tsv --root <dir the TSV paths are relative to>
+python3 dev-support/licenses/unused-jar-candidates.py \
+  <dir the TSV paths are relative to> archive-jars.tsv -o unused-jar-candidates.txt
+python3 dev-support/licenses/archive-delta.py \
+  <baseline>/archive-ground-truth <current>/archive-ground-truth
 ```
 
 Gate tooling has synthetic self-tests (not yet wired into per-push CI,
 requirement 49): `test-generate-archive-manifest.py` (happy paths plus
 every fail-closed path of the generator and emitter) and
 `test-check-archive-assets.py` (coverage matching, evidence tiers,
-self-cleaning allowlist rows) and `test-jar-layout-report.py`.
+self-cleaning allowlist rows), `test-jar-layout-report.py`,
+`test-unused-jar-candidates.py` and `test-archive-delta.py`.
 
 The shipped `LICENSE-binary` itself is generated (requirement 40) from
 the archives' enumerations plus the inventory, with the multi-license
@@ -229,6 +265,10 @@ generated manifest (R10). Regenerate and commit — never hand-edit.
   listed component (by its slug or this token, whole word), so a text
   for a component that no longer ships fails the per-push gate instead of
   shipping in the tarball; a row whose text is gone fails too.
+- `unused-jar-keep` — `g:a  # reason` for jars the pruning dry run
+  finds unreferenced but that are loaded by a name it cannot see (built
+  at run time, set outside the archive, JNI). Report only: a row naming
+  no shipped jar, or a jar found referenced anyway, is listed as stale.
 
 ## Refinements after the first manual-vs-automated comparison
 

@@ -38,9 +38,9 @@ anything uses it.
 | # | Extension | Reuses | Effort | Status |
 |---|---|---|---|---|
 | 1 | Jar layout report: same artifact at two versions in one lib directory, artifacts at several versions, the same jar copied into several lib directories, extra on-disk bytes | `archive-jars.tsv`; the R40 generator's row loader; the dist workflow's per-archive loop and artifact upload | 0.5 day | **Done** (this record) |
-| 2 | Unused-jar candidates: per classpath (`common`+`hdfs`, `yarn`, each WAR), start from Hadoop's own jars, follow class references (`jdeps -R -summary --ignore-missing-deps`, plus `META-INF/services`), report shipped jars never reached; a self-cleaning keep-list for jars loaded by name (Netty native transports, Jersey/HK2 discovery, logging back-ends, JDBC drivers) | The enumerator's unpacked tree; JDK 17 `jdeps` in the build image; the self-cleaning curation-file pattern of `archive-asset-allowlist` | 2–3 days + 1–3 days keep-list curation | Open |
-| 3 | Dependency path per shipped jar (`mvn dependency:tree`, joined to the jar list by module) | The inventory step of the same workflow | 1–2 days, +5–10 min per run | Open, only if reviewers ask |
-| 4 | Archive delta for a pruning PR: jars added/removed against the baseline run, in the job summary | The R10 baseline-artifact download; the R40 regeneration already drops the licence lines | 0.5–1 day | Open |
+| 2 | Unused-jar candidates: per classpath unit (everything outside WARs, each WAR), start from Hadoop's own jars, follow class references (planned with `jdeps`, built in pure Python — see below — plus `META-INF/services`), report shipped jars never reached; a self-cleaning keep-list for jars loaded by name (Netty native transports, Jersey/HK2 discovery, logging back-ends, JDBC drivers) | The enumerator's unpacked tree; JDK 17 `jdeps` in the build image; the self-cleaning curation-file pattern of `archive-asset-allowlist` | 2–3 days + 1–3 days keep-list curation | **Done** as a dry run (below); keep-list curation open |
+| 3 | Dependency path per shipped jar (`mvn dependency:tree`, joined to the jar list by module) | The inventory step of the same workflow | 1–2 days, +5–10 min per run | Deferred |
+| 4 | Archive delta for a pruning PR: jars added/removed against the baseline run, in the job summary | The R10 baseline-artifact download; the R40 regeneration already drops the licence lines | 0.5–1 day | **Done** (below) |
 
 What none of them does: prove a removal safe (the archive build runs
 `-DskipTests`; a pruning PR still needs the full test suite), protect
@@ -96,3 +96,100 @@ splits or copies.
 Not yet verified: the extra-bytes figures, which need the unpacked tree
 `--root` points at; the downloaded artifact has only the TSVs, so the
 first archive run with this change is the first real check.
+
+## Unused-jar candidates (#2) and archive delta (#4), dry run (2026-11-12)
+
+Both run in their own step of `licenses-dist.yml`, after the gates, with
+`continue-on-error`: they only write reports (`unused-jar-candidates.txt`
+per archive, `archive-delta.txt`, both in the artifact and the job
+summary) and can never turn the run red, which the per-push R10 gate
+depends on. Nothing in the tree is changed.
+
+### unused-jar-candidates.py
+
+- **jdeps does not work here:** on the 3.5.0 tree it aborts with
+  `FindException: Module org.slf4j not found, required by org.dnsjava`
+  (modular jars on a class-path scan), and `--ignore-missing-deps` does
+  not help. The scan is pure Python instead: it reads each class file's
+  constant pool (class entries, descriptors, generic signatures and
+  string constants, which also catches `Class.forName("...")` literals)
+  and the text resources of each jar.
+- **Model:** nodes are the TSV's jars plus each WAR's `WEB-INF/classes`;
+  roots are Hadoop's own jars (and jars the curation cannot identify),
+  every `WEB-INF/classes`, and the class names in the distribution's
+  `etc/`, `bin/`, `sbin/` and `libexec/`. A reference resolves to the
+  same unit first (a WAR's own copy), else anywhere. Service providers
+  count as used when their interface's jar is used, or the interface is
+  a JDK one (not `javax.annotation.processing.Processor`, compile-time
+  only). Conservative: any reference is use.
+- **False "used" found and fixed:** `META-INF/native-image/**` (GraalVM
+  reflection configs) and `META-INF/maven/**` (embedded poms) name
+  classes without loading them. Shaded jars (`hadoop-client-minicluster`,
+  `hbase-shaded-client-byo-hadoop`) carry both, unrelocated, for every
+  netty module they shade, which made every netty codec in `hdfs/lib`
+  look used. Both trees are skipped now.
+- `unused-jar-keep` (empty) moves jars known to be loaded by a name the
+  scan cannot see out of the candidates; stale rows are reported.
+- **Resources** (review fix): a non-class entry outside `META-INF/`
+  counts as used when a string constant names its path with a directory
+  and an extension (`getResource("a/b/schema.xsd")`, optional leading
+  slash; bare names like `log4j.properties` do not count). It changes no
+  3.5.0 verdict. The review's example for it was wrong: `jetty-webapp`
+  names `javax/servlet/jsp/resources/jsp_2_3.xsd`, but `jsp-api` ships
+  no `.xsd` files, so `jsp-api` stays a candidate.
+- Self-test `test-unused-jar-candidates.py`; it catches ten seeded
+  mutations (metadata skip, long/double slots, compile-only services,
+  string constants, root text files, same-unit preference, and four on
+  resource indexing and the resource-path pattern).
+
+**Official 3.5.0 tarball** (sha512-verified, 629 jars, 34–41 s, 175 MB):
+41 candidates, 23 no-class jars. An independent byte-level search of
+every other jar for each candidate's packages (relocated names in shaded
+jars ignored) found no reference to any of the 41 from its own unit; the
+only hits were split packages (`netty-codec` and `netty-handler` hold
+one class each in the `codec/xml` and `ssl/ocsp` packages) and other
+units' references to the WAR copies' main-unit twins.
+
+- `hdfs/lib`: netty `codec-haproxy`, `codec-memcache`, `codec-mqtt`,
+  `codec-redis`, `codec-smtp`, `codec-stomp`, `codec-xml`,
+  `handler-ssl-ocsp`, `transport-rxtx`, `transport-sctp`,
+  `transport-udt` — the modules `netty-all` pulls in and nothing uses
+  (the apache/hadoop#8943 question); the same set again in the catalog
+  WAR, plus `codec-http2`, `codec-socks`, `handler-proxy` there.
+- `common/lib` (+ `hdfs/lib` copies): `azure-storage` and
+  `azure-keyvault-core` (gone on trunk already), `kerb-crypto`,
+  `kerby-config`, `jakarta.servlet.jsp-api`.
+- `yarn/lib`: `commons-csv`, `jcodings`, `jetty-annotations`,
+  `jetty-plus`, and `asm-commons`/`asm-tree` (which only
+  `jetty-annotations` would use).
+- Catalog WAR: `jersey-media-json-jettison`.
+- No class files (review by hand): netty native transports and
+  `resolver-dns-native-macos` classifier jars, `netty-all` (an
+  aggregator in 4.1), `listenablefuture` (the empty Guava stub),
+  `grpc-context` in `yarn/csi/lib`.
+
+Each candidate still needs a human check before any pom change: the
+scan cannot see names built at run time or user code relying on
+`share/hadoop/*/lib`.
+
+### archive-delta.py
+
+Third-party jars removed (`-`), added (`+`), re-versioned (`~`) or
+copied into other lib directories (`#`) between two runs' enumerations,
+archive by archive; the release version is normalized out of paths (WAR
+file names repeat it) and out of archive names (review fix: a trunk
+version bump matched no archive and compared nothing). A `~` line is
+followed by where each dropped (`    -`) and new (`    +`) version ships
+(review fix). In the workflow the baseline is the last successful run of
+the workflow on the branch, fetched with the same API query as the R10
+gate; with no baseline, or an expired one, it says so and skips. The
+step goes on past a failing report and fails at its end (review fix:
+one crash used to stop the rest), still without turning the run red.
+
+- Two consecutive trunk runs (42704097221 → 42868918625, docs-only
+  change): no change.
+- 3.5.0 → trunk (`7f0f98943e4`): 2 removed (`azure-storage`,
+  `azure-keyvault-core`), 89 added, 60 re-versioned, 7 copy changes (158
+  in all) — including `failureaccess` gaining 1.0.2 in `common/lib` next
+  to 1.0.3, the same-directory conflict the layout report shows.
+- Self-test `test-archive-delta.py`.

@@ -273,6 +273,65 @@ jobs:
           done
           echo "R53 texts gate: every tarball ships exactly the referenced texts"
 
+      # Pruning dry run — report only, never a gate, changes nothing: the
+      # unused-jar candidates of each archive, and the third-party jar
+      # delta against the last successful run of this workflow on the
+      # branch (same lookup as licenses.yml's R10 gate). continue-on-error:
+      # a broken report must not turn this run red, because the per-push
+      # R10 gate needs it to succeed.
+      - name: Pruning dry run (unused-jar candidates, archive delta)
+        if: always()
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          # one failing report must not stop the others: record it, go on,
+          # and fail the (non-gating) step at the end
+          status=0
+          for d in target/archive-ground-truth/*/; do
+            d="${d%/}"
+            [[ -f "$d/archive-jars.tsv" && -d "$d/untarred" ]] || continue
+            if python3 dev-support/licenses/unused-jar-candidates.py \
+                "$d/untarred" "$d/archive-jars.tsv" \
+                -o "$d/unused-jar-candidates.txt"; then
+              { echo "## $(basename "$d"): unused-jar candidates (dry run)"
+                echo '```'
+                sed '/^## no class files/,$d' "$d/unused-jar-candidates.txt"
+                echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::warning::unused-jar candidates failed for $(basename "$d")"
+              status=1
+            fi
+          done
+          archive_delta() {
+            local wf_id last_run
+            wf_id="$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}" --jq .workflow_id)" || return 1
+            last_run="$(gh api "repos/${{ github.repository }}/actions/workflows/$wf_id/runs?status=success&per_page=100" \
+              --jq "[.workflow_runs[] | select(.head_branch == \"$GITHUB_REF_NAME\")][0].id // empty")" || return 1
+            if [[ -z "$last_run" ]]; then
+              echo "archive delta: no earlier successful run on $GITHUB_REF_NAME — skipped"
+              return 0
+            fi
+            rm -rf target/delta-baseline
+            if ! gh run download "$last_run" -n archive-ground-truth -D target/delta-baseline; then
+              echo "archive delta: the baseline artifact of run $last_run is unavailable (expired, R43) — skipped"
+              return 0
+            fi
+            python3 dev-support/licenses/archive-delta.py \
+              target/delta-baseline/archive-ground-truth target/archive-ground-truth \
+              -o target/archive-ground-truth/archive-delta.txt || return 1
+            { echo "## Third-party jar delta vs run $last_run"
+              echo '```'
+              cat target/archive-ground-truth/archive-delta.txt
+              echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+          }
+          if ! archive_delta; then
+            echo "::warning::archive delta failed"
+            status=1
+          fi
+          exit "$status"
+
       - name: Upload archive ground truth
         if: always()
         uses: actions/upload-artifact@v4
@@ -292,6 +351,8 @@ jobs:
             target/third-party/**
             target/archive-ground-truth/*/archive-jars.tsv
             target/archive-ground-truth/*/layout-report.md
+            target/archive-ground-truth/*/unused-jar-candidates.txt
+            target/archive-ground-truth/archive-delta.txt
             target/archive-ground-truth/*/gate.log
             target/archive-ground-truth/*/archive-assets.tsv
             target/archive-ground-truth/*/assets.log
