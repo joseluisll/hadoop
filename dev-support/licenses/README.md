@@ -135,11 +135,12 @@ release and verification paths plus every fail-closed one).
 
 ## Ground truth (one workflow, two jobs; weekly / on demand)
 
-`.github/workflows/licenses-ground-truth.yml` is the standing validation
-of the whole system, in two dependent jobs (the former
-"Collect dependency licenses" and "Archive license ground truth"
-workflows, merged because the second always consumed the first's
-baseline):
+The family is three workflows around one shared build definition,
+`licenses-archive-build.yml` ("Licenses: archive ground truth build
+(reusable)"), so the heavy Docker build exists in exactly one place:
+
+- `licenses-ground-truth.yml` — "Licenses: ground truth (archive +
+  source gates)": the standing validation, weekly or on dispatch.
 
 - **job `archive-ground-truth`** assembles the binary tarball in the
   Docker build environment (release-shaped, `-Pyarn-ui`, cloud package
@@ -176,6 +177,15 @@ baseline):
   requirement 48; the `texts/` store, requirement 53; NOTICE-binary
   coverage, requirement 14); and the optional network text download
   (`workflow_dispatch` `download` input only). All offline.
+
+- `licenses-release-candidate.yml` — "Licenses: build release candidate
+  (ground truth + bundle)": the RC production flow, two dependent jobs
+  in one run — the reusable archive build, then the release license
+  step (run-release-checks.sh) on those exact tarballs, GREEN =
+  ready-to-sign bundle, RED = fix list. Absorbs the former
+  licenses-build-rc-unsigned.yml; same-run provenance by construction
+  (needs: + same-run artifact), tarballs included in the shared
+  artifact since v3.3.
 
 Each archive also gets a jar layout report (`jar-layout-report.py`,
 `layout-report.md` in the artifact and the job summary). It is pruning
