@@ -1,0 +1,59 @@
+shipped jars (TSV rows): 628
+promoted from partial rows: 128  unpromoted: 0
+distinct shipped third-party g:a: 215  (own org.apache.hadoop jars excluded: 78)
+manual LICENSE-binary g:a entries: 218
+
+== SHIPPED BUT NOT LISTED in the manual LICENSE-binary: 0
+   of which COORDINATE DRIFT (artifact listed under another group): 0
+   NOT LISTED UNDER ANY COORDINATE: 0
+
+== VERSION DRIFT between manual manifest and shipped jars: 46 stale + 0 enumerated-form-only
+   at.yawk.lz4:lz4-java: manual ['1.11.1'] vs shipped ['1.10.4']
+   com.fasterxml.jackson.core:jackson-annotations: manual ['2.18.10'] vs shipped ['2.18.6']
+   com.fasterxml.jackson.core:jackson-core: manual ['2.18.10'] vs shipped ['2.18.6']
+   com.fasterxml.jackson.core:jackson-databind: manual ['2.18.10'] vs shipped ['2.18.6']
+   com.fasterxml.jackson.jaxrs:jackson-jaxrs-base: manual ['2.18.10'] vs shipped ['2.18.6']
+   com.fasterxml.jackson.jaxrs:jackson-jaxrs-json-provider: manual ['2.18.10'] vs shipped ['2.18.6']
+   com.fasterxml.jackson.module:jackson-module-jaxb-annotations: manual ['2.18.10'] vs shipped ['2.18.6']
+   com.github.luben:zstd-jni: manual ['1.5.7-8'] vs shipped ['1.5.6-4']
+   commons-io:commons-io: manual ['2.22.0'] vs shipped ['2.16.1']
+   io.netty:netty-all: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-buffer: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-dns: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-haproxy: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-http: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-http2: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-memcache: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-mqtt: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-redis: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-smtp: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-socks: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-stomp: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-codec-xml: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-common: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-handler: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-handler-proxy: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-handler-ssl-ocsp: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-resolver: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-resolver-dns: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-resolver-dns-classes-macos: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-resolver-dns-native-macos: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-transport: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-transport-classes-epoll: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-transport-classes-kqueue: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-transport-native-epoll: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-transport-native-kqueue: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-transport-native-unix-common: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-transport-rxtx: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-transport-sctp: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   io.netty:netty-transport-udt: manual ['4.1.135.final'] vs shipped ['4.1.130.final']
+   org.apache.commons:commons-configuration2: manual ['2.15.0'] vs shipped ['2.10.1']
+   org.apache.commons:commons-lang3: manual ['3.20.0'] vs shipped ['3.18.0']
+   org.bouncycastle:bcpkix-jdk18on: manual ['1.85'] vs shipped ['1.82']
+   org.bouncycastle:bcprov-jdk18on: manual ['1.85'] vs shipped ['1.82']
+   org.bouncycastle:bcutil-jdk18on: manual ['1.85'] vs shipped ['1.82']
+   org.jline:jline: manual ['3.30.14'] vs shipped ['3.9.0']
+
+== LISTED BUT NOT SHIPPED (declared-but-not-shipped): 0  (+3 embedded-only/shaded entries, expected)
+

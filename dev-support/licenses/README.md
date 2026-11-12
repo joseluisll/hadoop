@@ -12,7 +12,16 @@ manifest (requirement 13).
 the same system ported to the branch-3.5 release line and validated
 against the official 3.5.0 release: its committed `LICENSE-binary` is
 derived from the 3.5.1-SNAPSHOT archive's own enumeration (dist run
-42682946618), and `analysis-3.5/` in that branch's root holds the
+42682946618). Its manual source-release files (`LICENSE.txt`) are the
+comparison baseline and are never edited there, so that branch's R48
+gate stays red by design; its findings are report material. The tooling
+under `dev-support/licenses/` (scripts, workflow logic, requirements,
+records) is kept complete on this branch; the 3.5 branch differs only
+in branch data (curation rows and texts for what 3.5 ships, the
+cloud-storage dist steps it lacks). `analysis-3.5/` in that branch's
+root (copied here as `dev-support/licenses/analysis-3.5/` from
+`51e4baacf21`; the deviation scripts in `deviations/` read the curation
+files of this directory and reproduce their recorded `.txt` outputs) holds the
 automated-vs-manual comparison package (provenance-separated sources,
 reproducible deviation analyses, executive summary) that backs the
 proposal to adopt this system into Hadoop's release procedure; the
@@ -278,4 +287,4 @@ twice, and matches the alternatives as `^(alt|...)$`.
   wiring the gates into `create-release` and the precommit vote, ASF
   infrastructure compliance, and per-push self-tests. These are the
   subject of the release-procedure proposal the `analysis-3.5/`
-  package on `feat/LICENSES-3.5` supports.
+  package supports (on `feat/LICENSES-3.5`, copied here).

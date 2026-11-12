@@ -7,7 +7,8 @@ on the `feat/LICENSES` branch (trunk-based; `licenses` Maven profile +
 the collection core. The `feat/LICENSES-3.5` branch carries the same
 system ported to the branch-3.5 release line and validates it against
 the official 3.5.0 release artifacts (`analysis-3.5/` in that branch's
-root) — the evidence base for proposing adoption into the release
+root, copied on this branch to `dev-support/licenses/analysis-3.5/`) —
+the evidence base for proposing adoption into the release
 procedure (R44).
 
 ## Goal
