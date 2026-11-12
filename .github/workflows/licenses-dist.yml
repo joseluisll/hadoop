@@ -192,6 +192,15 @@ jobs:
             tar -xzf "$tar" -C "$dir/untarred"
             python3 dev-support/licenses/enumerate-archive-jars.py \
               "$dir/untarred" -o "$dir/archive-jars.tsv"
+            # pruning input, not a gate: version conflicts, version splits
+            # and duplicate copies across lib directories
+            if python3 dev-support/licenses/jar-layout-report.py \
+                "$dir/archive-jars.tsv" --root "$dir/untarred" \
+                > "$dir/layout-report.md"; then
+              { echo "## $name"; cat "$dir/layout-report.md"; } >> "$GITHUB_STEP_SUMMARY"
+            else
+              status=1
+            fi
             lb="$(find "$dir/untarred" -maxdepth 2 -name LICENSE-binary -print -quit)"
             if [[ -n "$lb" ]]; then
               dev-support/licenses/check-archive-licenses.sh \
@@ -282,6 +291,7 @@ jobs:
           path: |
             target/third-party/**
             target/archive-ground-truth/*/archive-jars.tsv
+            target/archive-ground-truth/*/layout-report.md
             target/archive-ground-truth/*/gate.log
             target/archive-ground-truth/*/archive-assets.tsv
             target/archive-ground-truth/*/assets.log

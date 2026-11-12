@@ -131,6 +131,13 @@ and gates each archive against:
   tarball's `licenses-binary/` from the fresh manifest, failing when it
   differs from what the archive ships (requirement 53).
 
+Each archive also gets a jar layout report (`jar-layout-report.py`,
+`layout-report.md` in the artifact and the job summary). It is pruning
+input, not a gate: one artifact at two versions in the same lib
+directory, artifacts shipped at several versions, and the same jar
+copied into several lib directories, with the on-disk bytes the extra
+copies take.
+
 The Docker build-env image comes from a GHCR cache under a
 content-addressed tag (the hash of the files the image build consumes),
 provided by `build-env-image.sh`. On a miss it waits while an earlier
@@ -150,13 +157,15 @@ dev-support/licenses/check-archive-licenses.sh \
   target/third-party/THIRD-PARTY.txt
 python3 dev-support/licenses/check-archive-assets.py \
   <extracted>/hadoop-<version> . --tsv archive-assets.tsv
+python3 dev-support/licenses/jar-layout-report.py \
+  archive-jars.tsv --root <dir the TSV paths are relative to>
 ```
 
 Gate tooling has synthetic self-tests (not yet wired into per-push CI,
 requirement 49): `test-generate-archive-manifest.py` (happy paths plus
 every fail-closed path of the generator and emitter) and
 `test-check-archive-assets.py` (coverage matching, evidence tiers,
-self-cleaning allowlist rows).
+self-cleaning allowlist rows) and `test-jar-layout-report.py`.
 
 The shipped `LICENSE-binary` itself is generated (requirement 40) from
 the archives' enumerations plus the inventory, with the multi-license
