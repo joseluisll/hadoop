@@ -78,7 +78,16 @@ usage() { sed -n '20,46p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --tarballs) TARBALLS+=("$2"); shift 2 ;;
+    --tarballs)
+      # variadic: every following value until the next --flag is a
+      # tarball source (dir or .tar.gz), so callers can pass several
+      # distribution target directories after one flag
+      shift
+      while [[ $# -gt 0 && "$1" != --* ]]; do
+        TARBALLS+=("$1")
+        shift
+      done
+      ;;
     --out) OUT="$2"; shift 2 ;;
     --repo) REPO="$2"; shift 2 ;;
     --third-party) THIRD_PARTY="$2"; shift 2 ;;
