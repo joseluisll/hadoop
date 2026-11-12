@@ -35,7 +35,7 @@
 # Nothing here is a release procedure change: this workflow only
 # prepares; the RM's own signed build remains the official path.
 
-name: Build unsigned RC bundle (license checks included)
+name: "Licenses: build unsigned RC bundle"
 
 on:
   workflow_dispatch:

@@ -133,27 +133,19 @@ dry runs and deliberately not part of this step: informational, never a
 gate. Synthetic coverage: `test-run-release-checks.py` (13 cases: green
 release and verification paths plus every fail-closed one).
 
-## CI
+## Ground truth (one workflow, two jobs; weekly / on demand)
 
-`.github/workflows/licenses.yml` installs the full reactor (no skipped
-modules), builds the `THIRD-PARTY` inventory, resolves texts from the
-local store (`--strict`), runs `check-asset-manifest.py` (the asset
-manifest against the source tree, requirement 7 stage B; the
-source-release `LICENSE.txt`, requirement 48; the `texts/` store,
-requirement 53; NOTICE-binary coverage, requirement 14), fails when the
-committed `LICENSE-binary`
-(the archive-derived artifact of record, requirement 40) drifts from
-the last ground-truth run's generated manifest (requirement 10), and
-uploads everything as workflow artifacts — all offline. Downloading
-from the network runs only when explicitly requested via the
-`workflow_dispatch` `download` input.
+`.github/workflows/licenses-ground-truth.yml` is the standing validation
+of the whole system, in two dependent jobs (the former
+"Collect dependency licenses" and "Archive license ground truth"
+workflows, merged because the second always consumed the first's
+baseline):
 
-## Archive ground truth (weekly / on demand)
-
-`.github/workflows/licenses-dist.yml` (requirement 35) assembles the
-binary tarball in the Docker build environment, then enumerates every jar
-in it — including jars nested inside WARs (requirements 26, 27, 36) —
-and gates each archive against:
+- **job `archive-ground-truth`** assembles the binary tarball in the
+  Docker build environment (release-shaped, `-Pyarn-ui`, cloud package
+  profiles; requirement 35), then enumerates every jar in it —
+  including jars nested inside WARs (requirements 26, 27, 36) —
+  and gates each archive against:
 
 - the `LICENSE-binary` the archive itself ships (requirement 38, the
   compliance direction: a shipped jar whose license the archive's
@@ -173,6 +165,17 @@ and gates each archive against:
   run's own archives (fail on diff — requirement 40) and re-emits each
   tarball's `licenses-binary/` from the fresh manifest, failing when it
   differs from what the archive ships (requirement 53).
+
+- **job `source-gates`** (needs the archive job; validates the committed
+  state against THIS run's output): the drift gate — the committed
+  `LICENSE-binary` must equal the manifest the archive job generated
+  from its own archives (requirement 10 / 40); the strict texts-store
+  resolve (`resolve-licenses.sh --strict`); the source-tree battery
+  `check-asset-manifest.py` (the curated asset manifest against the
+  source tree, requirement 7 stage B; the source-release `LICENSE.txt`,
+  requirement 48; the `texts/` store, requirement 53; NOTICE-binary
+  coverage, requirement 14); and the optional network text download
+  (`workflow_dispatch` `download` input only). All offline.
 
 Each archive also gets a jar layout report (`jar-layout-report.py`,
 `layout-report.md` in the artifact and the job summary). It is pruning

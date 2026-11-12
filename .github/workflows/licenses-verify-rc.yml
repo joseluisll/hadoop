@@ -34,7 +34,7 @@
 # be replaced by a new RC, not edited. The run ends with a vote-email
 # draft (GREEN) naming the verification run as the license evidence.
 
-name: Verify release candidate (license)
+name: "Licenses: verify release candidate"
 
 on:
   workflow_dispatch:
