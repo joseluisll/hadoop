@@ -22,40 +22,19 @@
 # itself. It complements the per-push graph gate (licenses.yml) — neither
 # replaces the other.
 #
-# The paths-filtered push trigger also exists for a GitHub limitation:
-# workflow_dispatch only reaches workflows registered from the default
-# branch; a workflow that has run via push gets registered, so the filter
-# (tooling paths only) both enables dispatch and re-validates the archive
-# whenever this tooling changes.
+# TRIGGER PLAN (owner, 2026-11-12): the per-push/per-PR archive gates
+# were rejected by the community — the license checks run ONE SHOT
+# during RC preparation (the release workflows call the same gates via
+# run-release-checks.sh) and on a schedule as the standing refresh of
+# the drift-gate baseline and the pruning evidence. No push trigger.
+# The weekly schedule also re-registers the workflow, which keeps
+# workflow_dispatch available (dispatch only reaches workflows
+# registered from the default branch).
 name: Archive license ground truth
 
 on:
-  push:
-    branches:
-      - feat/LICENSES
-    paths:
-      - '.github/workflows/licenses-dist.yml'
-      - 'dev-support/licenses/**'
-      # the whole build-env image tree is a gate input: its Dockerfiles
-      # and pkg-resolver scripts feed the content-addressed image cache
-      - 'dev-support/docker/**'
-      - 'start-build-env.sh'
-      - 'LICENSE-binary'
-      # R42 (review F1): dependency versions live in hadoop-project/pom.xml
-      # and the module poms, and the shipped set is declared by the assembly
-      # descriptors — a change to any of them must be validated by an archive
-      # run, or the per-push R10 gate would compare against the previous
-      # commit's baseline and pass a new shipped dependency unchecked
-      - 'pom.xml'
-      - '**/pom.xml'
-      - 'hadoop-assemblies/**'
   schedule:
-    # weekly, Sunday 03:00 UTC. INERT while this workflow is branch-only:
-    # GitHub runs schedule triggers from the default branch only, and the
-    # workflow is not on trunk (R43, review F2). Until it lands upstream the
-    # baseline is refreshed by pushes and manual dispatches only; the R10
-    # gate's failure message prints the exact dispatch command to recover.
-    - cron: '0 3 * * 0'
+    - cron: '0 3 * * 0'   # weekly, Sunday 03:00 UTC
   workflow_dispatch:
 
 permissions:
@@ -115,7 +94,7 @@ jobs:
       # cloud-storage assembly copies it during the Maven build, so it
       # must exist before the reactor runs; the main dist regenerates
       # it again at layout-stitching time.
-      - name: Generate the license-text directory for the assemblies (R13)
+      - name: Generate the bundled license texts for the assemblies
         run: |
           rm -rf licenses-binary
           python3 dev-support/licenses/generate-archive-manifest.py \
@@ -209,7 +188,7 @@ jobs:
                 target/third-party/THIRD-PARTY.txt \
                 . | tee "$dir/gate.log" || status=1
             else
-              echo "R38 FAILURE: $tar ships no LICENSE-binary — every jar in it is unlicensed" | tee "$dir/gate.log"
+              echo "coverage FAILURE: $tar ships no LICENSE-binary — every jar in it is unlicensed" | tee "$dir/gate.log"
               status=1
             fi
             # R7 stage C: non-jar assets (loose and jar/WAR-embedded)
@@ -234,7 +213,7 @@ jobs:
       # THIS run's archive enumerations and fail on any drift from the
       # committed file: the shipped manifest may never silently diverge
       # from what the archives actually contain.
-      - name: Regenerate the manifest from this run's archives (R40 drift gate)
+      - name: Regenerate the manifest from this run's archives (license drift gate)
         run: |
           set -euo pipefail
           shopt -s nullglob
@@ -248,10 +227,10 @@ jobs:
             --archive-tsv "${tsvs[@]}" \
             --out target/generated-LICENSE-binary
           if ! diff -u LICENSE-binary target/generated-LICENSE-binary; then
-            echo "R40 DRIFT: committed LICENSE-binary differs from the manifest generated from this run's archives — regenerate and commit it" >&2
+            echo "drift: committed LICENSE-binary differs from the manifest generated from this run's archives — regenerate and commit it" >&2
             exit 1
           fi
-          echo "R40 drift gate: committed LICENSE-binary matches this run's archives"
+          echo "drift gate: committed LICENSE-binary matches this run's archives"
           # R53: the license texts the fresh manifest references must be
           # exactly what each tarball ships (the shipped directory is
           # the R13 emitter's output, derived from the committed
@@ -263,15 +242,15 @@ jobs:
           for d in target/archive-ground-truth/*/untarred; do
             shipped="$(find "$d" -maxdepth 2 -type d -name licenses-binary -print -quit)"
             if [[ -z "$shipped" ]]; then
-              echo "R53 FAILURE: $d ships no licenses-binary/ directory" >&2
+              echo "texts FAILURE: $d ships no licenses-binary/ directory" >&2
               exit 1
             fi
             if ! diff -r "$shipped" target/licenses-binary-staged; then
-              echo "R53 DRIFT: $(basename "$d") ships a licenses-binary/ that differs from the texts the generated manifest references" >&2
+              echo "texts DRIFT: $(basename "$d") ships a licenses-binary/ that differs from the texts the generated manifest references" >&2
               exit 1
             fi
           done
-          echo "R53 texts gate: every tarball ships exactly the referenced texts"
+          echo "texts gate: every tarball ships exactly the referenced texts"
 
       # Pruning dry run — report only, never a gate, changes nothing: the
       # unused-jar candidates of each archive, and the third-party jar

@@ -99,6 +99,40 @@ dev-support/licenses/normalize-licenses.sh target/licenses /tmp/downloaded
 # review /tmp/downloaded, then copy vetted texts into texts/
 ```
 
+## Release time: the release-check driver (requirement 44)
+
+`run-release-checks.sh` packages the whole generate-and-verify suite as
+ONE callable, fail-closed step for the exact tarballs being voted on —
+the thing `create-release` (upstream) or the fork's release prototype
+invokes after tarball assembly. It re-runs the same gates the CI
+workflows run (R36/R38/R39/R26/R27 archive gate, R7 stage-C assets,
+R10/R40 committed drift, R53 texts, R14 NOTICE coverage), regenerates
+LICENSE-binary and `licenses-binary/` from this run's enumerations
+(R40/R13), and on GREEN publishes the RC artifact set (THIRD-PARTY.txt,
+generated manifest, texts dir, sha512) plus an RM offline checklist;
+on RED it prints a fix list — every failed requirement with the
+configuration file where the change belongs and a per-check log with
+the exact entries.
+
+```bash
+# release mode (RM host or release prototype): tarballs + repo checkout
+dev-support/licenses/run-release-checks.sh \
+  --tarballs <dir-with-tarballs> --repo <checkout> [--out <dir>]
+# supply the dependency inventory: --third-party <file>, --collect, or
+# the repo's pre-collected target/third-party/THIRD-PARTY.txt
+
+# verification mode (offline voter verifier): one command over a
+# staged/downloaded RC directory (tarballs + .sha512 + THIRD-PARTY.txt);
+# add --keys <KEYS> to verify signatures too
+dev-support/licenses/run-release-checks.sh --verify-only <rc-dir> \
+  --repo <checkout-of-the-release-tag>
+```
+
+The pruning reports (unused-jar candidates, archive delta) are CI-side
+dry runs and deliberately not part of this step: informational, never a
+gate. Synthetic coverage: `test-run-release-checks.py` (13 cases: green
+release and verification paths plus every fail-closed one).
+
 ## CI
 
 `.github/workflows/licenses.yml` installs the full reactor (no skipped

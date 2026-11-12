@@ -1,0 +1,150 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied.  See the License for the specific
+# language governing permissions and limitations under the License.
+
+# W1 of the RM toolbelt (requirement 44 / HADOOP-20078 increment 1,
+# optional): verify a staged or published release candidate in public,
+# secret-free, on GitHub's infrastructure. Any voter or PMC member can
+# dispatch it — or read the run linked from the vote email.
+#
+# The run downloads the RC artifacts from a URL (dev staging area, the
+# candidate's eventual release directory, or any public mirror),
+# verifies sha512 checksums and GPG signatures against the project's
+# KEYS file, re-enumerates the tarballs, and re-runs the FULL license
+# gate offline (dev-support/licenses/run-release-checks.sh
+# --verify-only): every shipped jar covered by the archive's OWN
+# LICENSE-binary (R38/R36), inventory cross-check against the RC's
+# THIRD-PARTY.txt (R26/R27), curated exclusions (R39), assets (R7),
+# manifest drift (shipped == regenerated, R40) and shipped texts (R53).
+# It needs no secrets: the KEYS file is public, the checks are offline.
+#
+# RED here is diagnostic, not enforcement: a staged RC that fails must
+# be replaced by a new RC, not edited. The run ends with a vote-email
+# draft (GREEN) naming the verification run as the license evidence.
+
+name: Verify release candidate (license)
+
+on:
+  workflow_dispatch:
+    inputs:
+      rc_base_url:
+        description: 'Base URL of the RC directory (dev staging, release dir, or mirror); artifacts are fetched as <url>/<name>'
+        required: true
+      artifacts:
+        description: 'Newline-separated artifact names to download and gate (binary tarballs; their .sha512/.asc are fetched automatically)'
+        required: true
+      ref:
+        description: 'Repo ref to check out for the license tooling (the release tag; defaults to this workflow''s ref)'
+        required: false
+        default: ''
+      keys_url:
+        description: 'Project KEYS file for signature verification'
+        required: false
+        default: 'https://downloads.apache.org/hadoop/common/KEYS'
+      version:
+        description: 'Release version for the vote-email draft (e.g. 3.6.0)'
+        required: false
+        default: ''
+      rc_number:
+        description: 'RC number for the vote-email draft (e.g. 0)'
+        required: false
+        default: '0'
+
+permissions:
+  contents: read
+
+env:
+  RC_DIR: rc-download
+  CHECKS_OUT: target/release-verify
+
+jobs:
+  verify-rc:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout the license tooling at the requested ref
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+
+      - name: Download the RC artifacts
+        run: |
+          set -euo pipefail
+          mkdir -p "$RC_DIR"
+          while IFS= read -r name; do
+            name="$(echo "$name" | xargs)"; [[ -n "$name" ]] || continue
+            for suffix in "" ".sha512" ".asc"; do
+              url="${{ inputs.rc_base_url }}/$name$suffix"
+              echo "fetching $url"
+              curl -fSL --retry 5 --retry-delay 10 -o "$RC_DIR/$name$suffix" "$url"
+            done
+          done <<< "${{ inputs.artifacts }}"
+
+      - name: Fetch the project KEYS file
+        run: curl -fSL --retry 5 -o KEYS "${{ inputs.keys_url }}"
+
+      - name: Run the offline license verification (fail-closed)
+        run: |
+          set -euo pipefail
+          dev-support/licenses/run-release-checks.sh \
+            --verify-only "$RC_DIR" --repo . --keys KEYS \
+            --out "$CHECKS_OUT"
+
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-verification
+          path: |
+            ${{ env.CHECKS_OUT }}/**
+          if-no-files-found: error
+
+      - name: Job summary and vote-email draft
+        if: always()
+        run: |
+          set -euo pipefail
+          draft="$CHECKS_OUT/vote-email-draft.txt"
+          {
+            echo "## RC license verification"
+            if [[ -f "$CHECKS_OUT/fixlist.txt" ]]; then
+              echo "RED — this RC does not verify. Fix list (diagnostic: a failing staged RC is replaced by a new RC):"
+              echo '```'
+              cat "$CHECKS_OUT/fixlist.txt"
+              echo '```'
+            else
+              echo "GREEN — checksums, signatures and the full license gate pass for this RC."
+            fi
+            echo
+            echo "<details><summary>Vote-email draft</summary>"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p "$CHECKS_OUT"
+          {
+            echo "Subject: [VOTE] Release ${{ inputs.version }} - RC${{ inputs.rc_number }}"
+            echo
+            echo "Please vote on the release candidate ..."
+            echo
+            echo "* The RC artifacts: ${{ inputs.rc_base_url }}/"
+            echo "* License verification (automated, public, this run):"
+            echo "  ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            echo "  - checksums and GPG signatures verified against the project KEYS"
+            echo "  - every shipped jar's license stated by the archive's"
+            echo "    LICENSE-binary; shipped texts match the generated set;"
+            echo "    the manifest matches a regeneration from the archive"
+            echo "    (THIRD-PARTY.txt and the generated license files ship"
+            echo "    with the RC as extra artifacts)"
+          } > "$draft"
+          cat "$draft" >> "$GITHUB_STEP_SUMMARY"
+          echo "</details>" >> "$GITHUB_STEP_SUMMARY"
