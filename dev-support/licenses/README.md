@@ -155,7 +155,16 @@ nothing):
   conservative (any reference counts as use), so a candidate has no
   reference at all; jars with no class files are listed apart, and
   `unused-jar-keep` moves jars known to be loaded by a name the scan
-  cannot see out of the candidates.
+  cannot see out of the candidates. A second section lists the jars that
+  are used, but only by optional features: each Hadoop jar belongs to a
+  feature by where it ships (core is `share/hadoop/{common,hdfs,
+  mapreduce,yarn}`; optional are each WAR, each `tools/lib` tool,
+  `yarn/timelineservice`, `yarn/csi`, `share/hadoop/client` and the test
+  jars), and a jar reached from optional features but not from core is
+  listed with them. A row whose artifact core also uses is that feature's
+  private copy: dropping the feature removes the copy, not the artifact.
+  Service providers count only on their own class path, so a WAR's
+  providers belong to the WAR.
 - `archive-delta.py` writes `archive-delta.txt`: the third-party jars
   added, removed, re-versioned or copied into other lib directories
   against the last successful run of this workflow on the branch (the R10

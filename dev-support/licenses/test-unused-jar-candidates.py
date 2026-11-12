@@ -60,10 +60,14 @@ def write(root, rel, data):
 LIB = "h/share/hadoop/common/lib/"
 OWN = "h/share/hadoop/common/hadoop-common-1.jar"
 WAR = "h/share/hadoop/yarn/app.war"
+TOOLS = "h/share/hadoop/tools/lib/"
+TLS = "h/share/hadoop/yarn/timelineservice/"
 
 JARS = {
     OWN: ("org.apache.hadoop", "hadoop-common", {
         "org/apache/hadoop/A.class": cls("(Lcom/x/Used;)V", "com.s.ByName",
+                                         "com/sh/Shared", "com/a/Api",
+                                         "com/ma/Api",
                                          "com/r/schema.xsd",
                                          "/com/r2/conf.properties",
                                          "/bare.properties"),
@@ -92,10 +96,44 @@ JARS = {
     # same class as the WAR's inwar jar: the WAR's reference resolves to
     # its own copy, so this one is unused
     LIB + "mainw-1.jar": ("com.mw", "mainw", {"com/w/InWar.class": cls()}),
+    # optional features: a tool, the timeline service and a test jar each
+    # need their own library; "shared" is needed by core and a tool
+    TOOLS + "hadoop-kafka-1.0.jar": ("org.apache.hadoop", "hadoop-kafka", {
+        "org/apache/hadoop/kafka/K.class": cls("com/kc/Client", "com/sh/Shared",
+                                               "com/z/D")}),
+    TOOLS + "kclient-1.jar": ("com.kc", "kclient", {"com/kc/Client.class": cls()}),
+    # a JDK service provider in tools/lib is on the tools' class path only
+    TOOLS + "tdrv-1.jar": ("com.td", "tdrv", {
+        "com/td/Drv.class": cls(), "META-INF/services/java.sql.Driver": b"com.td.Drv\n"}),
+    LIB + "shared-1.jar": ("com.sh", "shared", {"com/sh/Shared.class": cls()}),
+    TLS + "hadoop-yarn-server-timelineservice-1.0.jar": (
+        "org.apache.hadoop", "hadoop-yarn-server-timelineservice", {
+            "org/apache/hadoop/ts/T.class": cls("com/hb/HBase")}),
+    TLS + "lib/hbase-1.jar": ("com.hb", "hbase", {"com/hb/HBase.class": cls()}),
+    "h/share/hadoop/common/hadoop-common-1.0-tests.jar": (
+        "org.apache.hadoop", "hadoop-common", {
+            "org/apache/hadoop/T.class": cls("com/tl/TestLib")}),
+    LIB + "testlib-1.jar": ("com.tl", "testlib", {"com/tl/TestLib.class": cls()}),
+    # a service whose interface ships: used interface -> provider used
+    LIB + "api-1.jar": ("com.a", "api", {"com/a/Api.class": cls()}),
+    LIB + "mapi-1.jar": ("com.ma", "mapi", {"com/ma/Api.class": cls()}),
+    LIB + "impl-1.jar": ("com.ai", "impl", {
+        "com/ai/Impl.class": cls(), "META-INF/services/com.a.Api": b"com.ai.Impl\n"}),
 }
 WAR_JARS = {
     "WEB-INF/lib/inwar-1.jar": ("com.w", "inwar", {"com/w/InWar.class": cls()}),
     "WEB-INF/lib/warunused-1.jar": ("com.v", "warunused", {"com/v/V.class": cls()}),
+    # a JDK service provider inside the WAR is loaded only when the WAR
+    # is: it and what it uses belong to the WAR's feature, not to core
+    "WEB-INF/lib/warsvc-1.jar": ("com.ws", "warsvc", {
+        "com/ws/Drv.class": cls("com/wd/Dep"),
+        "META-INF/services/java.sql.Driver": b"com.ws.Drv\n"}),
+    "WEB-INF/lib/wardep-1.jar": ("com.wd", "wardep", {"com/wd/Dep.class": cls()}),
+    # provider of an interface that ships on the main class path only (see
+    # mapi): found only by the WAR's class loader, so it is the WAR's
+    "WEB-INF/lib/used-1.jar": ("com.x", "used", {"com/x/Used.class": cls()}),
+    "WEB-INF/lib/wprov-1.jar": ("com.wp", "wprov", {
+        "com/wp/P.class": cls(), "META-INF/services/com.ma.Api": b"com.wp.P\n"}),
 }
 
 
@@ -104,7 +142,7 @@ def build(d):
     for path, (g, a, entries) in JARS.items():
         write(root, path, zbytes(entries))
         rows.append("%s\t%s\t%s\t1\tpom.properties" % (path, g, a))
-    war = {"WEB-INF/classes/W.class": cls("com/w/InWar")}
+    war = {"WEB-INF/classes/W.class": cls("com/w/InWar", "com/x/Used")}
     for inner, (g, a, entries) in WAR_JARS.items():
         war[inner] = zbytes(entries)
         rows.append("%s#%s\t%s\t%s\t1\tpom.properties" % (WAR, inner, g, a))
@@ -139,9 +177,28 @@ def main():
             "com.v:warunused:1", "com.mw:mainw:1", "com.bare:bare:1"}, out
         # descriptor, string constant, JDK service, etc/ config and
         # WEB-INF/classes references all count as use
+        cands = section("candidates")
         for used in ("com.x:used", "com.s:str", "com.z:svc", "com.c:cfg",
-                     "com.w:inwar", "com.r:res", "com.r2:res2"):
-            assert used not in out, (used, out)
+                     "com.w:inwar", "com.r:res", "com.r2:res2", "com.kc:kclient",
+                     "com.hb:hbase", "com.tl:testlib", "com.sh:shared",
+                     "com.ai:impl"):
+            assert not any(c.startswith(used + ":") for c in cands), (used, out)
+        # used only by optional features, named by feature; core-reached
+        # jars (shared, used) are not listed
+        opt = out.split("## used only by optional features", 1)[1].split("\n## ", 1)[0]
+        rows = {l.split("\t")[0]: l.split("\t")[2] for l in opt.splitlines()
+                if l.count("\t") == 2}
+        assert "(9 jar files; 8 g:a that only these features need, " \
+               "1 private copies of g:a core uses too)" in opt, opt
+        assert rows.pop("com.x:used:1") == "app.war; copy: core uses this g:a too", out
+        assert rows == {"com.w:inwar:1": "app.war",
+                        "com.ws:warsvc:1": "app.war",
+                        "com.wd:wardep:1": "app.war",
+                        "com.wp:wprov:1": "app.war",
+                        "com.kc:kclient:1": "tools:hadoop-kafka",
+                        "com.td:tdrv:1": "tools/lib",
+                        "com.hb:hbase:1": "yarn-timelineservice",
+                        "com.tl:testlib:1": "tests"}, out
         assert section("no class files") == {"com.n:native:1"}, out
         assert section("keep-listed") == {"com.k:kept:1"}, out
         assert section("stale keep rows") == {"com.gone:gone"}, out

@@ -193,3 +193,106 @@ one crash used to stop the rest), still without turning the run red.
   in all) — including `failureaccess` gaining 1.0.2 in `common/lib` next
   to 1.0.3, the same-directory conflict the layout report shows.
 - Self-test `test-archive-delta.py`.
+
+## First CI results on trunk (run 43261414588, `1c737274769`)
+
+The archive run is green, every step included ("Pruning dry run":
+success). Reports in its `archive-ground-truth` artifact.
+
+**Layout report** (first produced by run 43249270763): the `--root`
+sizes work on the real tree; the 78 jars shared by `common/lib`,
+`hdfs/lib` and the catalog WAR take 41.6 MiB in redundant on-disk
+copies, the 13 shared by `common/lib` and `hdfs/lib` only 1.1 MiB.
+Groups whose only other copy is inside a WAR print "0.0 MiB" (WAR copies
+are not counted).
+
+**Archive delta** against run 43249270763: 0 changes in both archives,
+as expected (same dependencies).
+
+**Unused-jar candidates, `hadoop-3.6.0-SNAPSHOT`:** 43, plus 24 jars
+with no class files.
+
+- Same as the official 3.5.0 tarball: the unused netty modules in
+  `hdfs/lib` (`codec-haproxy`, `codec-memcache`, `codec-mqtt`,
+  `codec-redis`, `codec-smtp`, `codec-stomp`, `codec-xml`,
+  `handler-ssl-ocsp`, `transport-rxtx`, `transport-sctp`,
+  `transport-udt`) and again in the catalog WAR with `codec-http2`,
+  `codec-socks`, `handler-proxy`; `kerb-crypto`, `kerby-config`,
+  `jakarta.servlet.jsp-api`; `commons-csv`, `jcodings`,
+  `jetty-annotations`, `jetty-plus`, `asm-commons`, `asm-tree` in
+  `yarn/lib`; `jersey-media-json-jettison` in the WAR.
+- Gone since 3.5.0: `azure-storage`, `azure-keyvault-core` (trunk
+  removed them).
+- New on trunk, two kinds of pruning target the netty discussion did not
+  cover:
+  - **Unshaded copies of SDKs a connector already shades into itself:**
+    `bce-java-sdk` (`hadoop-bos` relocates `com.baidubce` to
+    `org.apache.hadoop.fs.bos.shaded.com.baidubce`),
+    `grpc-google-cloud-storage-v2` and `grpc-inprocess` (`hadoop-gcp`
+    shades `com.google.api.grpc` and relocates `io`, `com`, `org` under
+    `com.google.cloud.hadoop.repackaged.ossgcs`). Nothing loads the
+    separate jars.
+  - **Shipped test tooling:** `org.jacoco.agent-0.8.5-runtime.jar`
+    (code coverage) in `common/lib`, listed in `LICENSE-binary`. The
+    README attributes it to a cloud SDK declaring it at compile scope;
+    which one is not yet confirmed.
+
+**Unused-jar candidates, `hadoop-cloud-storage-dist-3.6.0-SNAPSHOT`:**
+5 — the same `bce-java-sdk`, `grpc-google-cloud-storage-v2`,
+`grpc-inprocess` and jacoco agent, plus `javax.annotation-api`; no-class:
+`listenablefuture` (the empty Guava stub) and `grpc-context`.
+
+All are candidates for a human check, not removals.
+
+## Why so few candidates, and the optional-feature section (2026-11-12)
+
+**The low count is real.** Rerun on the official 3.5.0 tarball under
+stricter models (scratch harness, not shipped), the never-referenced set
+stays small: 41 jar files / 26 g:a (shipped tool), 41 / 26 without
+Hadoop's test jars as roots, 49 / 30 class-level, 51 / 31 class-level
+without test roots, 55 / 33 also ignoring class names in third-party
+strings; giving `share/hadoop/client` its own class path changes none.
+No test framework ships, so test roots change nothing. Traced chains are
+genuine (`jsch` ← `SFTPFileSystem`, `re2j` ← `GlobPattern`, `jline` ←
+the YARN container shell, `curator-recipes` ← the RM leader elector).
+The strictest model adds `proto-google-common-protos`, `kerby-pkix`,
+`kerby-util` and netty `codec-dns`, `codec-socks`, `resolver-dns`,
+`resolver-dns-classes-macos`, `transport-classes-kqueue`.
+
+**The larger opportunity is feature-level**, now a second report
+section: jars used only by optional features. Each Hadoop jar belongs to
+a feature by where it ships (core: `share/hadoop/{common,hdfs,mapreduce,
+yarn}`; optional: each WAR, each `tools/lib` tool, `yarn/timelineservice`,
+`yarn/csi`, `share/hadoop/client`, test jars). Two defects found and
+fixed while building it, both of which made everything in the WAR look
+core:
+
+- JDK service providers were all seeded into core; six WAR jars
+  (`solr-solrj`, `netty-common`, `woodstox-core`, `bcprov`, `dnsjava`,
+  `mssql-jdbc`) provide JDK interfaces. A provider now belongs to the
+  feature where it ships.
+- 207 service edges crossed a class-path boundary (main-class-path
+  `SecurityInfo`, `TokenIdentifier`, `TokenRenewer`… interfaces pulling
+  WAR providers, and the WAR's copies pulling main ones). Service edges
+  now stay within one class path; a provider whose interface is not on
+  its own class path is a seed, as a JDK one. The never-referenced
+  section is unchanged by both fixes.
+
+**3.5.0 result:** 129 jar files used only by optional features — 22
+artifacts that only these features need, and 107 private copies of
+artifacts core uses too:
+
+| Feature | Jars | Only this feature needs | Private copies |
+|---|---|---|---|
+| YARN application catalog WAR (82 MB, 158 jars) | 116 | 9: `solr-solrj`, `httpmime`, Jetty `http2-client`/`-common`/`-hpack`/`-http-client-transport`, `jetty-alpn-client`, `jetty-alpn-java-client`, `jcl-over-slf4j` | 107 |
+| Timeline service v2 (`yarn/timelineservice`, 37 MB) | 11 | 11: the Cosmos DB / RxJava stack (`azure-cosmosdb*` ×4, `rxjava`, `rxjava-string`, `rxjava-extras`, `rxnetty`, `java-uuid-generator`, `commons-validator`, `commons-digester`) | 0 |
+| `tools:hadoop-kafka` | 1 | `kafka-clients` (8.8 MB) | 0 |
+| `tools:hadoop-resourceestimator` (+ tests) | 1 | `ojalgo` (1.6 MB) | 0 |
+
+Dropping or slimming those features is what would remove them; the
+catalog WAR is 15% of `share/hadoop` and bundles its own copies of
+`hadoop-common`, `hadoop-hdfs`, `hadoop-hdfs-client`, `guava`, `bcprov`
+and even `hadoop-common-3.5.0-tests.jar`. Self-test: the feature
+classification, core exclusion, provider placement (WAR, `tools/lib`),
+the same-class-path service rule and the private-copy note are each
+covered (all seeded mutations caught).
