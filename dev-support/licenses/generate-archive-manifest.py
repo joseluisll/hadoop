@@ -202,14 +202,15 @@ def load_mappings(path, what):
     return mapping
 
 
-def load_archive_ga_versions(paths, mappings_path):
-    """g:a -> set of shipping versions, from enumeration TSVs with the
-    archive-jar-mappings promotion applied (same rule as the gate).
-    Partial rows that resist normalization are collected and reported —
-    the gate's R36 failure class, never dropped silently."""
+def load_archive_rows(paths, mappings_path):
+    """Third-party rows of enumeration TSVs as (jar path, g:a, version),
+    with the archive-jar-mappings promotion applied (same rule as the
+    gate), plus the rows that still resist normalization (the gate's R36
+    failure class) as 'tsv:line  path (stem ...)' strings — never dropped
+    silently; the caller decides whether they fail. Shared with
+    jar-layout-report.py."""
     mapping = load_mappings(mappings_path, 'archive-jar-mappings')
-    ga_versions = collections.defaultdict(set)
-    total = 0
+    rows = []
     unresolved = []
     for path in paths:
         for lineno, line in enumerate(open_or_fail(path, 'archive TSV'),
@@ -228,8 +229,7 @@ def load_archive_ga_versions(paths, mappings_path):
                      % (path, lineno, fields))
             if not group:
                 # Partial row: identify via the curated mapping, from the
-                # manifest/filename stem. A row that still resists is the
-                # gate's R36 failure class — collect, never drop.
+                # manifest/filename stem.
                 stem = (artifact or '').lower()
                 if not stem:
                     stem = stem_from_filename(jar_path)
@@ -240,9 +240,18 @@ def load_archive_ga_versions(paths, mappings_path):
                 group, artifact = mapping[stem].split(':')[:2]
             if version_is_own(group):
                 continue  # own jars are covered by the top-level LICENSE
-            ga_versions[(group + ':' + artifact).lower()].add(version)
-            total += 1
-    if total == 0:
+            rows.append((jar_path, (group + ':' + artifact).lower(), version))
+    return rows, unresolved
+
+
+def load_archive_ga_versions(paths, mappings_path):
+    """g:a -> set of shipping versions, from enumeration TSVs. Fails on
+    rows that resist normalization."""
+    rows, unresolved = load_archive_rows(paths, mappings_path)
+    ga_versions = collections.defaultdict(set)
+    for _jar_path, ga, version in rows:
+        ga_versions[ga].add(version)
+    if not rows:
         fail('zero enumerated third-party jars across %d TSV(s) — '
              'refusing to generate an empty manifest' % len(paths))
     if unresolved:

@@ -51,7 +51,7 @@ sys.dont_write_bytecode = True  # importlib load below must not litter the tree
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # one source of truth for TSV row identification: the R40 generator's
-# helpers (filename has a dash, so import via importlib)
+# load_archive_rows (filename has a dash, so import via importlib)
 _spec = importlib.util.spec_from_file_location(
     "generate_archive_manifest",
     os.path.join(SCRIPT_DIR, "generate-archive-manifest.py"))
@@ -61,28 +61,6 @@ _spec.loader.exec_module(_gam)
 
 def lib_dir(jar_path):
     return jar_path.rsplit("/", 1)[0] if "/" in jar_path else "."
-
-
-def load_rows(tsv, mappings_path):
-    """[(jar path, g:a, version)] for third-party jars, plus unresolved."""
-    mapping = _gam.load_mappings(mappings_path, "archive-jar-mappings")
-    rows, unresolved = [], []
-    for lineno, line in enumerate(_gam.open_or_fail(tsv, "archive TSV"), 1):
-        fields = line.rstrip("\n").split("\t")
-        if len(fields) != 5:
-            _gam.fail("%s:%d: malformed TSV row (need 5 fields, got %d)"
-                      % (tsv, lineno, len(fields)))
-        jar_path, group, artifact, version, _origin = fields
-        if not group:
-            stem = artifact.lower() or _gam.stem_from_filename(jar_path)
-            if not stem or stem not in mapping:
-                unresolved.append(jar_path)
-                continue
-            group, artifact = mapping[stem].split(":")[:2]
-        if _gam.version_is_own(group):
-            continue
-        rows.append((jar_path, (group + ":" + artifact).lower(), version))
-    return rows, unresolved
 
 
 def size_of(root, jar_path):
@@ -174,7 +152,7 @@ def main():
     parser.add_argument("--mappings",
                         default=os.path.join(SCRIPT_DIR, "archive-jar-mappings"))
     args = parser.parse_args()
-    rows, unresolved = load_rows(args.tsv, args.mappings)
+    rows, unresolved = _gam.load_archive_rows([args.tsv], args.mappings)
     sys.stdout.write(report(rows, unresolved, args.root) + "\n")
 
 
