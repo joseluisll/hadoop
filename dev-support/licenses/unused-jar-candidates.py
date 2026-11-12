@@ -44,9 +44,23 @@ so a candidate is a jar with no reference at all):
   and an extension (getResource("a/b/schema.xsd")): a jar shipped only
   for its schemas or property files counts as used.
 - META-INF/services: a provider jar is used when its service interface's
-  jar is used, or when the interface is a JDK one (except
-  javax.annotation.processing.Processor, a compile-time-only service).
+  jar on the same class path (unit) is used, or when the interface is not
+  on that class path (a JDK one, or a WAR's parent's) — except
+  javax.annotation.processing.Processor, a compile-time-only service.
 - Reachability is closed over these references, jar level.
+
+Second section: jars that ARE used, but only by optional features. Each
+Hadoop jar belongs to a feature by where it ships (feature()): "core" is
+share/hadoop/{common,hdfs,mapreduce,yarn} outside the optional subtrees,
+plus what etc/, bin/, sbin/, libexec/ name; a JDK service provider
+belongs to the feature where it ships (inside a WAR, the WAR's). The
+optional features are each WAR, each tools/lib tool, yarn/timelineservice,
+yarn/csi, share/hadoop/client and Hadoop's test jars. A third-party jar
+reached from optional features but not from core is listed with the
+features that need it: dropping or repackaging those features is what
+would remove it. A row whose g:a core also uses is the feature's private
+copy (a WAR bundling its own class path): removing it removes the copy,
+not the artifact or its LICENSE-binary line.
 
 Not seen: names built at run time (string concatenation, configuration
 values set outside the archive), JNI and native loading. Jars with no
@@ -262,26 +276,16 @@ def root_text_tokens(root):
     return toks
 
 
-def reachable(nodes, roots, root_tokens):
-    """Indices of the nodes reachable from roots (see module doc)."""
+def jar_graph(nodes):
+    """Jar-level edges: node -> nodes it refers to (same unit first, else
+    anywhere), plus service-interface jar -> provider jars. Also the
+    class/resource index and the providers of JDK interfaces."""
     index = collections.defaultdict(list)
     for i, n in enumerate(nodes):
         for c in n.classes:
             index[c].append(i)
         for r in n.resources:
             index[r].append(i)
-    providers = collections.defaultdict(list)  # iface owner -> providers
-    jdk_providers = set()
-    for i, n in enumerate(nodes):
-        for iface, _impls in n.services:
-            if iface in COMPILE_ONLY_SERVICES:
-                continue
-            owners = index.get(iface)
-            if owners:
-                for o in owners:
-                    providers[o].append(i)
-            else:
-                jdk_providers.add(i)
 
     def resolve(tok, unit):
         owners = index.get(tok)
@@ -290,20 +294,101 @@ def reachable(nodes, roots, root_tokens):
         same = [o for o in owners if nodes[o].unit == unit]
         return same or owners
 
-    seen = set(roots) | jdk_providers
-    for tok in root_tokens:
-        seen.update(resolve(tok, "main"))
+    adj = [set() for _ in nodes]
+    jdk_providers = set()
+    for i, n in enumerate(nodes):
+        for tok in n.refs:
+            adj[i].update(resolve(tok, n.unit))
+        for iface, _impls in n.services:
+            if iface in COMPILE_ONLY_SERVICES:
+                continue
+            # a provider is found by the class loader of its own class
+            # path: only the interface's jars there pull it in; an interface
+            # from elsewhere (the JDK, a parent class path) makes it a seed
+            same = [o for o in index.get(iface, ()) if nodes[o].unit == n.unit]
+            if same:
+                for o in same:
+                    adj[o].add(i)  # the interface's jar pulls the provider
+            else:
+                jdk_providers.add(i)
+    return adj, index, resolve, jdk_providers
+
+
+def closure(adj, seeds):
+    seen = set(seeds)
     queue = list(seen)
     while queue:
-        i = queue.pop()
-        nxt = list(providers.get(i, ()))
-        for tok in nodes[i].refs:
-            nxt.extend(resolve(tok, nodes[i].unit))
-        for j in nxt:
+        for j in adj[queue.pop()]:
             if j not in seen:
                 seen.add(j)
                 queue.append(j)
-    return seen, index
+    return seen
+
+
+def reachable(nodes, roots, root_tokens):
+    """Indices of the nodes reachable from roots (see module doc)."""
+    adj, index, resolve, jdk_providers = jar_graph(nodes)
+    seeds = set(roots) | jdk_providers
+    for tok in root_tokens:
+        seeds.update(resolve(tok, "main"))
+    return closure(adj, seeds), index
+
+
+TEST_JAR = re.compile(r"-tests?\.jar$|-test-sources\.jar$")
+VERSIONED = re.compile(r"-\d[\w.\-]*(\.(?:jar|war))$")
+
+
+def feature(path):
+    """The feature a Hadoop jar (or WEB-INF/classes) belongs to, from where
+    it ships: "core" is what the daemons and the hadoop command put on the
+    class path (share/hadoop/{common,hdfs,mapreduce,yarn} outside the
+    optional subtrees); everything else is optional."""
+    outer, _, inner = path.partition("#")
+    base = outer.rsplit("/", 1)[-1]
+    if inner:
+        return VERSIONED.sub(r"\1", base)  # the WAR
+    if TEST_JAR.search(base):
+        return "tests"
+    for marker, name in (("/share/hadoop/client/", "client"),
+                         ("/share/hadoop/yarn/timelineservice/",
+                          "yarn-timelineservice"),
+                         ("/share/hadoop/yarn/csi/", "yarn-csi")):
+        if marker in path:
+            return name
+    if "/share/hadoop/tools/" in path:
+        return "tools:" + VERSIONED.sub("", base)
+    return "core"
+
+
+def placement(path):
+    """The feature whose class path a (third-party) jar is on: a JDK
+    service provider is loaded only when that class path is in use."""
+    f = feature(path)
+    if f.startswith("tools:"):
+        return "tools/lib"
+    return "core" if f == "tests" else f
+
+
+def optional_only(nodes, roots, root_tokens, third):
+    """Third-party nodes reached, but not from core: node -> features."""
+    adj, _index, resolve, jdk_providers = jar_graph(nodes)
+    by_feature = collections.defaultdict(set)
+    for i in roots:
+        by_feature[feature(nodes[i].path)].add(i)
+    # JDK service providers belong to the feature where they ship (one
+    # inside a WAR is loaded only with that WAR); what the scripts name is core
+    for i in jdk_providers:
+        by_feature[placement(nodes[i].path)].add(i)
+    for tok in root_tokens:
+        by_feature["core"].update(resolve(tok, "main"))
+    core = closure(adj, by_feature.pop("core", ()))
+    out = collections.defaultdict(set)
+    for name, seeds in by_feature.items():
+        for j in closure(adj, seeds):
+            if j not in core and nodes[j].path in third:
+                out[j].add(name)
+    core_gas = {third[nodes[i].path][0] for i in core if nodes[i].path in third}
+    return out, core_gas
 
 
 def load_keep(path):
@@ -318,7 +403,8 @@ def load_keep(path):
     return keep
 
 
-def report(nodes, third, seen, index, keep, roots):
+def report(nodes, third, seen, index, keep, roots, optional=None,
+           core_gas=frozenset()):
     """Text report: candidates, no-class jars, keep-listed, stale keep."""
     out = []
     candidates, noclass, kept = [], [], []
@@ -357,6 +443,25 @@ def report(nodes, third, seen, index, keep, roots):
     for ga, v, n in sorted(candidates, key=lambda e: (e[0], e[2].path)):
         out.append("%s:%s\t%s\t%s" % (ga, v, n.path, dup_note(n)))
     out.append("")
+    if optional is not None:
+        groups = collections.defaultdict(list)
+        for j, feats in optional.items():
+            groups[" + ".join(sorted(feats))].append(nodes[j])
+        gas = {third[nodes[j].path][0] for j in optional}
+        out.append("## used only by optional features, not by core (%d jar "
+                   "files; %d g:a that only these features need, %d private "
+                   "copies of g:a core uses too)" % (
+                       len(optional), len(gas - core_gas),
+                       sum(1 for j in optional
+                           if third[nodes[j].path][0] in core_gas)))
+        for feats, ns in sorted(groups.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+            out.append("### %s (%d)" % (feats, len(ns)))
+            for n in sorted(ns, key=lambda n: (third[n.path][0], n.path)):
+                ga, v = third[n.path]
+                note = feats + ("; copy: core uses this g:a too"
+                                if ga in core_gas else "")
+                out.append("%s:%s\t%s\t%s" % (ga, v, n.path, note))
+        out.append("")
     out.append("## no class files: native or aggregator jars, loaded by name "
                "or not at all — review by hand (%d)" % len(noclass))
     for ga, v, n in sorted(noclass, key=lambda e: (e[0], e[2].path)):
@@ -393,8 +498,11 @@ def main():
     # reference count as used; drop tests jars from the roots if that hides
     # real candidates
     roots = {i for i, n in enumerate(nodes) if n.path not in third}
-    seen, index = reachable(nodes, roots, root_text_tokens(args.root))
-    text = report(nodes, third, seen, index, load_keep(args.keep), roots)
+    root_tokens = root_text_tokens(args.root)
+    seen, index = reachable(nodes, roots, root_tokens)
+    optional, core_gas = optional_only(nodes, roots, root_tokens, third)
+    text = report(nodes, third, seen, index, load_keep(args.keep), roots,
+                  optional, core_gas)
     if args.output:
         with open(args.output, "w") as fh:
             fh.write(text)
