@@ -52,7 +52,6 @@ on:
         default: false
 
 jobs:
-jobs:
   archive:
     uses: ./.github/workflows/licenses-archive-build.yml
     permissions:

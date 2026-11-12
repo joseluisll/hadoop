@@ -266,6 +266,25 @@ def case_green_release():
         shutil.rmtree(tmp)
 
 
+def case_two_tarball_flags():
+    """Regression (first real CI run, 43297145629): the workflow passes
+    TWO distribution target directories after ONE --tarballs flag; the
+    parser treated the second as an unknown argument."""
+    tmp, w = fresh_world()
+    try:
+        out = os.path.join(tmp, "out")
+        proc = run_driver(["--tarballs", w["main"], w["cloud"],
+                           "--repo", w["root"],
+                           "--third-party", w["inventory"], "--out", out])
+        expect(proc.returncode == 0,
+               "two values after one --tarballs flag must gate both", proc)
+        expect("hadoop-3.6.0" in proc.stdout
+               and "hadoop-cloud-storage-dist-3.6.0" in proc.stdout,
+               "both archives must be gated", proc)
+    finally:
+        shutil.rmtree(tmp)
+
+
 def case_green_verify():
     tmp, w = fresh_world()
     try:
@@ -515,6 +534,7 @@ def case_verify_green_survives_bad_repo_default():
 
 CASES = [
     ("green release mode", case_green_release),
+    ("two dirs after one --tarballs flag", case_two_tarball_flags),
     ("green verification mode", case_green_verify),
     ("R38: shipped jar unlicensed by shipped manifest", case_r38),
     ("R36: unnameable jar", case_r36_unnameable),
