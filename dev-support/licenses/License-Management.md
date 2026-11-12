@@ -1,4 +1,4 @@
-# Automatic license management — requirements (v3.2)
+# Automatic license management — requirements (v3.3)
 
 Requirements for automating the collection, validation, and distribution of
 third-party license information in this repository. The implementation
@@ -330,7 +330,7 @@ every dependency change, at release time, and in the precommit vote.
     re-measuring drift against the latest release. First pass 2026-11-10
     (T00023): 3.4.2, 3.4.3 and 3.5.0.
 
-## Implementation status (branches `feat/LICENSES` and `feat/LICENSES-3.5`, v3.2)
+## Implementation status (branches `feat/LICENSES` and `feat/LICENSES-3.5`, v3.3)
 
 Open work items, the transition plan, and in-flight CI verification are
 tracked in the claude-mem work state for this project (list
@@ -501,3 +501,13 @@ open and what is in flight.
   (standing validation, weekly + dispatch), `licenses-verify-rc.yml`
   ("Licenses: verify release candidate"), `licenses-build-rc-unsigned.yml`
   ("Licenses: build unsigned RC bundle"). No gate logic changed.
+- **v3.3** — workflow refactor 2026-11-12: the archive build became a
+  REUSABLE workflow (`licenses-archive-build.yml`, "Licenses: archive
+  ground truth build (reusable)"), called by the standing validation
+  and by the new RC orchestrator `licenses-release-candidate.yml`
+  ("Licenses: build release candidate (ground truth + bundle)", which
+  absorbs `licenses-build-rc-unsigned.yml`). One build definition, no
+  duplication; the shared artifact now carries the distribution
+  tarballs so the RC bundle is produced from the exact archives the
+  same run gated — same-run provenance by construction (needs: +
+  artifact), no cross-run baseline possible. No gate logic changed.

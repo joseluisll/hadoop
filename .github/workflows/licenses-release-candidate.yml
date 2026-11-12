@@ -1,0 +1,78 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND,
+# either express or implied.  See the License for the specific
+# language governing permissions and limitations under the License.
+
+# Licenses: build release candidate — the ONE workflow that produces a
+# release candidate the automated way (the "mostly automatic" half of
+# the RM toolbelt; humans keep review, signing, staging, tagging and
+# the vote). Two dependent jobs in one run, one provenance chain:
+#   job archive: the reusable archive build — dist tarballs + gates +
+#     regenerated manifest, published WITH the tarballs;
+#   job rc-bundle (needs archive): the release license step
+#     (run-release-checks.sh, fail-closed) on those exact tarballs —
+#     GREEN publishes the ready-to-sign bundle (tarballs, sha512,
+#     THIRD-PARTY.txt, generated LICENSE-binary + licenses-binary/,
+#     RM offline checklist); RED publishes the fix list.
+# Dispatch on the release branch or tag. The credential-bearing steps
+# (sign, stage, Nexus, signed tag, vote email) stay with the release
+# manager — the bundle's CHECKLIST.md lists them in order.
+
+name: "Licenses: build release candidate (ground truth + bundle)"
+
+on:
+  workflow_dispatch:
+
+jobs:
+  archive:
+    uses: ./.github/workflows/licenses-archive-build.yml
+    permissions:
+      contents: read
+      packages: write
+      actions: read
+
+  rc-bundle:
+    needs: archive
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download this run's archive ground truth (tarballs included)
+        uses: actions/download-artifact@v4
+        with:
+          name: archive-ground-truth
+
+      - name: Release license step on the exact tarballs (fail-closed)
+        run: |
+          set -euo pipefail
+          dev-support/licenses/run-release-checks.sh \
+            --tarballs hadoop-dist/target \
+                       hadoop-cloud-storage-project/hadoop-cloud-storage-dist/target \
+            --third-party target/third-party/THIRD-PARTY.txt \
+            --repo . --out target/release-checks
+
+      - name: Upload the RC bundle (GREEN) or the fix list (RED)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-unsigned-bundle
+          path: |
+            target/release-checks/rc-bundle/**
+            target/release-checks/generated-LICENSE-binary
+            target/release-checks/licenses-binary/**
+            target/release-checks/fixlist.txt
+            target/release-checks/checks/**
+          if-no-files-found: error
