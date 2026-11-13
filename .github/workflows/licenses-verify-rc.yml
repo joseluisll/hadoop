@@ -49,6 +49,14 @@ on:
         description: 'Repo ref to check out for the license tooling (the release tag; defaults to this workflow''s ref)'
         required: false
         default: ''
+      rc_release_tag:
+        description: 'Tag of the GitHub release holding the RC (use instead of rc_base_url; downloads via the API, which works for tags containing slashes)'
+        required: false
+        default: ''
+      keys_asset:
+        description: 'Name of the KEYS asset in the release (rc_release_tag mode only)'
+        required: false
+        default: 'FORK-KEYS'
       keys_url:
         description: 'Project KEYS file for signature verification'
         required: false
@@ -83,17 +91,33 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "$RC_DIR"
-          while IFS= read -r name; do
-            name="$(echo "$name" | xargs)"; [[ -n "$name" ]] || continue
-            for suffix in "" ".sha512" ".asc"; do
-              url="${{ inputs.rc_base_url }}/$name$suffix"
-              echo "fetching $url"
-              curl -fSL --retry 5 --retry-delay 10 -o "$RC_DIR/$name$suffix" "$url"
-            done
-          done <<< "${{ inputs.artifacts }}"
+          if [[ -n "${{ inputs.rc_release_tag }}" ]]; then
+            # GitHub release assets: the API route (gh release download)
+            # works for tags containing slashes, where the plain
+            # /releases/download/<tag>/<asset> URLs 404
+            export GH_TOKEN="${{ github.token }}"
+            gh release download "${{ inputs.rc_release_tag }}" \
+              --repo "${{ github.repository }}" -D "$RC_DIR"
+            ls -la "$RC_DIR"
+          else
+            while IFS= read -r name; do
+              name="$(echo "$name" | xargs)"; [[ -n "$name" ]] || continue
+              for suffix in "" ".sha512" ".asc"; do
+                url="${{ inputs.rc_base_url }}/$name$suffix"
+                echo "fetching $url"
+                curl -fSL --retry 5 --retry-delay 10 -o "$RC_DIR/$name$suffix" "$url"
+              done
+            done <<< "${{ inputs.artifacts }}"
+          fi
 
-      - name: Fetch the project KEYS file
-        run: curl -fSL --retry 5 -o KEYS "${{ inputs.keys_url }}"
+      - name: Locate or fetch the project KEYS file
+        run: |
+          set -euo pipefail
+          if [[ -n "${{ inputs.rc_release_tag }}" && -s "$RC_DIR/${{ inputs.keys_asset }}" ]]; then
+            cp "$RC_DIR/${{ inputs.keys_asset }}" KEYS
+          else
+            curl -fSL --retry 5 -o KEYS "${{ inputs.keys_url }}"
+          fi
 
       - name: Run the offline license verification (fail-closed)
         run: |
