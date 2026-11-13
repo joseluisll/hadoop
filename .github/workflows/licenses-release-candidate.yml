@@ -37,6 +37,8 @@ on:
 jobs:
   archive:
     uses: ./.github/workflows/licenses-archive-build.yml
+    with:
+      publish_tarballs: true
     permissions:
       contents: read
       packages: write
@@ -50,10 +52,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download this run's archive ground truth (tarballs included)
+      - name: Download this run's evidence and tarballs
         uses: actions/download-artifact@v4
         with:
-          name: archive-ground-truth
+          pattern: '{archive-ground-truth,rc-tarballs}'
+          merge-multiple: true
 
       - name: Release license step on the exact tarballs (fail-closed)
         run: |
