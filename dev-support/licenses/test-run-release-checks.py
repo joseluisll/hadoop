@@ -490,6 +490,38 @@ def case_verify_bad_checksum():
         shutil.rmtree(tmp)
 
 
+def case_verify_declared_artifacts():
+    """Regression (W1 run 43338793555): verify mode must gate exactly
+    the declared artifacts — an auxiliary unsigned tarball in the RC
+    dir (licenses-binary.tar.gz) must not turn the verification red."""
+    tmp, w = fresh_world()
+    try:
+        rc = os.path.join(tmp, "rc")
+        os.makedirs(rc)
+        for tar in (w["main"], w["cloud"]):
+            shutil.copyfile(tar, os.path.join(rc, os.path.basename(tar)))
+            sums = subprocess.run(["sha512sum", os.path.basename(tar)],
+                                  cwd=w["build"], capture_output=True, text=True)
+            with open(os.path.join(rc, os.path.basename(tar)) + ".sha512",
+                      "w") as fh:
+                fh.write(sums.stdout)
+        shutil.copyfile(w["inventory"], os.path.join(rc, "THIRD-PARTY.txt"))
+        # auxiliary, unsigned, no checksum: not a voted-on artifact
+        shutil.copyfile(w["main"], os.path.join(rc, "licenses-binary.tar.gz"))
+        with open(os.path.join(rc, "FORK-KEYS"), "w") as fh:
+            fh.write("stub\n")
+        proc = run_driver(["--verify-only", rc, "--repo", w["root"],
+                           "--tarballs",
+                           os.path.join(rc, "hadoop-3.6.0.tar.gz"),
+                           os.path.join(rc, "hadoop-cloud-storage-dist-3.6.0.tar.gz")])
+        expect(proc.returncode == 0,
+               "declared-artifacts verification must be green", proc)
+        expect("== licenses-binary" not in proc.stdout,
+               "auxiliary tarball must not be gated", proc)
+    finally:
+        shutil.rmtree(tmp)
+
+
 def case_verify_missing_artifacts():
     tmp, w = fresh_world()
     try:
@@ -546,6 +578,7 @@ CASES = [
     ("R38: archive ships no manifest", case_missing_shipped_manifest),
     ("SHA512: tampered artifact", case_verify_bad_checksum),
     ("MISSING-ARTIFACTS: RC without THIRD-PARTY.txt", case_verify_missing_artifacts),
+    ("verify mode gates only declared artifacts", case_verify_declared_artifacts),
     ("verify mode is CWD-independent", case_verify_green_survives_bad_repo_default),
 ]
 
