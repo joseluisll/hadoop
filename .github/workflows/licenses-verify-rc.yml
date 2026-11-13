@@ -123,8 +123,18 @@ jobs:
       - name: Run the offline license verification (fail-closed)
         run: |
           set -euo pipefail
+          # gate exactly the DECLARED RC artifacts: the release dir may
+          # also carry auxiliary files (e.g. a bundled licenses-binary
+          # tarball, KEYS) that are not voted-on artifacts
+          tarargs=()
+          while IFS= read -r name; do
+            name="$(echo "$name" | xargs)"; [[ -n "$name" ]] || continue
+            [[ -f "$RC_DIR/$name" ]] || { echo "declared RC artifact missing: $name" >&2; exit 1; }
+            tarargs+=("$RC_DIR/$name")
+          done <<< "${{ inputs.artifacts }}"
           dev-support/licenses/run-release-checks.sh \
             --verify-only "$RC_DIR" --repo . --keys KEYS \
+            --tarballs "${tarargs[@]}" \
             --out "$CHECKS_OUT"
 
       - name: Upload verification evidence
