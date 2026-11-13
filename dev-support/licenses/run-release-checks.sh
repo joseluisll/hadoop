@@ -103,8 +103,11 @@ done
 if [[ "$MODE" == "verify" ]]; then
   [[ -n "$VERIFY_DIR" ]] || { echo "$PROG: --verify-only needs a directory" >&2; exit 2; }
   [[ -d "$VERIFY_DIR" ]] || { echo "$PROG: no such directory: $VERIFY_DIR" >&2; exit 2; }
-  # the verification target is the RC directory's tarballs
-  TARBALLS=("$VERIFY_DIR")
+  # default the verification target to the RC directory's tarballs,
+  # unless the caller declared exactly which artifacts to gate
+  if [[ "${#TARBALLS[@]}" -eq 0 ]]; then
+    TARBALLS=("$VERIFY_DIR")
+  fi
 elif [[ "${#TARBALLS[@]}" -eq 0 ]]; then
   echo "$PROG: release mode needs at least one --tarballs" >&2
   usage
