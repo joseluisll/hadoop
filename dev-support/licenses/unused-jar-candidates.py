@@ -71,11 +71,30 @@ stale.
 
 Usage: unused-jar-candidates.py <unpacked-dir> <archive-jars.tsv>
            [--keep unused-jar-keep] [--mappings archive-jar-mappings]
-           [-o unused-jar-candidates.txt]
+           [--poms <source-tree>] [-o unused-jar-candidates.txt]
+           [-t pruning-report.tsv]
 
 <unpacked-dir> is the directory the TSV paths are relative to (for the
 dist workflow, target/archive-ground-truth/<name>/untarred).
 Exit 0 on any finding; 2 when the inputs are unreadable or malformed.
+
+With --tsv, additionally writes one row per third-party jar FILE (all of
+them, used or not): g:a:v, path, class count, inbound references split
+by their source (inbound_hadoop: Hadoop's own jars, WEB-INF/classes and
+the distribution's config/scripts; inbound_other: other third-party
+jars), a verdict (candidate / no-class / kept / used / used-optional),
+and pulled-in-by attribution. Inbound counts are DIRECT references only
+(the verdict stays closure-based, which is the conservative one); a jar
+referenced only from config text shows +1 inbound_hadoop.
+
+With --poms <source-tree> (a Hadoop source checkout), pulled-in-by
+names the modules whose poms declare the artifact (any <dependency>
+element, dependencyManagement included); "transitive" marks an
+artifact no module pom declares directly (it arrives through another
+artifact's pom, e.g. the netty codecs through netty-all — resolving
+that needs the parent artifact's own pom, which the tool does not
+fetch). Attribution is informational: it says where a jar comes from,
+never that removing it is safe.
 """
 
 import argparse
@@ -325,9 +344,9 @@ def closure(adj, seeds):
     return seen
 
 
-def reachable(nodes, roots, root_tokens):
+def reachable(nodes, roots, root_tokens, graph=None):
     """Indices of the nodes reachable from roots (see module doc)."""
-    adj, index, resolve, jdk_providers = jar_graph(nodes)
+    adj, index, resolve, jdk_providers = graph or jar_graph(nodes)
     seeds = set(roots) | jdk_providers
     for tok in root_tokens:
         seeds.update(resolve(tok, "main"))
@@ -369,9 +388,9 @@ def placement(path):
     return "core" if f == "tests" else f
 
 
-def optional_only(nodes, roots, root_tokens, third):
+def optional_only(nodes, roots, root_tokens, third, graph=None):
     """Third-party nodes reached, but not from core: node -> features."""
-    adj, _index, resolve, jdk_providers = jar_graph(nodes)
+    adj, _index, resolve, jdk_providers = graph or jar_graph(nodes)
     by_feature = collections.defaultdict(set)
     for i in roots:
         by_feature[feature(nodes[i].path)].add(i)
@@ -401,6 +420,123 @@ def load_keep(path):
         if ga:
             keep[ga] = parts[1].strip() if len(parts) > 1 else ""
     return keep
+
+
+def load_pom_declarations(source_tree):
+    """g:a (lowercased) -> set of module dirs whose pom.xml declares it.
+
+    Every <dependency> element counts, dependencyManagement included: the
+    question is which module's pom pulls the artifact in, not which pins
+    the version. Unparseable poms fail closed.
+    """
+    import xml.etree.ElementTree as ET
+    declared = collections.defaultdict(set)
+    poms = []
+    for dirpath, dirs, files in os.walk(source_tree):
+        dirs[:] = [d for d in dirs if d != "target"]
+        if "pom.xml" in files:
+            poms.append(os.path.join(dirpath, "pom.xml"))
+    if not poms:
+        _gam.fail("no pom.xml found under %s" % source_tree)
+    for pom in sorted(poms):
+        rel = os.path.dirname(os.path.relpath(pom, source_tree))
+        try:
+            tree = ET.parse(pom)
+        except ET.ParseError as err:
+            _gam.fail("cannot parse %s: %s" % (pom, err))
+            raise  # fail exits; this line only marks it for static analysis
+        for dep in tree.getroot().iter():
+            if not dep.tag.endswith("dependency"):
+                continue
+            g = a = None
+            for child in dep:
+                if child.tag.endswith("groupId"):
+                    g = (child.text or "").strip()
+                elif child.tag.endswith("artifactId"):
+                    a = (child.text or "").strip()
+            if g and a and not g.startswith("${") and not a.startswith("${"):
+                declared[("%s:%s" % (g, a)).lower()].add(rel)
+    return declared
+
+
+def inbound_counts(nodes, third, adj, root_tokens, resolve):
+    """Per node: (inbound from Hadoop's side, inbound from other jars).
+
+    Direct references only: jar-level edges plus the config/script text
+    tokens (one pseudo-source, Hadoop's side). References from the jar
+    itself and from ANOTHER COPY OF THE SAME g:a (a lib directory
+    repeating common/lib) do not count — a candidate referred to only by
+    its own duplicate is still unused.
+    """
+    in_h, in_o = [0] * len(nodes), [0] * len(nodes)
+    text_hits = set()
+    for tok in root_tokens:
+        text_hits.update(resolve(tok, "main"))
+    for i, targets in enumerate(adj):
+        src_ga = third[nodes[i].path][0] if nodes[i].path in third else None
+        for j in targets:
+            # a jar's references to itself (direct or via its own duplicate
+            # copies) are not inbound: same g:a on both sides covers the
+            # self-edge j == i as well, so no separate self check is needed
+            if nodes[j].path not in third:
+                continue
+            if src_ga is not None and src_ga == third[nodes[j].path][0]:
+                continue
+            if src_ga is not None:
+                in_o[j] += 1
+            else:
+                in_h[j] += 1
+    for j in text_hits:
+        if nodes[j].path in third:
+            in_h[j] += 1
+    return in_h, in_o
+
+
+def verdicts(nodes, third, seen, keep, optional):
+    """Per node: the report's verdict for that jar file, with the text
+    report's precedence: a reached jar is used (a reached keep row is
+    stale there, not kept); only unreached ones are no-class/kept/candidate."""
+    out = []
+    for i, n in enumerate(nodes):
+        if n.path not in third:
+            out.append(None)
+        elif i in seen:
+            out.append("used-optional:" + "+".join(sorted(optional[i]))
+                       if i in optional else "used")
+        elif not n.classes:
+            out.append("no-class")
+        elif third[n.path][0] in keep:
+            out.append("kept")
+        else:
+            out.append("candidate")
+    return out
+
+
+def tsv_report(nodes, third, verdict, in_h, in_o, declared):
+    """The full per-jar-file table (every third-party jar, used or not)."""
+    out = ["# Unused-jar pruning report (dry run: nothing is changed)",
+           "# informational only: reflection, by-name ServiceLoader and",
+           "# native loading are invisible to this scan; the verdict is",
+           "# closure-based and conservative, the inbound counts are direct",
+           "# references only. Attribution names the modules whose poms",
+           "# declare the artifact; 'transitive' = no module pom declares it",
+           "# (it arrives through another artifact's own pom).",
+           "g:a:v\tpath\tclasses\tinbound_hadoop\tinbound_other\tverdict"
+           "\tpulled_in_by"]
+    rows = [(third[n.path][0], n.path, i) for i, n in enumerate(nodes)
+            if n.path in third]
+    for _ga, _path, i in sorted(rows):
+        n = nodes[i]
+        ga, v = third[n.path]
+        if declared is None:
+            by = "-"
+        else:
+            mods = declared.get(ga, ())
+            by = ";".join(sorted(mods)) if mods else "transitive"
+        out.append("%s:%s\t%s\t%d\t%d\t%d\t%s\t%s" % (
+            ga, v, n.path, len(n.classes), in_h[i], in_o[i],
+            verdict[i], by))
+    return "\n".join(out) + "\n"
 
 
 def report(nodes, third, seen, index, keep, roots, optional=None,
@@ -486,7 +622,11 @@ def main():
     parser.add_argument("--keep", default=os.path.join(SCRIPT_DIR, "unused-jar-keep"))
     parser.add_argument("--mappings",
                         default=os.path.join(SCRIPT_DIR, "archive-jar-mappings"))
+    parser.add_argument("--poms", default=None,
+                        help="Hadoop source tree for pulled-in-by attribution")
     parser.add_argument("-o", "--output", default=None)
+    parser.add_argument("-t", "--tsv", default=None, dest="tsv_out",
+                        help="also write the full per-jar pruning report TSV")
     args = parser.parse_args()
 
     rows, _unresolved = _gam.load_archive_rows([args.tsv], args.mappings)
@@ -499,15 +639,23 @@ def main():
     # real candidates
     roots = {i for i, n in enumerate(nodes) if n.path not in third}
     root_tokens = root_text_tokens(args.root)
-    seen, index = reachable(nodes, roots, root_tokens)
-    optional, core_gas = optional_only(nodes, roots, root_tokens, third)
-    text = report(nodes, third, seen, index, load_keep(args.keep), roots,
-                  optional, core_gas)
+    graph = jar_graph(nodes)
+    seen, index = reachable(nodes, roots, root_tokens, graph)
+    optional, core_gas = optional_only(nodes, roots, root_tokens, third, graph)
+    keep = load_keep(args.keep)
+    text = report(nodes, third, seen, index, keep, roots, optional, core_gas)
     if args.output:
         with open(args.output, "w") as fh:
             fh.write(text)
     else:
         sys.stdout.write(text)
+    if args.tsv_out:
+        adj, _index, resolve, _jdk = graph
+        in_h, in_o = inbound_counts(nodes, third, adj, root_tokens, resolve)
+        declared = load_pom_declarations(args.poms) if args.poms else None
+        with open(args.tsv_out, "w") as fh:
+            fh.write(tsv_report(nodes, third, verdicts(
+                nodes, third, seen, keep, optional), in_h, in_o, declared))
 
 
 if __name__ == "__main__":

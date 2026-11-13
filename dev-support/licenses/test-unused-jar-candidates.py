@@ -74,9 +74,16 @@ JARS = {
         "META-INF/native-image/x/reflect-config.json": b'["com.m.M"]',
     }),
     LIB + "used-1.jar": ("com.x", "used", {"com/x/Used.class": cls()}),
-    LIB + "unused-1.jar": ("com.y", "unused", {"com/y/Nope.class": cls()}),
+    LIB + "unused-1.jar": ("com.y", "unused",
+                           {"com/y/Nope.class": cls("com/y/Nope")}),
+    # a duplicate copy of unused (hdfs/lib repeats common/lib): the jar's
+    # classes reference themselves, and the copies' shared scan sets make
+    # each copy's references resolve to BOTH copies — that is still not
+    # use: both copies stay zero-inbound candidates
+    "h/share/hadoop/hdfs/lib/unused-1.jar": ("com.y", "unused",
+                                             {"com/y/Nope.class": cls("com/y/Nope")}),
     LIB + "svc-1.jar": ("com.z", "svc", {
-        "com/z/D.class": cls(), "META-INF/services/java.sql.Driver": b"com.z.D\n"}),
+        "com/z/D.class": cls("com/z/D"), "META-INF/services/java.sql.Driver": b"com.z.D\n"}),
     LIB + "proc-1.jar": ("com.p", "proc", {
         "com/p/P.class": cls(),
         "META-INF/services/javax.annotation.processing.Processor": b"com.p.P\n"}),
@@ -152,12 +159,28 @@ def build(d):
     open(tsv, "w").write("\n".join(rows) + "\n")
     keep = os.path.join(d, "keep")
     open(keep, "w").write("com.k:kept  # loaded by name\ncom.gone:gone  # stale\n")
-    return root, tsv, keep
+    # a source tree for the pulled-in-by attribution: two module poms, one
+    # declaring in <dependencyManagement> only
+    src = os.path.join(d, "src")
+    write(src, "hadoop-common-project/hadoop-common/pom.xml",
+          b"<project><dependencies><dependency>"
+          b"<groupId>com.x</groupId><artifactId>used</artifactId></dependency>"
+          b"<dependency><groupId>com.sh</groupId><artifactId>shared</artifactId>"
+          b"</dependency></dependencies></project>")
+    write(src, "hadoop-assemblies/pom.xml",
+          b"<project><dependencies><dependency>"
+          b"<groupId>com.x</groupId><artifactId>used</artifactId>"
+          b"</dependency></dependencies></project>")
+    write(src, "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-app/pom.xml",
+          b"<project><dependencyManagement><dependencies><dependency>"
+          b"<groupId>com.kc</groupId><artifactId>kclient</artifactId>"
+          b"</dependency></dependencies></dependencyManagement></project>")
+    return root, tsv, keep, src
 
 
 def main():
     with tempfile.TemporaryDirectory() as d:
-        root, tsv, keep = build(d)
+        root, tsv, keep, src = build(d)
         maps = os.path.join(d, "maps")
         open(maps, "w").write("")
         p = subprocess.run([sys.executable, "-I", SCRIPT, root, tsv,
@@ -207,6 +230,98 @@ def main():
                             "--keep", keep, "--mappings", maps],
                            capture_output=True, text=True)
         assert p.returncode == 2 and "cannot read" in p.stderr, p.stderr
+
+        # the per-jar TSV: every third-party jar file, inbound counts,
+        # verdicts and pom attribution
+        tsv_out = os.path.join(d, "pruning-report.tsv")
+        p = subprocess.run([sys.executable, "-I", SCRIPT, root, tsv,
+                            "--keep", keep, "--mappings", maps,
+                            "--poms", src, "-t", tsv_out],
+                           capture_output=True, text=True)
+        assert p.returncode == 0, p.stderr
+        lines = open(tsv_out).read().splitlines()
+        header = [l for l in lines if not l.startswith("#")]
+        assert header[0] == ("g:a:v\tpath\tclasses\tinbound_hadoop\t"
+                             "inbound_other\tverdict\tpulled_in_by"), header[0]
+        data = {}
+        for l in header[1:]:
+            f = l.split("\t")
+            data[f[1]] = f  # by path
+        # 22 main third-party files + 6 WAR-nested = 28 rows
+        assert len(data) == 28, len(data)
+        def row(gav):
+            hits = [f for f in data.values() if f[0] == gav]
+            assert len(hits) == 1, (gav, hits)
+            return hits[0]
+        def row_path(suffix):
+            hits = [f for f in data.values() if f[1].endswith(suffix)]
+            assert len(hits) == 1, (suffix, hits)
+            return hits[0]
+        # duplicate copies: same bytes in another lib dir reference each
+        # other, and that is not use — both stay zero-inbound candidates
+        f = row_path("common/lib/unused-1.jar")
+        assert f[0] == "com.y:unused:1" and f[2:] == [
+            "1", "0", "0", "candidate", "transitive"], f
+        f = row_path("hdfs/lib/unused-1.jar")
+        assert f[0] == "com.y:unused:1" and f[2:] == [
+            "1", "0", "0", "candidate", "transitive"], f
+        # direct inbound from Hadoop's own jar; the WAR's reference to the
+        # same class resolves to the WAR's own copy, not this one
+        # two declaring modules, listed sorted
+        f = row_path("common/lib/used-1.jar")
+        assert f[0] == "com.x:used:1" and f[2:] == [
+            "1", "1", "0", "used",
+            "hadoop-assemblies;hadoop-common-project/hadoop-common"], f
+        # the WAR's private copy of the same g:a: referenced by the WAR's
+        # own classes (Hadoop's side), used only by the WAR feature;
+        # attribution is per g:a, so it names the declaring module too
+        f = row_path("app.war#WEB-INF/lib/used-1.jar")
+        assert f[0] == "com.x:used:1" and f[2:] == [
+            "1", "1", "0", "used-optional:app.war",
+            "hadoop-assemblies;hadoop-common-project/hadoop-common"], f
+        # service edge: the interface's jar (third-party) pulls the provider
+        assert row("com.ai:impl:1")[2:] == [
+            "1", "0", "1", "used", "transitive"], row("com.ai:impl:1")
+        # a third-party jar referenced by another third-party jar
+        assert row("com.wd:wardep:1")[2:] == [
+            "1", "0", "1", "used-optional:app.war", "transitive"], \
+            row("com.wd:wardep:1")
+        # config-text references count as one inbound from Hadoop's side
+        assert row("com.c:cfg:1")[2:] == [
+            "1", "1", "0", "used", "transitive"], row("com.c:cfg:1")
+        # a jar whose class references itself: the self-edge is not inbound
+        assert row("com.z:svc:1")[2:] == [
+            "1", "1", "0", "used", "transitive"], row("com.z:svc:1")
+        # no class files / keep-listed verdicts
+        assert row("com.n:native:1")[4] == "0" and row("com.n:native:1")[5] == \
+            "no-class", row("com.n:native:1")
+        assert row("com.k:kept:1")[5] == "kept", row("com.k:kept:1")
+        # attribution from a dependencyManagement-only declaration; the
+        # referencing jar (hadoop-kafka) is Hadoop's own
+        assert row("com.kc:kclient:1")[2:] == [
+            "1", "1", "0", "used-optional:tools:hadoop-kafka",
+            "hadoop-yarn-project/hadoop-yarn/hadoop-yarn-app"], \
+            row("com.kc:kclient:1")
+        # a no-class jar with no declarer stays transitive (informational)
+        assert row("com.n:native:1")[6] == "transitive"
+        # a keep row for a reached jar is stale in the text report, so the
+        # TSV says used, not kept
+        keep2 = os.path.join(d, "keep2")
+        open(keep2, "w").write("com.x:used  # reached anyway\n")
+        p = subprocess.run([sys.executable, "-I", SCRIPT, root, tsv,
+                            "--keep", keep2, "--mappings", maps,
+                            "--tsv", tsv_out], capture_output=True, text=True)
+        assert p.returncode == 0, p.stderr
+        assert "\tused\t-" in [l for l in open(tsv_out).read().splitlines()
+                               if "common/lib/used-1.jar" in l][0]
+        # --poms with no pom anywhere fails closed
+        empty = os.path.join(d, "empty-src")
+        os.makedirs(empty)
+        p = subprocess.run([sys.executable, "-I", SCRIPT, root, tsv,
+                            "--keep", keep, "--mappings", maps,
+                            "--poms", empty, "-t", tsv_out],
+                           capture_output=True, text=True)
+        assert p.returncode == 2 and "no pom.xml" in p.stderr, p.stderr
     print("test-unused-jar-candidates: OK")
 
 
