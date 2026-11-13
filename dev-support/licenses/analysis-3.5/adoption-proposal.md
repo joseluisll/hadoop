@@ -79,6 +79,10 @@ run linked from the vote email.
   public JIRA) attached to the run;
 - a pre-promotion completeness check (every artifact present, signed,
   checksummed, license-verified) before the final promotion.
+- an unused-jar report from the archive build: every shipped
+  third-party jar with its inbound references and the module poms that
+  declare it, as input for dependency pruning (26 unreferenced
+  artifacts on 3.5.0). Informational only: it never fails a build.
 
 All of these prepare work for the RM; none of them execute a
 credential-bearing step.

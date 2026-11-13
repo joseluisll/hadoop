@@ -1,4 +1,4 @@
-# Automatic license management — requirements (v3.4)
+# Automatic license management — requirements (v3.5)
 
 Requirements for automating the collection, validation, and distribution of
 third-party license information in this repository. The implementation
@@ -330,7 +330,7 @@ every dependency change, at release time, and in the precommit vote.
     re-measuring drift against the latest release. First pass 2026-11-10
     (T00023): 3.4.2, 3.4.3 and 3.5.0.
 
-## Implementation status (branches `feat/LICENSES` and `feat/LICENSES-3.5`, v3.4)
+## Implementation status (branches `feat/LICENSES` and `feat/LICENSES-3.5`, v3.5)
 
 Open work items, the transition plan, and in-flight CI verification are
 tracked in the claude-mem work state for this project (list
@@ -520,3 +520,17 @@ open and what is in flight.
   which then also publishes the distribution tarballs as a separate
   `rc-tarballs` artifact with 1-day retention — a transfer channel for
   the rc-bundle job, not storage; the tarballs live in the release.
+- **v3.5** — pruning support recorded 2026-11-13 (T00034; no numbered
+  requirement, no gate changed). The archive build's informational
+  unused-jar dry run (`unused-jar-candidates.py`, 2026-11-12, input for
+  the apache/hadoop#8943 pruning question; records
+  `2026-11-12-1631-Pruning-Support-Jar-Layout-Report.md`) gains a
+  per-jar TSV (`-t/--tsv`): every third-party jar file with its class
+  count, direct inbound references from Hadoop's side and from other
+  jars, the closure-based verdict, and with `--poms <source tree>` the
+  modules whose poms declare it. Demoed on the official 3.5.0 tarball:
+  26 unreferenced g:a in 41 jar files, none referenced from Hadoop's
+  side (record:
+  `2026-11-13-0412-Pruning-Inbound-Counts-Attribution-3.5.0.md`). The
+  scan never fails a build; removing a jar stays a compatibility call
+  for the project.
