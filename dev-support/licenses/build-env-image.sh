@@ -16,7 +16,8 @@
 # language governing permissions and limitations under the License.
 #
 # Provide the Docker build-env image as "hadoop-build" for the archive
-# ground-truth workflow (licenses-dist.yml), from a content-addressed
+# ground-truth workflow (licenses-archive-build.yml, reusable), from a
+# content-addressed
 # GHCR cache: the tag is the hash of every file the image build
 # consumes, so a hit is an image built from this commit's exact inputs.
 #

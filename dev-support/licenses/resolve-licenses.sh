@@ -20,7 +20,8 @@
 # Reads the distinct licenses from a THIRD-PARTY.txt report and resolves
 # each one against the versioned texts in dev-support/licenses/texts/.
 # Nothing is downloaded: network access is only used by the optional
-# aggregate-download-licenses goal (see .github/workflows/licenses.yml).
+# aggregate-download-licenses goal (the optional network-download
+# input of the standing license-validation workflow).
 #
 # The report lines look like:
 #     (License One) (License Two) Artifact Name (g:a:v - url)

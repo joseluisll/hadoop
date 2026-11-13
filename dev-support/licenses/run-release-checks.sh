@@ -19,7 +19,7 @@
 # dev-support/licenses/License-Management.md): ONE callable, fail-closed
 # step that runs the full license generate-and-verify suite against the
 # exact tarballs being voted on. It packages the gates the CI workflows
-# run inline (licenses.yml, licenses-dist.yml) so the same checks execute
+# the standing license validation runs, so the same checks execute
 # at release time — in the RC build (the create-release hook shape) and,
 # with the same inputs, as the offline voter verifier.
 #
@@ -389,8 +389,15 @@ for tar in "${DIST_TARS[@]}"; do
           matched=1
         fi
       done
-      [[ "$matched" -eq 1 ]] || \
-        record_failure "GATE" "$(fix_for GATE)"
+      if [[ "$matched" -eq 1 ]]; then
+        # drop the generic GATE entry run_check recorded: the specific
+        # requirement terms above are what the fix list should carry
+        idx=-1
+        for i in "${!FIXES[@]}"; do
+          [[ "${FIXES[$i]}" == "GATE|"* ]] && idx=$i
+        done
+        if [[ "$idx" -ge 0 ]]; then unset "FIXES[$idx]"; fi
+      fi
     fi
   fi
 
