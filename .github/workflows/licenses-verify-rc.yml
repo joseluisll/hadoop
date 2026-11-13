@@ -40,8 +40,9 @@ on:
   workflow_dispatch:
     inputs:
       rc_base_url:
-        description: 'Base URL of the RC directory (dev staging, release dir, or mirror); artifacts are fetched as <url>/<name>'
-        required: true
+        description: 'Base URL of the RC directory (dev staging, release dir, or mirror); artifacts are fetched as <url>/<name>. Not needed with rc_release_tag.'
+        required: false
+        default: ''
       artifacts:
         description: 'Newline-separated artifact names to download and gate (binary tarballs; their .sha512/.asc are fetched automatically)'
         required: true
