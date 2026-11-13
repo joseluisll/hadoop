@@ -36,6 +36,11 @@ name: "Licenses: archive ground truth build (reusable)"
 
 on:
   workflow_call:
+    inputs:
+      publish_tarballs:
+        description: 'Also publish the distribution tarballs as a short-retention rc-tarballs artifact (RC production needs them; standing validation does not)'
+        type: boolean
+        default: false
 
 jobs:
   archive-ground-truth:
@@ -301,25 +306,23 @@ jobs:
           fi
           exit "$status"
 
-      - name: Upload archive ground truth
+      # evidence of record (small, 90-day retention): enumerations, gate
+      # logs, inventory, generated manifest, pruning reports. The
+      # distribution tarballs are NOT here — see the rc-tarballs artifact
+      # below; GB-scale artifacts per run made the standing validation
+      # storage-impractical (owner, 2026-11-12).
+      - name: Upload archive ground truth (evidence)
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: archive-ground-truth
-          # R43: this artifact is the per-push R10 gate's baseline of record.
+          # R43: this artifact is the drift gate's baseline of record.
           # Public repositories cap artifact retention at 90 days, so 90 is
-          # the maximum expressible here; expiry stays fail-closed — the R10
+          # the maximum expressible here; expiry stays fail-closed — the
           # gate prints the exact dispatch command to refresh the baseline.
-          # Upstream (apache/hadoop), the org's retention setting plus the
-          # weekly cron refresh make the cap a non-issue.
           retention-days: 90
-          # the extracted tarballs stay on the runner; upload only the
-          # evidence (enumeration TSVs, gate logs, inventory) plus the
-          # generated manifest the per-push drift gate compares against
           path: |
             target/third-party/**
-            hadoop-dist/target/*.tar.gz
-            hadoop-cloud-storage-project/hadoop-cloud-storage-dist/target/*.tar.gz
             target/archive-ground-truth/*/archive-jars.tsv
             target/archive-ground-truth/*/layout-report.md
             target/archive-ground-truth/*/unused-jar-candidates.txt
@@ -329,3 +332,18 @@ jobs:
             target/archive-ground-truth/*/assets.log
             target/generated-LICENSE-binary
           if-no-files-found: warn
+
+      # RC production only: the tarballs as a transfer artifact for the
+      # rc-bundle job of the calling workflow (needs: runs immediately
+      # after). 1-day retention — the tarballs live in the release, not
+      # in CI storage.
+      - name: Upload distribution tarballs (RC transfer, 1-day retention)
+        if: always() && inputs.publish_tarballs
+        uses: actions/upload-artifact@v4
+        with:
+          name: rc-tarballs
+          retention-days: 1
+          path: |
+            hadoop-dist/target/*.tar.gz
+            hadoop-cloud-storage-project/hadoop-cloud-storage-dist/target/*.tar.gz
+          if-no-files-found: error

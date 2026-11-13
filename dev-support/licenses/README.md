@@ -184,8 +184,10 @@ The family is three workflows around one shared build definition,
   step (run-release-checks.sh) on those exact tarballs, GREEN =
   ready-to-sign bundle, RED = fix list. Absorbs the former
   licenses-build-rc-unsigned.yml; same-run provenance by construction
-  (needs: + same-run artifact), tarballs included in the shared
-  artifact since v3.3.
+  (needs: + same-run artifact); the reusable build publishes the
+  tarballs as a 1-day-retention `rc-tarballs` transfer artifact only
+  when the RC orchestrator asks (`publish_tarballs: true`) — the
+  standing validation's artifact stays evidence-only and small.
 
 Each archive also gets a jar layout report (`jar-layout-report.py`,
 `layout-report.md` in the artifact and the job summary). It is pruning
