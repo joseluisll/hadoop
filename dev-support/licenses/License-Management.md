@@ -1,4 +1,4 @@
-# Automatic license management — requirements (v3.3)
+# Automatic license management — requirements (v3.4)
 
 Requirements for automating the collection, validation, and distribution of
 third-party license information in this repository. The implementation
@@ -330,7 +330,7 @@ every dependency change, at release time, and in the precommit vote.
     re-measuring drift against the latest release. First pass 2026-11-10
     (T00023): 3.4.2, 3.4.3 and 3.5.0.
 
-## Implementation status (branches `feat/LICENSES` and `feat/LICENSES-3.5`, v3.3)
+## Implementation status (branches `feat/LICENSES` and `feat/LICENSES-3.5`, v3.4)
 
 Open work items, the transition plan, and in-flight CI verification are
 tracked in the claude-mem work state for this project (list
@@ -511,3 +511,12 @@ open and what is in flight.
   tarballs so the RC bundle is produced from the exact archives the
   same run gated — same-run provenance by construction (needs: +
   artifact), no cross-run baseline possible. No gate logic changed.
+- **v3.4** — artifact-size fix 2026-11-13 (owner: GB-scale CI
+  artifacts per standing run are impractical; supersedes the v3.3
+  tarball-in-shared-artifact decision): the shared archive artifact is
+  evidence-only again (enumerations, gate logs, inventory, generated
+  manifest; 90-day retention — the drift-gate baseline). The RC
+  orchestrator passes `publish_tarballs: true` to the reusable build,
+  which then also publishes the distribution tarballs as a separate
+  `rc-tarballs` artifact with 1-day retention — a transfer channel for
+  the rc-bundle job, not storage; the tarballs live in the release.
