@@ -201,7 +201,8 @@ python3 dev-support/licenses/check-archive-assets.py \
 python3 dev-support/licenses/jar-layout-report.py \
   archive-jars.tsv --root <dir the TSV paths are relative to>
 python3 dev-support/licenses/unused-jar-candidates.py \
-  <dir the TSV paths are relative to> archive-jars.tsv -o unused-jar-candidates.txt
+  <dir the TSV paths are relative to> archive-jars.tsv -o unused-jar-candidates.txt \
+  [--poms <hadoop source tree>] [-t pruning-report.tsv]
 python3 dev-support/licenses/archive-delta.py \
   <baseline>/archive-ground-truth <current>/archive-ground-truth
 ```
