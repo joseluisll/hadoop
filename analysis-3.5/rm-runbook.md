@@ -97,6 +97,12 @@ build says what to add. A component removed stops being listed at the
 next generation. The license files cannot silently fall behind the
 archive again.
 
+If the project wants to trim what ships, the same archive build also
+writes an informational unused-jar report: per jar, who references it
+and which module pom declares it (on 3.5.0: 26 artifacts nothing
+references). It never fails a build and is not part of the RC step;
+dropping a jar stays a normal, reviewed dependency change.
+
 ## What this rests on (evidence)
 
 The claim above is only as good as the system behind it. The evidence,
