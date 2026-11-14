@@ -339,6 +339,13 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   the Curator listener thread, and no thread may apply an older snapshot of a token after a newer change from
   a peer (cancel/renew during startup) has been applied. (arch §11.4, ZKDelegationTokenSecretManager)
 
+- **NFR-C-17 — IPC sender-thread shutdown promptness.** A connection's request-sending thread
+  (`Client.Connection.RpcRequestSender`) must be woken and terminated promptly when its connection is
+  marked closed: a close path may not leave it blocked in `rpcRequestQueue.poll(timeout)` until the poll
+  times out, and the thread (and its native stack) must not accumulate across connection churn
+  (`ipc.client.connection.maxidletime` bounds idle-connection lifetime, not sender shutdown latency).
+  (arch §11.3, Client.Connection.markClosed/RpcRequestSender)
+
 ### 2.2 Security (arch §12)
 
 - **NFR-S-1 — RPC authentication selection.** `hadoop.security.authentication` (default `simple`) must select
@@ -516,7 +523,7 @@ When a diff touches an area, check the listed requirements (and cite them in rev
 - **`org.apache.hadoop.conf`:** FR-4, FR-5, FR-6, FR-7, NFR-C-1, NFR-L-6.
 - **`org.apache.hadoop.fs`:** FR-8, FR-9, FR-10, FR-11, FR-12, NFR-C-2, NFR-C-3, NFR-C-4, NFR-L-7, NFR-I-4.
 - **`org.apache.hadoop.ipc` (Client, Server, call queues, RetryCache):** FR-13, FR-14, FR-15, FR-16, FR-17,
-  NFR-C-5, NFR-C-6, NFR-C-7, NFR-L-3, NFR-I-1, NFR-I-4, NFR-S-3.
+  NFR-C-5, NFR-C-6, NFR-C-7, NFR-C-17, NFR-L-3, NFR-I-1, NFR-I-4, NFR-S-3.
 - **`org.apache.hadoop.security` (UGI, groups, SASL, authorize, tokens):** FR-18, FR-19, FR-20, FR-21, FR-39,
   NFR-C-8, NFR-C-9, NFR-C-16, NFR-S-1, NFR-S-2, NFR-S-3, NFR-S-4, NFR-S-7, NFR-S-8, NFR-S-9, NFR-S-10,
   NFR-S-12, NFR-L-2.

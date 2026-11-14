@@ -518,6 +518,20 @@ against the named class.
   iterates); close coordination via `AtomicBoolean shouldCloseConnection`
   (`compareAndSet` in `markClosed`) and `AtomicBoolean running`. `Call` completion
   (`Call.complete`) notifies the parked caller.
+- Request *sending* is a separate per-connection daemon thread: `Connection.run`
+  starts `rpcRequestThread` (a `RpcRequestSender`) before its read loop. Caller
+  threads serialize the request themselves and hand it to a `SynchronousQueue`
+  (`rpcRequestQueue`, 1 s `offer` timeout loop while
+  `!shouldCloseConnection.get()`); the sender blocks in
+  `rpcRequestQueue.poll(maxIdleTime)` and writes to the socket under
+  `synchronized (ipcStreams.out)`, exiting on `shouldCloseConnection` or
+  `InterruptedException`. **Known gap at trunk (HDFS-18036):** a per-connection
+  close (`markClosed`) wakes only the connection thread (`notifyAll`); the
+  sender is interrupted only by `Client.stop()`, so after an idle timeout, I/O
+  error or FATAL response it lingers in `poll` for up to
+  `ipc.client.connection.maxidletime` with its ~1 MB stack — under heavy
+  connection churn (e.g. a Router recycling pooled connections) these threads
+  accumulate until native OOM.
 - Asynchronous calls are bounded per `Client` by `ipc.client.asyncCalls.max`
   (`IPC_CLIENT_ASYNC_CALLS_MAX`, default 100) via `AtomicInteger asyncCallCounter`;
   exceeding it throws `AsyncCallLimitExceededException`.
