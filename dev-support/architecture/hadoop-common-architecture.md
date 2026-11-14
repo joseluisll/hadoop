@@ -576,6 +576,15 @@ against the named class.
   false; `hadoop.security.groups.cache.background.reload.threads`, default 3). With
   background refresh off, a slow group-mapping backend blocks the calling RPC
   handler thread.
+- ZK delegation-token store (`ZKDelegationTokenSecretManager`): the in-memory
+  mirrors `allKeys`/`currentTokens` are `ConcurrentHashMap`s; the authoritative
+  state is ZooKeeper and verify/renew/cancel fall back to ZK reads, so a stale
+  in-memory map degrades token-owner stats, not authentication. On trunk the
+  `startThreads()` thread loads each `CuratorCache` snapshot itself
+  (`loadFromZKCache`) while the cache listener applies later events on Curator's
+  single listener thread — two writers to the same maps with no ordering between
+  them, so a peer's cancel/renew during startup can be overwritten by an older
+  snapshot applied afterwards (HADOOP-19966).
 
 ### 11.5 io
 
@@ -725,6 +734,20 @@ against the named class.
 - KMS clients obtain/renew the `kms-dt` token over HTTP with
   `DelegationTokenAuthenticatedURL` (renewer and `doAsUser` passed explicitly —
   `KMSClientProvider.java` renew/cancel methods).
+- ZK backend (`ZKDelegationTokenSecretManager`, opt-in via
+  `DelegationTokenManager`'s `enable_zk_key`): persists delegation keys and
+  token identifiers under `<zk-dt-secret-manager.znode.working.path>/ZKDTSMRoot`
+  (`/ZKDTSMMasterKeyRoot`, `/ZKDTSMTokensRoot`, plus `SharedCount` sequence-number
+  counters; config prefix `zk-dt-secret-manager.*`), so all instances of the
+  service share one token state. Each instance mirrors the znodes into memory
+  (`allKeys`, `currentTokens`) through a `CuratorCache` per root with a cache
+  listener; verify/renew/cancel read the authoritative state from ZK. As of
+  c815ec8e1e9, `startThreads()` starts each cache and immediately streams its
+  content into the in-memory maps (`loadFromZKCache`) without waiting for the
+  cache's initial population, and the root container znodes are created with
+  Curator's default payload (the creating client's address) because
+  `createPersistentNode` passes no data — the startup race is tracked as
+  HADOOP-19966. (§11.4 records the concurrency side.)
 
 ### 12.5 Service-level authorization (RPC)
 

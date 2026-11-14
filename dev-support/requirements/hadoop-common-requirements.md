@@ -137,6 +137,12 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   `CompositeGroupsMapping`, netgroups via `JniBasedUnixGroupsNetgroupMapping` + `NetgroupCache`). (arch §5
   security, Groups)
 
+- **FR-39 — ZK-backed shared delegation-token store.** When the ZK backend is enabled,
+  `ZKDelegationTokenSecretManager` must persist delegation keys and token identifiers in ZooKeeper
+  (`<zk-dt-secret-manager.znode.working.path>/ZKDTSMRoot`) so all instances of the service share one token
+  state, mirror the znodes into `allKeys`/`currentTokens` through per-root `CuratorCache` listeners, and read
+  the authoritative state from ZK on verify/renew/cancel. (arch §12.4)
+
 ### 1.7 hadoop-common/io — Writable serialization (arch §5)
 
 - **FR-22 — Hand-written binary format and prefix comparison.** `Writable.write/ readFields` must use the
@@ -327,6 +333,12 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   NameNode block management) must provide their own locking. A PR must not weaken these assumptions. (arch
   §11.5)
 
+- **NFR-C-16 — ZK delegation-token startup load ordering.** `ZKDelegationTokenSecretManager.startThreads()`
+  must not return while the in-memory mirror is incomplete or unordered: the initial cache population must be
+  applied before the wait ends, later listener events and the initialized event must be applied in order on
+  the Curator listener thread, and no thread may apply an older snapshot of a token after a newer change from
+  a peer (cancel/renew during startup) has been applied. (arch §11.4, ZKDelegationTokenSecretManager)
+
 ### 2.2 Security (arch §12)
 
 - **NFR-S-1 — RPC authentication selection.** `hadoop.security.authentication` (default `simple`) must select
@@ -505,9 +517,9 @@ When a diff touches an area, check the listed requirements (and cite them in rev
 - **`org.apache.hadoop.fs`:** FR-8, FR-9, FR-10, FR-11, FR-12, NFR-C-2, NFR-C-3, NFR-C-4, NFR-L-7, NFR-I-4.
 - **`org.apache.hadoop.ipc` (Client, Server, call queues, RetryCache):** FR-13, FR-14, FR-15, FR-16, FR-17,
   NFR-C-5, NFR-C-6, NFR-C-7, NFR-L-3, NFR-I-1, NFR-I-4, NFR-S-3.
-- **`org.apache.hadoop.security` (UGI, groups, SASL, authorize, tokens):** FR-18, FR-19, FR-20, FR-21,
-  NFR-C-8, NFR-C-9, NFR-S-1, NFR-S-2, NFR-S-3, NFR-S-4, NFR-S-7, NFR-S-8, NFR-S-9, NFR-S-10, NFR-S-12,
-  NFR-L-2.
+- **`org.apache.hadoop.security` (UGI, groups, SASL, authorize, tokens):** FR-18, FR-19, FR-20, FR-21, FR-39,
+  NFR-C-8, NFR-C-9, NFR-C-16, NFR-S-1, NFR-S-2, NFR-S-3, NFR-S-4, NFR-S-7, NFR-S-8, NFR-S-9, NFR-S-10,
+  NFR-S-12, NFR-L-2.
 - **`org.apache.hadoop.io`:** FR-22, FR-23, FR-24, NFR-C-15.
 - **`org.apache.hadoop.metrics2`:** FR-25, NFR-C-11, NFR-L-5.
 - **`org.apache.hadoop.service` + launcher (`ServiceLauncher`, `ShutdownHookManager`, bin scripts,
