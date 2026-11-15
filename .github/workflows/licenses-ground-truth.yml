@@ -77,6 +77,11 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           name: archive-ground-truth
+          # upload-artifact strips the least-common ancestor of the
+          # upload path list — the `target/` prefix — so re-root the
+          # download to rebuild the layout the gates expect
+          # (target/generated-LICENSE-binary, target/third-party/, ...).
+          path: target
 
       - name: "Drift gate: committed manifest vs this run's generated manifest"
         run: |
