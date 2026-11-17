@@ -131,6 +131,77 @@ possibly a QJM quorum) and returns once the required number have synced. On
 restart, `FSImage` loads the latest fsimage and replays the subsequent edit
 segments through `FSEditLogLoader` to rebuild the tree before serving RPCs.
 
+
+#### FSNamesystem
+
+`FSNamesystem` is the state container behind every NameNode RPC. `NameNode`
+builds it via `FSNamesystem.loadFromDisk(conf)` and activates it with
+`startCommonServices(conf, haContext)`, which starts `BlockManager` services,
+`LeaseManager.startMonitor()`, the `NameNodeResourceMonitor` daemon
+(`nnrmthread`, active only per the HDFS-2914 comment in source) and
+`CacheManager.startMonitorThread()`.
+
+- Safemode/HA flags live directly on `FSNamesystem` (`manualSafeMode`,
+  `resourceLowSafeMode`, §2.3); mutation RPCs run
+  `checkOperation(OperationCategory)` → `checkNameNodeSafeMode()` →
+  permission check before the `FSDir*Op` call.
+- Audit: every op terminates in `logAuditEvent` through the configured
+  `AuditLogger`s (§11.1), emitted from the op layer after permission checks.
+
+#### FSDirectory and the INode tree
+
+- Lookup yields an `INodesInPath` (the INode array down the path); ops mutate
+  only through it, keeping quota, snapshot and last-block updates consistent.
+- `inodeMap` (`INodeMap`) is annotated "Synchronized by dirLock": the
+  id → INode mapping is only coherent while the namesystem lock is held
+  (§9.1).
+- `nameCache` (`NameCache<ByteArray>`) interns frequently used path
+  components; `markNameCacheInitialized()` is called once safemode population
+  completes.
+- Representative per-op helpers and their journal calls: `FSDirMkdirOp.mkdirs`,
+  `FSDirDeleteOp.deleteInternal` (returns a `BlocksMapUpdateInfo`),
+  `FSDirRenameOp.renameToInt`, and on the write path `FSDirWriteFileOp.startFile`
+  / `storeAllocatedBlock` / `persistBlocks` (the last journals the
+  under-construction block list). Append, truncate, concat, ACL, XAttr,
+  snapshot, EC, encryption-zone and storage-policy ops each have their own
+  `FSDir*Op` class.
+
+#### FSImage, NNStorage and the fsimage format
+
+- **Load.** `FSImage.loadFSImage` inspects storage dirs through `NNStorage`
+  and `FSImageTransactionalStorageInspector`, picks the newest fsimage and
+  the contiguous edit-segment chain, loads the image into `FSDirectory`,
+  then `FSEditLogLoader` replays the remaining ops while accumulating
+  `ContentCounts`.
+- **Save.** `FSImage.saveNamespace` runs under a `SaveNamespaceContext` and
+  serializes the tree with `FSImageFormatProtobuf`/`FSImageFormatPBINode`
+  into `fsimage_<txId>`, then promotes it over the old image and rolls the
+  edit log (`FSEditLog.startLogSegment` /
+  `startLogSegmentAndWriteHeaderTxn`).
+- **Retention.** `NNStorageRetentionManager` purges superseded
+  images/segments once a newer checkpoint is adopted.
+- **Resources.** `NameNodeResourceChecker` periodically evaluates storage
+  dirs (`NameNodeResourcePolicy.areResourcesAvailable`) and can force
+  resource-driven safemode.
+
+#### FSEditLog and journaling
+
+- `FSEditLog` holds a `JournalSet` aggregating `JournalManager`s
+  (`FileJournalManager` locally, `QuorumJournalManager` in HA) and a
+  private `State` enum driving its open/closed segment lifecycle.
+- `logEdit` appends an `FSEditLogOp` to each stream's `EditsDoubleBuffer`;
+  `logSync()` flushes via `EditLogOutputStream.flushAndSync(durable)` and is
+  single-flighted by the volatile `isSyncRunning` flag (other callers wait
+  on the sync monitor). `logSyncAll()` waits for all written txids, not just
+  the current one (used before checkpoint/roll; §11.2).
+- `FSEditLogAsync` (enabled by `dfs.namenode.edits.asynclogging`, default
+  true) moves appends/syncs onto a background thread bounded by
+  `dfs.namenode.edits.asynclogging.pending.queue.size` (4096).
+- Segment lifecycle: `startLogSegment(txid)` writes the header txn
+  (`startLogSegmentAndWriteHeaderTxn`); finalized segments carry
+  `edits_<start>_<end>` names (§12.5); failover recovery runs the
+  QJM segment-recovery path (§2.4).
+
 ### 2.2 Block management
 
 `org.apache.hadoop.hdfs.server.blockmanagement` — NameNode-side bookkeeping of
@@ -181,6 +252,64 @@ invalidated; when good replicas drop below policy, reconstruction is queued.
 `BlockManagerSafeMode` gates reconstruction until enough block reports have
 arrived after startup (`incrementSafeBlockCount`, `checkSafeMode`).
 
+
+#### BlocksMap and block state
+
+- `BlocksMap` is a `LightWeightGSet` keyed by block id; each
+  `BlockInfoContiguous` chains replica triplets and its `BlockCollection`
+  (the `INodeFile`); `BlockInfoStriped` adds per-cell storage indices for EC
+  groups.
+- While a file is under construction, `BlockUnderConstructionFeature`
+  carries the `ReplicaUnderConstruction[]` expected locations; pipeline
+  recovery updates them via `setExpectedLocations` (§2.8).
+- `LocatedBlockBuilder` assembles `LocatedBlock`/`LocatedBlocks` responses
+  (block tokens, storage IDs/types) for `getBlockLocations`/`addBlock`.
+
+#### DatanodeManager and HeartbeatManager
+
+- `DatanodeManager` owns `Host2NodesMap`, the per-node
+  `DatanodeDescriptor`s (each with its `DatanodeStorageInfo[]`), topology
+  resolution, the stale/dead-node windows (`staleInterval`), and
+  decommissioning (`DatanodeAdminManager` with
+  `DatanodeAdminDefaultMonitor` / `DatanodeAdminBackoffMonitor` running as
+  monitor threads). Host lists come from `HostFileManager`,
+  `CombinedHostFileManager` or `HostConfigManager`.
+- `HeartbeatManager` registers live nodes, computes `DatanodeStats`
+  (capacity/usage aggregation), and its inner `Monitor` daemon runs
+  `heartbeatCheck()` to expire silent nodes and trigger dead-node handling.
+- Slow-node telemetry (`SlowPeerTracker`, `SlowDiskTracker`) is aggregated
+  from DataNode reports and surfaced in the NN UI/JMX.
+
+#### Placement and reconstruction
+
+- Target selection goes through `BlockPlacementPolicy.chooseTarget` —
+  default `BlockPlacementPolicyDefault` (writer-local first, off-rack
+  remainder), with the available-space, rack-fault-tolerant, upgrade-domain
+  and node-group variants selectable via `BlockPlacementPolicies`.
+- The single `RedundancyMonitor` daemon (§9.3) calls `computeDatanodeWork()`,
+  which pops priority-queued entries from `LowRedundancyBlocks` and builds
+  `ReplicationWork` / `ErasureCodingWork` (`BlockReconstructionWork`),
+  delivered as heartbeat commands. `PendingReconstructionBlocks` times out
+  unacknowledged copies (`PendingReconstructionMonitor`);
+  `PendingRecoveryBlocks` tracks in-flight block recovery.
+- DataNode-side EC reconstruction runs in `ErasureCodingWorker` with
+  `StripedBlockReader`/`StripedBlockWriter` per target
+  (`StripedReconstructionInfo`).
+
+#### Invalidation, corruption and caching
+
+- Extra/corrupt/abandoned replicas become `InvalidateBlocks` entries keyed
+  per DataNode and flushed as `DNA_INVALIDATE` heartbeat commands;
+  `BlockToMarkCorrupt` turns a bad report into `CorruptReplicasMap` state,
+  `NumberReplicas` counts live replicas per state to drive the deficit
+  math, and over-replication is recorded in `ExcessRedundancyMap`.
+- `CacheManager` tracks cache directives/pools; `CacheReplicationMonitor`
+  (a daemon started by `CacheManager.startMonitorThread()`) reconciles
+  cached block sets and issues `DNA_CACHE`/`DNA_UNCACHE` commands.
+- `ProvidedStorageMap` (inside `DatanodeManager`) tracks provided-storage
+  replicas fed by the aliasmap (§2.9); `StorageTypeStats` aggregates
+  per-storage-type usage from reports.
+
 ### 2.3 Leases and safemode
 
 **Leases** (`LeaseManager` in `namenode`): every open-for-write file is owned
@@ -202,6 +331,34 @@ no low-disk storage dirs). Current trunk keeps startup-block accounting in
 (`isInSafeMode`, `isInStartupSafeMode`). Mutating RPCs fail with
 `SafeModeException` via `FSNamesystem.checkNameNodeSafeMode()` until
 `leaveSafeMode()`, triggered automatically or by `-safemode leave`.
+
+
+#### LeaseManager internals
+
+- `LeaseManager` maps client name → `Lease` (kept in a set ordered by
+  renewal time) and inode id → lease; each under-construction file points
+  back through `FileUnderConstructionFeature.clientName`.
+- The `Monitor` (`implements Runnable`, started by `FSNamesystem` via
+  `LeaseManager.startMonitor()`) scans for `expiredSoftLimit` /
+  `expiredHardLimit` leases; a hard-limit expiry (monotonic clock vs
+  `dfs.namenode.lease-hard-limit-sec`, settable via `setLeasePeriod`) makes
+  the inode eligible for `FSNamesystem.internalReleaseLease` — pipeline
+  recovery — even while the client is alive but stalled (§9.5). Closing or
+  recovering the file removes the lease (`removeLease`).
+
+#### Safemode accounting
+
+- `BlockManagerSafeMode` owns `blockTotal`/`blockSafe` counting and
+  `incrementSafeBlockCount()`; thresholds come from
+  `dfs.namenode.safemode.threshold-pct`,
+  `dfs.namenode.safemode.extension` and
+  `dfs.namenode.safemode.min.datanodes`.
+- `FSNamesystem` holds the `manualSafeMode` / `resourceLowSafeMode` flags;
+  `setSafeMode(SafeModeAction)` implements the admin contract
+  (`-safemode enter|leave|get`), and mutating RPCs fail with
+  `SafeModeException` via `checkNameNodeSafeMode()` until `leaveSafeMode()`.
+- `NameNodeResourceChecker` can force the resource flag (§2.1), keeping the
+  NameNode read-only even once all block reports have arrived.
 
 ### 2.4 HA: active/standby, ZKFC, QuorumJournalManager, JournalNode
 
@@ -243,6 +400,66 @@ heartbeats/commands to) → clients re-resolve via
 `org.apache.hadoop.hdfs.NameNodeProxies` failover proxy provider. The standby
 is normally warm because `EditLogTailer` kept it within a few transactions.
 
+
+#### NameNode HA state machine
+
+- `HAState` is the abstract state; `ActiveState` and `StandbyState` (also
+  used for the observer, §12.4) implement
+  `prepareToEnterState`/`prepareToExitState`/`enterState`/`exitState`.
+  `HAState.setStateInternal` calls `context.writeLock()` around the actual
+  exit/enter — HA transitions serialize against namespace mutations.
+- `HAContext` (implemented by `NameNode`) exposes the RPC servers and the
+  namesystem to the state; `checkOperation(OperationCategory)` rejects
+  writes on standby/observer with `StandbyException`.
+
+#### QuorumJournalManager (client)
+
+- `QuorumJournalManager` holds an `AsyncLoggerSet` of `IPCLoggerChannel`s
+  (one per JournalNode) and fans every edit out in parallel; a `QuorumCall`
+  aggregates results and throws `QuorumException` unless a majority acks
+  within the per-call timeout.
+- Stream/durability types mirror the local path (`QuorumOutputStream`,
+  `EditsDoubleBuffer`); segments are started and finalized via
+  `startLogSegment`/`finalizeLogSegment`.
+- Failover recovery: `recoverUnfinalizedSegments` drives the
+  prepare/accept-recovery RPCs (`QJournalProtocol.prepareRecovery`,
+  `acceptRecovery`) with `SegmentRecoveryComparator` deciding the winning
+  segment across journals (JN `paxos` dir, §12.5).
+
+#### JournalNode (server)
+
+- `JournalNodeRpcServer` implements `QJournalProtocol`; each journal-id gets
+  a `Journal` persisting to `JNStorage` (`dfs.journalnode.edits.dir`), whose
+  `current/` holds segment files and `paxos/` the segment-recovery state.
+- `Journal` accepts only epoch/current-txn-ordered writes
+  (`NewerTxnIdException` otherwise) and serves segment reads over
+  `GetJournalEditServlet` to standbys and checkpointers;
+  `JournaledEditsCache` caches recent edits for tailing reads.
+
+#### DFSZKFailoverController and fencing
+
+- `DFSZKFailoverController` (extends hadoop-common
+  `ZKFailoverController`) runs a `HealthMonitor` thread probing its local
+  NameNode and an `ActiveStandbyElector` session holding the ephemeral
+  active znode; election loss or health failure triggers fencing
+  (`dfs.ha.fencing.methods` plus the service-RPC ACL barrier) before the
+  peer may go active (§9.6).
+- `BootstrapStandby` initializes a new standby's storage from the active's
+  fsimage via `TransferFsImage.downloadImageToStorage`.
+
+#### Standby services: EditLogTailer and StandbyCheckpointer
+
+- `EditLogTailer` runs an `EditLogTailerThread` plus a single-thread
+  `rollEditsRpcExecutor` (bounded by `rollEditsTimeoutMs`) that asks the
+  active to roll edits so the standby can tail closed segments; it takes
+  `writeLockInterruptibly` for the transitionToActive contract (§9.6,
+  §9.7).
+- `StandbyCheckpointer` runs its `CheckpointerThread` and uploads
+  checkpoints on `TransferFsImageUpload-%d` daemon threads; thresholds come
+  from `CheckpointConf` (`dfs.namenode.checkpoint.period`,
+  `dfs.namenode.checkpoint.txns`), with the `CheckpointSignature` handshake
+  against the active (§2.6).
+
 ### 2.5 NameNode RPC and HTTP
 
 - `NameNodeRpcServer` implements `ClientProtocol`
@@ -259,6 +476,30 @@ is normally warm because `EditLogTailer` kept it within a few transactions.
   routers/proxies. Security and token selection go through
   `HDFSPolicyProvider` and the `NameNode` token secret managers.
 
+
+#### NameNodeRpcServer
+
+- Three RPC servers (client / service / lifeline; §9.2) expose the protocol
+  stack: client ops through
+  `ClientNamenodeProtocolServerSideTranslatorPB`, DataNode traffic through
+  `DatanodeProtocolServerSideTranslatorPB` (register/heartbeat/blockReport/
+  commands), checkpoint traffic via `NamenodeProtocol`, plus admin/HA
+  service protocols; the PB service definitions and translators live in
+  `protocolPB` (§12.2).
+- Per-call sequence (§9.2): `checkOperation` → `getPermissionChecker()` →
+  op under the lock mode → journal `logSync`/audit. This is the seam a new
+  RPC must respect.
+
+#### NameNodeHttpServer
+
+- Hosts the web UI, `FsckServlet` (delegating to `NamenodeFsck`'s read-only
+  path over the namesystem), `ImageServlet` (fsimage download/upload for
+  `TransferFsImage`), `StartupProgressServlet` and
+  `IsNameNodeActiveServlet` (used by routers/load balancers to locate the
+  active).
+- Security: SPNEGO/Kerberos via the web authentication handler and
+  `HDFSPolicyProvider` for RPC service ACLs (§10.1, §10.7).
+
 ### 2.6 SecondaryNameNode and checkpointing
 
 `SecondaryNameNode` (a separate role, *not* a hot standby): periodically
@@ -272,6 +513,34 @@ triggered by checkpoint interval/txn-count thresholds; `ha.EditLogTailer`
 keeps the standby's namespace current between checkpoints. A related legacy
 role is `BackupNode` (with `BackupImage`/`BackupJournalManager`), which
 streams edits and keeps a full in-memory replica.
+
+
+#### SecondaryNameNode checkpoint flow
+
+- The `SecondaryNameNode` process runs `doCheckpoint()` on its own daemon
+  (`checkpointThread`): obtain a `CheckpointSignature` from the active
+  (`NamenodeProtocol`), download fsimage + in-progress edits
+  (`TransferFsImage.downloadImageToStorage`), merge them in memory with
+  `FSImage`/`FSEditLogLoader`, upload the merged image
+  (`TransferFsImage.uploadImageFromStorage`), then let the active roll its
+  edit log and adopt the checkpoint.
+- `CheckpointConf` reads the interval/txn thresholds
+  (`dfs.namenode.checkpoint.period`, `dfs.namenode.checkpoint.txns`,
+  `dfs.namenode.checkpoint.check.period`).
+
+#### StandbyCheckpointer (HA)
+
+- In HA the same merge runs on the standby: `StandbyCheckpointer` performs
+  the checkpoint against its tailed namespace and uploads it via
+  `TransferFsImage` (upload threads named `TransferFsImageUpload-%d`),
+  then instructs the active to roll/adopt; it must not run while the
+  namespace is still under startup population.
+
+#### BackupNode
+
+- `BackupNode` (with `BackupImage`/`BackupJournalManager`) streams edits
+  over `JournalProtocol` and keeps a full in-memory replica; it can also
+  perform checkpoints for the active.
 
 ### 2.7 DataNode
 
@@ -327,6 +596,82 @@ are served by `BlockSender` streaming packet-size chunks with checksum
 verification. Dead volumes are reported via `Storage` error reporters and
 excluded by `FsVolumeList`.
 
+
+#### DataNode lifecycle
+
+- Boot: `SecureDataNodeStarter` (secure mode) or the `DataNode` main class
+  parses `StorageLocation`s, formats/upgrades them via `DataStorage`,
+  starts the HTTP and IPC servers (`initIpcServer`), the
+  `DataXceiverServer`(s), and `BlockPoolManager` services for each
+  configured namespace.
+- Shutdown (`DataNode.shutdown()`, offerService-thread only per §9.7(4)):
+  plugins stop first; then the xceiver servers are killed after sending OOB
+  to peers (`sendOOBToPeers`); then the periodic scanners and the
+  DataNode-side `DiskBalancer`, the HTTP server, the volume/
+  storage-location checkers and the pause monitor; finally the block-pool
+  services and the dataset are torn down.
+
+#### BPOfferService / BPServiceActor
+
+- Each `BPServiceActor` thread runs `connectToNNAndHandshake()` (including
+  `registerDatanode`) and then the `offerService()` loop:
+  `sendHeartbeat` → `processCommand(DatanodeCommand[])` — executed on the
+  actor's dedicated `CommandProcessingThread` inner class, which delegates
+  to `BPOfferService.processCommandFromActor` (replication, invalidation,
+  cache, `DNA_ERASURE_CODING_RECONSTRUCTION` commands).
+- Full block reports are lease-gated (`BlockReportLeaseManager` on the NN
+  side); `IncrementalBlockReportManager` batches received/deleted events
+  onto the same actor thread. `BPOfferService` tracks which NameNode is
+  active and routes heartbeats/lifelines accordingly; `BlockPoolManager`
+  owns the per-pool actor sets across namespace changes.
+
+#### DataXceiverServer, DataXceiver and BlockReceiver
+
+- `DataXceiverServer` accepts on the streaming port thread-per-peer
+  (§9.4); `DataXceiver` dispatches `OP_READ_BLOCK` → `BlockSender`
+  (packetised, checksummed stream) and `OP_WRITE_BLOCK` → `BlockReceiver`.
+- `BlockReceiver` verifies chunk checksums (`DataChecksum`), writes through
+  its `ReplicaInPipeline`, forwards downstream, and pairs with a
+  `PacketResponder` thread for acks/finalization (§9.4); pipeline recovery
+  must stop both.
+- `BlockRecoveryWorker` performs NN-directed `recoverBlock` via
+  `InterDatanodeProtocol` (`ReplicaUnderRecovery` handling).
+- The IPC port serves `ClientDatanodeProtocol` (`initIpcServer`):
+  short-circuit path info, block recovery and refresh ops.
+
+#### Dataset and on-disk layout (FsDatasetImpl)
+
+- `FsDatasetImpl` (built by `FsDatasetFactory`) manages an `FsVolumeList`
+  of `FsVolumeImpl` volumes; each volume holds one `BlockPoolSlice` per
+  block pool with the directory tree `current/finalized`, `current/rbw`,
+  `current/lazypersist`, plus pool-level `tmp` (`DataStorage`
+  `STORAGE_DIR_*` constants). Startup re-scans re-add replicas through a
+  `ForkJoinPool` (`addReplicaThreadPool`).
+- `ReplicaMap` (per volume/pool, guarded by the `DataNodeLockManager`
+  hierarchy, §9.4) maps `ExtendedBlock` → the replica-state classes listed
+  at depth-2 (`FinalizedReplica`, `ReplicaBeingWritten`,
+  `ReplicaWaitingToBeRecovered`, `ReplicaUnderRecovery`,
+  `ProvidedReplica`).
+- Capacity accounting uses `FSCachingGetSpaceUsed` per volume and
+  `dfs.datanode.du.reserved`; volume failures beyond
+  `dfs.datanode.failed.volumes.tolerated` fail the node; all I/O is
+  instrumented through `FileIoProvider`.
+- Helper services: `FsDatasetAsyncDiskService` (async deletes/moves),
+  `RamDiskReplicaTracker` + `RamDiskAsyncLazyPersistService` (lazy-persist
+  RAM-disk writes to disk), `FsDatasetCache`/`MappableBlock` (persistent
+  memory caching).
+
+#### Background scanners, cache and IPC
+
+- `BlockScanner` dispatches per-volume `VolumeScanner` threads (thread name
+  `VolumeScannerThread(<volume>)`) that verify checksums with throttling
+  and report corruption via `ReportBadBlockAction`; `DirectoryScanner`
+  reconciles the on-disk tree against `ReplicaMap` on the
+  `dfs.datanode.directoryscan.interval` schedule (§9.4).
+- `ShortCircuitRegistry` publishes shm slots for zero-copy client reads
+  (with the documented drop-the-lock step, §9.7(3));
+  `IncrementalBlockReportManager` coalesces received/deleted reports.
+
 ### 2.8 DataTransferProtocol and the write pipeline
 
 `org.apache.hadoop.hdfs.protocol.datatransfer.DataTransferProtocol` (in
@@ -363,11 +708,43 @@ client; `create` RPCs against `ClientProtocol`):
    calls `setupPipelineForAppendOrRecovery` → error propagation down the
    pipeline, removal of the dead node from `LocatedBlock`, and
    `triggerBlockReport`/pipeline recovery; the NN is told via
-   `updatePipeline` (`FSDirWriteFileOp.updatePipelineForReplica`) so the block's
+   `FSNamesystem.updatePipeline` (the `updatePipelineInternal` path) so the block's
    `ReplicaUnderConstruction` list matches the new pipeline.
 
 EC files use the same skeleton with `DFSStripedOutputStream` + `StripedDataStreamer`
 (one streamer per cell/stripe writer) and erasure-coded packets.
+
+
+#### Wire format
+
+- `DataTransferProtocol` ops are written by `Sender` and read by `Receiver`
+  on top of packet frames headed by `PacketHeader` (offset, seqno,
+  lastPacketInBlock, `Status`); payload chunks are checksummed with
+  `DataChecksum`. The op set is `OP_READ_BLOCK`, `OP_WRITE_BLOCK`,
+  `OP_TRANSFER_BLOCK`, `OP_BLOCK_CHECKSUM`, `OP_COPY_BLOCK`,
+  `OP_REPLACE_BLOCK` plus the ack frames.
+- SASL negotiation (§10.2) wraps the stream before any block bytes flow
+  when `dfs.data.transfer.protection` or block tokens require it.
+
+#### Client-side streaming threads
+
+- `DataStreamer extends Daemon` (thread name `DataStreamer for file <src>`)
+  drains `dataQueue` into the pipeline and parks sent packets on
+  `ackQueue`; a per-block `ResponseProcessor` daemon (`ResponseProcessor
+  for block <block>`) consumes downstream acks and moves packets out of
+  `ackQueue`; `waitForAckedSeqno` blocks the writer thread per packet.
+- Empty heartbeat packets keep the pipeline acking while the writer is
+  idle; block boundaries trigger `addBlock` for the next allocation.
+
+#### Pipeline recovery
+
+- On write/ack timeout `DataStreamer.setupPipelineForAppendOrRecovery`
+  locates the failing node (`errorIndex`), re-opens the pipeline with the
+  remaining nodes (`createBlockOutputStream`) and bumps the generation
+  stamp; the NameNode is updated via `FSNamesystem.updatePipeline` —
+  `updatePipelineInternal` re-stamps the last block and calls
+  `setExpectedLocations` on its `BlockUnderConstructionFeature`, then
+  journals via `FSDirWriteFileOp.persistBlocks`.
 
 ### 2.9 Other server subsystems
 
@@ -382,6 +759,36 @@ EC files use the same skeleton with `DFSStripedOutputStream` + `StripedDataStrea
 - **ViewFS/aliasmap** (`server.aliasmap`): in-memory/levelDB view of
   "provided" storage mappings used by `ProvidedStorageMap`/`ProvidedVolumeImpl`.
 
+#### Balancer
+
+- `Balancer` (with `Dispatcher`) computes utilization via the NameNode and
+  moves blocks DataNode-to-DataNode over `OP_COPY_BLOCK`/`OP_REPLACE_BLOCK`,
+  bandwidth-limited by `dfs.datanode.balance.bandwidthPerSec`; runs are
+  parameterized (threshold, threads, excluded nodes) through the CLI and
+  `BalancerMXBean`.
+
+#### Mover and StoragePolicySatisfier
+
+- `Mover` (`server.mover`) replays storage-policy mismatches as moves;
+  `StoragePolicySatisfier` (`server.sps`, with the external-SPS variant in
+  `server.namenode.sps` and shared pieces in `server.common.sps`) tracks
+  unsatisfied files (`ExternalSPSMXBean` for external mode) and issues
+  movement work on its own thread(s).
+
+#### DiskBalancer
+
+- `server.diskbalancer` holds the plan model and `DiskBalancerCLI` (in
+  `tools`); the DataNode-side `DiskBalancer` executes volume-to-volume
+  copies within one node from a resumable, throttled plan.
+
+#### Aliasmap (provided storage)
+
+- `server.aliasmap` provides `InMemoryAliasMap` (LevelDB-backed) served by
+  `InMemoryLevelDBAliasMapServer` over `InMemoryAliasMapProtocol`; the
+  NameNode's `ProvidedStorageMap` and the DataNode's `ProvidedReplica`
+  consume it to surface external (provided) block storage.
+
+
 ---
 
 ## 3. `hadoop-hdfs-client` — the client library
@@ -395,6 +802,16 @@ ops: `setStoragePolicy`/`getStoragePolicy`, EC ops, snapshot ops, recovery,
 `getAllStoragePolicies`, and the `HdfsDataInputStream`/`HdfsDataOutputStream`
 wrappers around `DFSInputStream`/`DFSOutputStream`.
 
+
+#### Lifecycle and stream wrappers
+
+- `DistributedFileSystem` creates its `DFSClient` lazily, exposes the
+  HDFS-specific ops (storage policy, EC, snapshots, encryption zones,
+  recovery, `getAllStoragePolicies`) and returns
+  `HdfsDataInputStream`/`HdfsDataOutputStream` wrappers that add HDFS
+  semantics — read statistics and `hflush`/`hsync` (`SyncFlag` variants) —
+  on top of the raw `DFSInputStream`/`DFSOutputStream`.
+
 ### 3.2 DFSClient
 
 `DFSClient` owns client identity, configuration (`DFSConfigKeys`), the RPC
@@ -406,6 +823,30 @@ shared caches: `PeerCache` (reusable sockets to DataNodes),
 implements `getLinkTarget`, token renewal, and `DFSInotifyEventInputStream`
 for edit-log event streaming.
 
+
+#### ClientContext and shared caches
+
+- `ClientContext` (keyed per user/config, obtained via `ClientContext.get`)
+  owns the process-shared objects `DfsClientConf` reads at construction:
+  `PeerCache` (reusable DataNode sockets), `KeyProviderCache`,
+  `DeadNodeDetector`, `DFSHedgedReadMetrics`, and the `shortcircuit`
+  plumbing (`DomainSocketFactory`, `ShortCircuitCache`, `ShortCircuitShm`).
+- These are shared across all `DFSClient` instances in one process; the
+  `ClientProtocol` proxy and open-file leases are per-`DFSClient`.
+
+#### RPC proxies, HA and lease renewal
+
+- `NameNodeProxiesClient` builds the `ClientProtocol` proxy, selecting the
+  failover/observer proxy provider from
+  `dfs.client.failover.proxy.provider.<ns>` (§12.4); delegation-token
+  renewal rides the same proxy (§10.4).
+- `client.impl.LeaseRenewer` renews all open leases of one user with a
+  single lazy-started daemon thread shared across `DFSClient`s; it renews
+  ahead of the soft limit and gives up on unrecoverable errors, letting
+  server-side `LeaseManager` expiry recover the file (§2.3).
+- `DFSInotifyEventInputStream` streams edit-log events to clients (the
+  inotify API surface).
+
 ### 3.3 Write path: DFSOutputStream and DataStreamer
 
 Described end-to-end in 2.8. Class roles: `DFSOutputStream` buffers client
@@ -415,6 +856,29 @@ tracks acks; append/recovery variants use
 `setupPipelineForAppendOrRecovery`. Striped writes use
 `DFSStripedOutputStream` with `StripedDataStreamer`s writing cells in
 parallel across the EC target list.
+
+
+#### DFSOutputStream packet path
+
+- Client writes accumulate into `DFSPacket`s (checksummed chunks via
+  `DataChecksum`); `flush`/`hflush` push the current packet and `hsync`
+  (with `SyncFlag` variants) additionally syncs the pipeline; the last
+  block stays under construction until `close` → `complete` (§2.8 step 7).
+
+#### DataStreamer threading
+
+- One `DataStreamer` daemon per open file: allocates blocks (`addBlock`),
+  opens the pipeline (`createBlockOutputStream`), streams packets, and
+  retires them when the per-block `ResponseProcessor` sees the final ack;
+  `waitForAckedSeqno` is the per-packet barrier; failures set `errorIndex`
+  and trigger pipeline recovery (§2.8).
+
+#### Striped (EC) writes
+
+- `DFSStripedOutputStream` fans cell-sized packets out through one
+  `StripedDataStreamer` per target (data + parity cells computed
+  client-side), reusing the same allocation/ack/recovery skeleton per
+  streamer.
 
 ### 3.4 Read path: DFSInputStream, short-circuit and hedged reads
 
@@ -436,6 +900,35 @@ parallel across the EC target list.
 - `readBlockLength` probes the block's real length (used for the last block
   under construction); `DeadNodeDetector` blacklists unreachable DataNodes
   proactively. Corruption on read triggers `reportBadBlocks`.
+
+#### Block locations and replica ordering
+
+- `DFSInputStream.openInfo()` caches `LocatedBlocks` (including
+  `lastLocatedBlock` and `currentLocatedBlock` for the under-construction
+  tail) and picks nodes via `chooseDataNode`, skipping dead/ignored nodes
+  (`DeadNodeDetector` entries) and re-sorting by topology after failures.
+
+#### Readers and short-circuit
+
+- `BlockReaderFactory` walks the `ReaderStrategy` implementations:
+  short-circuit local reads (`BlockReaderLocal`, or
+  `BlockReaderLocalLegacy` over
+  `ClientDatanodeProtocol.getBlockLocalPathInfo` paths) with shm-based
+  zero-copy via `ShortCircuitShm` (gated by
+  `dfs.client.read.shortcircuit` and `dfs.domain.socket.path`), remote
+  `RemoteBlockReader2` (`OP_READ_BLOCK` to the DataNode's `BlockSender`),
+  and `ExternalBlockReader` for pluggable out-of-band readers.
+
+#### Hedged reads and dead-node detection
+
+- Enabled by `dfs.client.hedged.read.threadpool.size` (> 0) and triggered
+  per read after `dfs.client.hedged.read.threshold.millis` (default 500):
+  `DFSInputStream` launches a second read against a different replica on
+  the `hedgedRead-<n>` pool threads and keeps the first result
+  (`DFSHedgedReadMetrics` counters).
+- `DeadNodeDetector` probes suspected DataNodes out-of-band and blacklists
+  them for future picks; corruption hit while reading triggers
+  `reportBadBlocks`.
 
 ### 3.5 ViewFS and HAR
 
@@ -460,15 +953,60 @@ connections to every subcluster), plus `RouterHttpServer` and
 `NamenodeHeartbeatService`/`NamenodeStatusReport` feed membership state;
 `MountTableRefresherService` propagates mount-table updates to RBF caches.
 
+
+#### Router services and lifecycle
+
+- `Router` is a `CompositeService` whose service list is built at startup:
+  `StateStoreService`, `RouterRpcServer`, `RouterAdminServer`,
+  `RouterHttpServer`, one `NamenodeHeartbeatService` per configured
+  namenode (emitting `NamenodeStatusReport`), `RouterHeartbeatService`,
+  `RouterMetrics` (`RouterRpcMonitor`), `RouterQuotaUpdateService`,
+  `RouterSafemodeService`, and `MountTableRefresherService` (with
+  `MountTableRefresherThread` workers pushing mount-table updates to other
+  routers). `DFSRouter` is the main class.
+- Endpoints: `dfs.federation.router.rpc-address` (default `0.0.0.0:8888`),
+  `dfs.federation.router.admin-address` (default `0.0.0.0:8111`),
+  `dfs.federation.router.http-address`.
+
+#### RouterRpcServer and connection management
+
+- `RouterRpcServer` implements the NameNode client protocol through
+  `RouterClientProtocol`; invocations are packaged as `RemoteMethod`s and
+  dispatched by `RouterRpcClient` over pooled connections (`ConnectionPool`,
+  `ConnectionManager`, `ConnectionContext`) to the target subcluster's
+  active NN; `RouterStateIdContext` carries observer-read state IDs and
+  `RouterPermissionChecker` mirrors the NN permission model.
+
 ### 4.2 StateStore
 
 `server.federation.store.StateStoreService` is the Router's pluggable record
 store (backends under `store.driver`: local file, ZooKeeper, SQL), exposing
 typed `RecordStore`s cached in memory by `StateStoreCache` and refreshed by
-`StateStoreCacheUpdateService` (`ConnectionMonitor` for driver health):
+`StateStoreCacheUpdateService` (`StateStoreConnectionMonitorService` for driver health):
 `MembershipStore` (subcluster/NameNode membership and capacity states),
 `MountTableStore` (the path → subcluster mapping), and nameservice/quota
 records. Records are protobuf under `store.records`.
+
+
+#### Drivers and record stores
+
+- `StateStoreDriver` implementations under `store.driver.impl`:
+  `StateStoreFileImpl` (filesystem based, `StateStoreFileBaseImpl`),
+  `StateStoreZooKeeperImpl`, `StateStoreMySQLImpl`, and
+  `StateStoreFileSystemImpl`; records are protobuf (serializer
+  `StateStoreSerializerPBImpl`) under `store.records` — `BaseRecord`,
+  `MembershipState`, `MountTable`, `RouterState`, `DisabledNameservice` —
+  exposed as typed `RecordStore`s (`MembershipStore`, `MountTableStore`,
+  `RouterStore` with `MembershipStoreImpl`/`MountTableStoreImpl`/
+  `RouterStoreImpl`).
+
+#### Caching and refresh
+
+- `StateStoreCache` (with `CachedRecordStore`) keeps every record store in
+  memory; the periodic `StateStoreCacheUpdateService` (a `PeriodicService`)
+  reloads records from the driver, and
+  `StateStoreConnectionMonitorService` watches driver health so RPCs fail
+  over when the backing store is unreachable.
 
 ### 4.3 Federation resolution and admin
 
@@ -488,6 +1026,29 @@ to the owning subcluster's active NameNode and relays the response — namespace
 data still lives in the subclusters, the Router is stateless per request
 except for the cached StateStore tables.
 
+#### Mount-table resolution
+
+- `MountTableResolver` (implements both `ActiveNamenodeResolver` and
+  `FileSubclusterResolver`) caches the mount table and resolves a request
+  path into a `PathLocation` of `RemoteLocation`s;
+  `MultipleDestinationMountTableResolver` adds fan-out (multi-destination)
+  mounts.
+
+#### Membership and RPC targeting
+
+- `MembershipNamenodeResolver` ranks known namenodes by
+  `FederationNamenodeServiceState` (ordering via
+  `NamenodePriorityComparator`) so each RPC lands on the best active NN;
+  heartbeat reports keep membership state/capacity current.
+
+#### Admin surfaces
+
+- `RouterAdminServer` backs `hdfs dfsrouteradmin` (mount table, quotas via
+  `RouterQuotaManager`/`Quota`, subcluster membership, safemode);
+  `RouterCacheAdmin`, `RouterFsck` and the quota-update/safemode services
+  complete the admin model.
+
+
 ---
 
 ## 5. `hadoop-hdfs-httpfs` — WebHDFS REST gateway
@@ -504,6 +1065,26 @@ round out request validation. It is a stateless HTTP → RPC gateway: the HTTP
 verbs map to NameNode and DataNode operations, with data PUT/GET streamed
 through the gateway process.
 
+#### Server bootstrap and filters
+
+- `HttpFSServerWebServer` loads `httpfs-default.xml`/`httpfs-site.xml`
+  (bind host `httpfs.http.hostname`, port `httpfs.http.port` — default
+  14000 — TLS via `httpfs.ssl.enabled`) and boots the Jersey app
+  (`HttpFSServerWebApp`) hosting `HttpFSServer` under `/webhdfs/v1`.
+- The servlet filter chain is `HttpFSAuthenticationFilter` (Kerberos/SPNEGO
+  plus delegation tokens), `CheckUploadContentTypeFilter` (upload content
+  checks) and `HttpFSExceptionProvider` (REST error mapping).
+
+#### FSOperations and proxy-user execution
+
+- `FSOperations` maps REST parameters (declared by
+  `HttpFSParametersProvider`) onto `FileSystem` calls executed inside a
+  proxy-user `UserGroupInformation.doAs`, so authorization happens as the
+  end user (the gateway principal must be a Hadoop proxy user, §10.7);
+  data PUT/GET streams through the gateway. The client side
+  (`HttpFSFileSystem`, with `HttpFSUtils`) speaks the same wire contract.
+
+
 ---
 
 ## 6. `hadoop-hdfs-nfs` — NFS gateway
@@ -515,6 +1096,33 @@ maintains per-user `DFSClient`/`DFSInputStream` instances, `WriteManager` +
 the write path, committing them on `COMMIT`/`fsync`. It is a single-node NFS
 server in front of HDFS — a POSIX convenience layer, not a cluster role —
 and requires the gateway host to be configured as a proxy user.
+
+#### NFSv3 RPC program and services
+
+- `PrivilegedNfsGatewayStarter` (secure mode) boots the ONC-RPC services:
+  `RpcProgramNfs3` (NFSv3) and `RpcProgramMountd` (`Mountd`) registered
+  with the portmap; ports are `nfs.server.port` (default 2049) and
+  `nfs.mountd.port` (default 4242), bound to the configured bind host
+  (default `0.0.0.0`).
+
+#### Write staging and commit
+
+- `RpcProgramNfs3` WRITE/COMMIT calls land in `WriteManager`, which stages
+  per-open-file state in an `OpenFileCtx` (bounded by `nfs.max.open.files`,
+  default 256); each write becomes a `WriteCtx` entry that is
+  reordered/flushed into HDFS through the client write path, and `COMMIT`
+  forces the stable write. Unwritable/stale contexts are dumped to
+  `nfs.dump.dir` (default `/tmp/.hdfs-nfs`) by a `Dumper` daemon, and idle
+  streams are cut off after the stream timeout (default 10 minutes).
+
+#### Per-user DFS clients
+
+- `DFSClientCache` keeps per-user `DFSClient`s and their
+  `DFSInputStream`s in Guava caches (bounded sizes, eviction/removal
+  listeners, a JVM shutdown hook), so NFS identity maps onto HDFS
+  `UserGroupInformation` identity; a shared user implies shared leases and
+  clients.
+
 
 ---
 
@@ -691,6 +1299,10 @@ given. Each subsection states the concurrency contract a PR must preserve.
 - Helper thread pools: `FsDatasetAsyncDiskService` (deletes/moves),
   `RamDiskAsyncLazyPersistService` (lazy persist writes), `FsDatasetCache`
   with `MappableBlock` loaders.
+- **`BPServiceActor.CommandProcessingThread`**: each actor runs one inner
+  `CommandProcessingThread` (`extends Thread`) that executes the NN commands
+  returned by heartbeats (`processCommand` →
+  `BPOfferService.processCommandFromActor`), off the heartbeat loop.
 
 ### 9.5 LeaseManager timeouts
 
@@ -698,7 +1310,7 @@ given. Each subsection states the concurrency contract a PR must preserve.
   and `hardLimit` (from `dfs.namenode.lease-hard-limit-sec`,
   `DFS_LEASE_HARDLIMIT_KEY`), settable via `setLeasePeriod`.
 - Its `Monitor` daemon (`shouldRunMonitor` flag) scans for expired leases;
-  a lease whose `lastUpdate` exceeds `hardLimit` (`hardLimitExpired`) makes
+  a lease whose `lastUpdate` exceeds `hardLimit` (`expiredHardLimit()`) makes
   the inode eligible for `internalReleaseLease` → block recovery, even if the
   client is still alive but stalled. A PR must not assume lease expiry only
   happens after client death.
@@ -743,6 +1355,21 @@ These are load-bearing invariants a refactor must keep:
    threads.
 5. `FSEditLogAsync` lock-ordering comments (separate mutex, monitor
    re-offer) as above.
+
+#### Client library concurrency
+
+- One `DataStreamer` daemon per open file and one `ResponseProcessor`
+  daemon per in-flight block; the writer thread (`DFSOutputStream`)
+  blocks only in `waitForAckedSeqno` — no pipeline I/O on the caller's
+  thread beyond packet filling.
+- `client.impl.LeaseRenewer` runs one shared renewal daemon per user
+  across all `DFSClient`s (lazy-started, sleeping between renewals).
+- `PeerCache` hands out pooled DataNode sockets to readers/streamers;
+  `ShortCircuitCache` manages shm slots and mmap'd replica
+  descriptors; `DeadNodeDetector` probes asynchronously on its own
+  threads.
+- Hedged reads run on the bounded `hedgedRead-<n>` pool
+  (`dfs.client.hedged.read.threadpool.size`, default 0 = disabled).
 
 ---
 
@@ -903,7 +1530,9 @@ Global HTTP policy is `dfs.http.policy` (`DFS_HTTP_POLICY_KEY`, e.g.
   existing `logEdit`/`logSync` pairing; skipping `logSync` after an
   exception is only allowed for `StandbyException` (see `recoverLease`).
 - `FSEditLogAsync` optionally decouples append from sync (background sync
-  thread), preserving the same on-disk ordering.
+  thread), preserving the same on-disk ordering; enabled by
+  `dfs.namenode.edits.asynclogging` (default true), bounded by
+  `dfs.namenode.edits.asynclogging.pending.queue.size`.
 
 ### 11.3 DataNode logs and metrics
 
@@ -953,6 +1582,12 @@ relies on DataNode INFO/WARN logs and metrics.
 | DataNode IPC | `dfs.datanode.ipc.address` | (see `DFS_DATANODE_IPC_ADDRESS_KEY`) |
 | JournalNode RPC | `dfs.journalnode.rpc-address` | 8485 (`DFS_JOURNALNODE_RPC_PORT_DEFAULT`) |
 | JournalNode HTTP | `dfs.journalnode.http-address` | 8480 (`DFS_JOURNALNODE_HTTP_PORT_DEFAULT`) |
+| Router RPC | `dfs.federation.router.rpc-address` | 8888 (`DFS_ROUTER_RPC_PORT_DEFAULT`) |
+| Router admin | `dfs.federation.router.admin-address` | 8111 (`DFS_ROUTER_ADMIN_PORT_DEFAULT`) |
+| Router HTTP | `dfs.federation.router.http-address` | (see `RBFConfigKeys`) |
+| HttpFS HTTP | `httpfs.http.port` | 14000 (`httpfs-default.xml`) |
+| NFS server | `nfs.server.port` | 2049 (`DFS_NFS_SERVER_PORT_DEFAULT`) |
+| NFS mountd | `nfs.mountd.port` | 4242 (`DFS_NFS_MOUNTD_PORT_DEFAULT`) |
 
 IPC framing for all RPC endpoints is hadoop-common's RPC (protobuf, IPC
 version headers); the *streaming* port (DataNode data transfer) speaks
@@ -1080,7 +1715,7 @@ class is the enforcement point.
 9. **[Leases]** A hard-expired lease (`> dfs.namenode.lease-hard-limit-sec`)
    must trigger lease recovery (`internalReleaseLease`) even if the client
    later resumes; the client must then observe recovery rather than
-   continue writing. *Ref: `LeaseManager.Monitor`, `LeaseManager.hardLimitExpired`.*
+   continue writing. *Ref: `LeaseManager.Monitor`, `LeaseManager.expiredHardLimit`.*
 10. **[HA]** Failover must fence the old active before the standby
     transitions to active, and the tailer must use
     `writeLockInterruptibly` to avoid the documented
