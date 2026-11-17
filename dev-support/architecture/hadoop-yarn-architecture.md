@@ -197,6 +197,38 @@ from source `addService(...)` calls): `AdminService`, `ClientRMService`,
 `RMAppManager`, `DelegationTokenRenewer`, `RMSecretManagerService`, and an
 `AsyncDispatcher`. Shared state lives in `RMContextImpl` (`RMContext`).
 
+#### RMActiveServices and the active service graph
+
+`RMActiveServices` (an inner `CompositeService` of `ResourceManager`,
+declared in `ResourceManager.java`) is the graph of services that exist only
+while the RM is ACTIVE; `createAndInitActiveServices()` builds it and
+rebuilds it on each active/standby transition. `serviceInit` wires, in
+registration order (verified in source): `RMSecretManagerService`,
+`ContainerAllocationExpirer`, the two `AMLivelinessMonitor`s (expiry and
+finishing), `RMAppLifetimeMonitor` (`rmapp/monitor/`, application-lifetime
+expiry driven by `yarn.resourcemanager.application-timeouts.monitor.interval-ms`),
+the node label manager (`RMNodeLabelsManager`), the node attributes manager,
+`AllocationTagsManager`, `PlacementConstraintManagerService`,
+`ResourceProfilesManager`, `MultiNodeSortingManager`, the optional
+`RMDelegatedNodeLabelsUpdater`, the state store
+(`RMStateStoreFactory.getStore(conf)` when `yarn.resourcemanager.recovery.enabled`
+is true, otherwise `NullRMStateStore`), `NodesListManager`, the scheduler, the
+`EventDispatcher` for `SchedulerEventType`, the app/attempt/node event
+dispatchers, `NMLivelinessMonitor`, `ResourceTrackerService`, a
+`JvmPauseMonitor`, the optional reservation system, `ApplicationMasterService`,
+`RMAppManager`, `ClientRMService`, `ApplicationMasterLauncher`, and — in
+secure mode only — `DelegationTokenRenewer`; conditionally also a federation
+state-store service, `ProxyCAManager`, and the services-API
+`SystemServiceManager`.
+
+`RMActiveServices.serviceStart()` starts the state store first and runs
+recovery (`checkVersion()`, `loadState()`, `recover(state)`) before the
+children start, incrementing the epoch for work-preserving recovery; a
+single-thread `ScheduledThreadPoolExecutor` daemon
+("`EventQueueSizeMetricThread`") samples both the RM dispatcher and the
+scheduler `EventDispatcher` every second and publishes
+`rmEventQueueSize`/`schedulerEventQueueSize` gauges to `ClusterMetrics`.
+
 ### 7.1 Dispatcher / event bus
 
 `org.apache.hadoop.yarn.event.AsyncDispatcher` (from hadoop-yarn-common) is
@@ -207,6 +239,30 @@ state-machine transition, processed serially. A fatal handler
 (`RMCriticalThreadUncaughtExceptionHandler`, `RMFatalEvent`) transitions the
 RM to standby/shutdown on internal corruption.
 
+#### AsyncDispatcher mechanics and RM registration topology
+
+The RM dispatcher thread is named "AsyncDispatcher event handler" by default
+(`AsyncDispatcher` constructor; `setDispatcherName()` renames both the thread
+and the queue-depth log line). `RMActiveServices` registers on the RM bus:
+`SchedulerEventType` → an `EventDispatcher` (`schedulerDispatcher`, which
+itself runs a second dedicated dispatch thread), `RMAppEventType` →
+`ApplicationEventDispatcher`, `RMAppAttemptEventType` →
+`ApplicationAttemptEventDispatcher`, `RMNodeEventType` → `NodeEventDispatcher`
+(`static final` inner classes of `ResourceManager`); sub-services register
+`RMContainerEventType`, `AMLauncherEventType`, `RMAppManagerEventType` and
+`RMFatalEvent` handlers on the same bus. The `EventQueueSizeMetricThread`
+described above reads queue depth through `AsyncDispatcher.getEventQueueSize()`.
+
+#### RMFatalEvent path
+
+`RMCriticalThreadUncaughtExceptionHandler` converts an uncaught exception on
+a critical thread (dispatcher, `AsyncScheduleThread`s) into an
+`RMFatalEvent`; `RMFatalEventDispatcher` (inner class of `ResourceManager`)
+handles it by failing over or shutting down. `RMFatalEventType` covers
+`STATE_STORE_FENCED`, `STATE_STORE_OP_FAILED`, `EMBEDDED_ELECTOR_FAILED`,
+`TRANSITION_TO_ACTIVE_FAILED` and `CRITICAL_THREAD_CRASH` — state-store and
+elector failures surface here rather than as silent errors.
+
 ### 7.2 ApplicationsManager / RMAppManager
 
 `RMAppManager` handles client submissions arriving at `ClientRMService`
@@ -216,6 +272,49 @@ It also enforces max-app-completion limits and fires `RMAppManagerEvent`s for
 completed-app cleanup. `ClientRMService` is the user-facing RPC surface;
 `AdminService` the operator surface (refresh queues/nodes, transition to
 standby).
+
+#### RMAppManager internals
+
+`RMAppManager` implements `EventHandler<RMAppManagerEvent>`. Its state
+containers are the completed-app bookkeeping: `maxCompletedAppsInMemory` and
+`maxCompletedAppsInStateStore` (the state-store cap is clamped to the
+in-memory cap at init) plus a `LinkedList<ApplicationId> completedApps` and
+its `completedAppsInStateStore` counter; on every finished app,
+`checkAppNumCompletedLimit()` trims the oldest applications from memory and
+asks the state store to remove the excess. `submitApplication` validates the
+`ApplicationSubmissionContext`, checks the submit queue ACL, has
+`RMStateStore` persist the new application and posts `RMAppEventType.START`;
+failures audit through `RMAuditLogger`.
+
+#### ClientRMService and AdminService
+
+`ClientRMService` binds the `ApplicationClientProtocol` server from
+`yarn.resourcemanager.address` in `serviceStart()`; submit/kill/move calls
+are audited with `RMAuditLogger` (success and failure paths) and reservation
+calls are delegated to the scheduler's reservation system.
+`AdminService` (`CompositeService`) binds `RMAdminProtocol` from
+`yarn.resourcemanager.admin.address`; every operation (`refreshQueues`,
+`refreshNodes`, `refreshNodesResources`,
+`refreshSuperUserGroupsConfiguration`, `transitionToActive`/
+`transitionToStandby`, ...) passes `checkAcls(method)`/`checkAccess(method)`
+against `yarn.admin.acl` before executing. The embedded elector services
+(`ActiveStandbyElectorBasedElectorService`, `CuratorBasedElectorService`) and
+the HA fencing path hang off it; elector failures reach the RM as
+`RMFatalEvent`s.
+
+#### ApplicationMasterService and the AMS processing chain
+
+`ApplicationMasterService` (`AbstractService`) owns the
+`ApplicationMasterProtocol` listener bound from
+`yarn.resourcemanager.scheduler.address`. `allocate()` runs on RPC handler
+threads and forwards to an `AMSProcessingChain` built around
+`DefaultAMSProcessor` and extended with any processors listed in
+`yarn.resourcemanager.application-master-service.processors` (e.g.
+`VolumeAMSProcessor`, which also installs a `VolumeManager` in the RM
+context). With opportunistic scheduling enabled, the service instance is
+`OpportunisticContainerAllocatorAMService`, which additionally receives
+`SchedulerEventType` node additions/updates/removals through its own
+`EventDispatcher` registered on the RM bus.
 
 ### 7.3 RMApp / RMAppAttempt state machines
 
@@ -233,6 +332,45 @@ standby).
   fail based on `maxAppAttempts` (default 2) and the AM failure validity
   window; a `RMAppAttemptFailedEvent` may spawn a new attempt (new
   `ApplicationAttemptId`) or move the app to `FAILED`.
+
+#### RMAppImpl internals
+
+The state container is the `StateMachineFactory`-generated `stateMachine`;
+thread safety comes from a `ReentrantReadWriteLock` (`readLock`/`writeLock`
+fields): `handle()` takes the write lock around `doTransition`, report
+construction takes the read lock. `RMAppImpl` composes `RMAppLogAggregation`
+(log-aggregation coordination across attempts) and carries the
+`ApplicationSubmissionContext` plus attempt bookkeeping; the `NEW_SAVING`
+transition persists the submission context through `RMStateStore` before
+processing `RMAppEventType.APP_NEW_SAVED`.
+
+#### RMAppAttemptImpl internals
+
+Same idiom — generated `stateMachine` guarded by a
+`ReentrantReadWriteLock` — with fields `eventHandler` (the RM dispatcher's
+handler) and `scheduler` (the `YarnScheduler`) so transitions can post
+`SchedulerEvent`s (`AppAttemptAddedSchedulerEvent`,
+`AppAttemptRemovedSchedulerEvent`) and launch the AM by posting
+`AMLauncherEvent(AMLauncherEventType.LAUNCH)` to the RM bus, absorbing
+`Allocation` results in return. The attempt holds the AM
+`ContainerLaunchContext` and master-token containers; a granted AM container
+is persisted via `ALLOCATED_SAVING` before `ApplicationMasterLauncher` is
+asked to launch it, and the whole attempt is written to `RMStateStore`
+(`STORE_APP_ATTEMPT`) at the saving transitions.
+
+#### RMStateStore interaction
+
+`RMStateStore` is itself an `AbstractService` with its **own** dispatcher
+(`RMStateStoreEventType` transitions: `STORE_APP`, `UPDATE_APP`,
+`STORE_APP_ATTEMPT`, `UPDATE_APP_ATTEMPT`, `REMOVE_APP`,
+`REMOVE_APP_ATTEMPT`, `STORE_MASTERKEY`, `STORE_DELEGATION_TOKEN`,
+`UPDATE_AMRM_TOKEN`, `STORE_RESERVATION`, `STORE_PROXY_CA_CERT`, `FENCED`,
+...), so state-store writes execute off the RM main thread and completion
+events (`RMStateStoreAppEvent`, `RMStateStoreAppAttemptEvent`, ...) are
+posted back to the RM dispatcher. Implementations selected via
+`yarn.resourcemanager.store.class` (`RMStateStoreFactory`):
+`ZKRMStateStore`, `FileSystemRMStateStore`, `LeveldbRMStateStore`,
+`MemoryRMStateStore` (tests), `NullRMStateStore` (recovery disabled).
 
 ### 7.4 Scheduler hierarchy
 
@@ -259,6 +397,42 @@ standby).
   `DefaultAMSProcessor` and the optional
   `OpportunisticContainerAllocatorAMService` for opportunistic containers).
 
+#### AbstractYarnScheduler shared state
+
+`AbstractYarnScheduler` keeps `ClusterNodeTracker<N>` (the node list and
+per-node `SchedulerNode` lookup) and per-application `SchedulerApplication`
+maps; cluster-wide mutations that must be atomic with each other are guarded
+by its own `ReentrantReadWriteLock` (`readLock`/`writeLock` fields with
+documented write-lock usages), while allocation input arrives only as
+`SchedulerEvent`s. Per-app state (`AppSchedulingInfo`) maps
+`SchedulerRequestKey`s to `AppPlacementAllocator`s
+(e.g. `SingleConstraintAppPlacementAllocator`). Multi-node placement commits
+go through `scheduler/common/ResourceCommitRequest` and `tryCommit`.
+
+#### CapacityScheduler internals
+
+Queue tree: `CSQueue` → `ParentQueue`/`AbstractParentQueue` and
+`LeafQueue`/`AbstractLeafQueue`; per-app `FiCaSchedulerApp` and per-node
+`FiCaSchedulerNode` live under `scheduler/common/fica/`. Under async
+scheduling, `AsyncSchedulingConfiguration` (inner class) spawns
+`.maximum-threads` `AsyncScheduleThread`s (default 1) that loop `schedule()`
+every `.scheduling-interval-ms` (default 5) under a
+`.maximum-pending-backlogs` cap (default 100), with commit decisions applied
+by the separate `ResourceCommitterService` thread — proposals and commits
+run on different threads. Key rolling of other token types happens in the
+security managers (section 7.7).
+
+#### FairScheduler internals
+
+`FairScheduler` composes `AllocationFileLoaderService` (`allocsLoader`,
+which loads/reloads the allocations XML), `FSContext`, `QueueManager` (the
+`FSQueue`/`FSLeafQueue`/`FSParentQueue` tree) and
+`FSSchedulerNode`/`FSAppAttempt`. A dedicated `FSPreemptionThread` (extends
+`Thread`) computes starved apps (`FSStarvedApps`) and issues preemption; it
+is started in `serviceStart()` with an uncaught-exception handler
+installed, and `serviceStop()` interrupts and `join(THREAD_JOIN_TIMEOUT_MS)`s
+it so thread death is neither silent nor allowed to outlive the daemon.
+
 ### 7.5 Resource tracker
 
 `ResourceTrackerService` implements the `ResourceTracker` protocol: NMs
@@ -269,10 +443,32 @@ LOST transitions; container status deltas are forwarded to the scheduler and
 `RMContainerImpl` (`rmcontainer`, states `NEW, RESERVED, ALLOCATED, ACQUIRED,
 RUNNING, COMPLETED, EXPIRED, RELEASED, KILLED`).
 
+#### ResourceTrackerService request handling
+
+`registerNodeManager` validates the registration (secret-manager state,
+node labels/attributes), builds the `RMNodeImpl` and posts
+`RMNodeStartedEvent`; `nodeHeartbeat` converts the incoming `NodeStatus`
+into an `RMNodeStatusEvent`, updates `DecommissioningNodesWatcher` for
+graceful-decommission progress, and returns a `NodeHeartbeatResponse`
+carrying containers to launch/clean/signal and the next heartbeat interval.
+All handling runs on `ResourceTracker` RPC handler threads — `RMNodeImpl`
+mutation happens only via events on the RM dispatcher.
+
+#### RMNodeImpl and RMContainerImpl state containers
+
+`RMNodeImpl` guards its state with a `ReentrantReadWriteLock`
+(`readLock`/`writeLock`) and buffers node updates in a
+`ConcurrentLinkedQueue<UpdatedContainerInfo> nodeUpdateQueue` drained by
+`StatusUpdateWhenHealthyTransition` per heartbeat; `DeactivateNodeTransition`
+handles DECOMMISSION/LOST/UNHEALTHY deactivation. `RMContainerImpl` is the
+per-container RM-side mirror (`readLock`/`writeLock` plus its
+`stateMachine`); container state changes that affect scheduling are
+forwarded as `RMContainerEvent`s and `SchedulerEvent`s.
+
 ### 7.6 Liveliness monitors and expiry
 
-- `AMLivelinessMonitor` (`server-common` `AbstractLivelinessMonitor`) —
-  expiry threads that fire `RMAppAttemptEventType.AM_EXPIRED` when an AM
+- `AMLivelinessMonitor` (`hadoop-yarn-common` `AbstractLivelinessMonitor`) —
+  expiry threads that fire `RMAppAttemptEventType.EXPIRE` when an AM
   misses heartbeats; `AMFinishingMonitor` bounds the finishing state.
 - `ContainerAllocationExpirer` — enforces the window between container
   allocation and the NM's launch acknowledgement; expired containers are
@@ -280,6 +476,36 @@ RUNNING, COMPLETED, EXPIRED, RELEASED, KILLED`).
   leaked allocations.
 - `NMLivelinessMonitor` — node heartbeats; expiry posts `RMNodeEvent`
   DECOMMISSION/LOST handling through `NodesListManager`.
+
+#### AbstractLivelinessMonitor mechanics
+
+Each monitor instance runs a single `PingChecker` thread (named
+"Ping Checker for <service-name>", started in `serviceStart()`, interrupted
+on stop). The tracked map is a plain `HashMap` guarded by `synchronized`
+`register`/`receivedPing`/`unregister`/`resetTimer` methods; the checker
+scans every `monitorInterval` (default `expireInterval/3`) and invokes the
+subclass `expire()` for timed-out keys. The expiry callbacks post events and
+never mutate state directly: `AMLivelinessMonitor` →
+`RMAppAttemptEventType.EXPIRE` (interval
+`yarn.resourcemanager.am.liveness-monitor.expiry-interval-ms`, default 15
+min), `NMLivelinessMonitor` → `RMNodeEventType.EXPIRE` (interval
+`yarn.resourcemanager.nm.liveness-monitor.expiry-interval-ms`, default 10
+min), `ContainerAllocationExpirer` → `ContainerExpiredSchedulerEvent` on the
+scheduler dispatcher (interval
+`yarn.resourcemanager.rm.container-allocation.expiry-interval-ms`, default
+10 min).
+
+#### ApplicationMasterLauncher threading
+
+`ApplicationMasterLauncher` holds a `BlockingQueue<Runnable> masterEvents`
+drained by a `LauncherThread`; each `AMLauncherEvent` becomes an
+`AMLauncher` `Runnable` submitted to `launcherPool`, a fixed
+`ThreadPoolExecutor` of `yarn.resourcemanager.amlauncher.thread-count`
+(default 50) threads named "ApplicationMasterLauncher #%d".
+`AMLauncher.run()` calls `launch()` (builds the AM `ContainerLaunchContext`,
+adds the AMRMToken, calls the target NM over `ContainerManagementProtocol`
+via `NMProxy` with `yarn.resourcemanager.nodemanager-connect-retries`
+applied) or `cleanup()` (on kill/fail). `serviceStop()` shuts the pool down.
 
 ### 7.7 Security and delegation tokens
 
@@ -289,6 +515,32 @@ with `DelegationTokenRenewer` renewing tokens on behalf of submitted apps),
 `RMContainerTokenSecretManager`, `ClientToAMTokenSecretManagerInRM`, and queue
 ACL managers (`QueueACLsManager`, `CapacityQueueACLsManager`,
 `FairQueueACLsManager`).
+
+#### RMSecretManagerService and key rolling
+
+`RMSecretManagerService` (a `CompositeService`) constructs and owns
+`RMContainerTokenSecretManager`, `NMTokenSecretManagerInRM`,
+`AMRMTokenSecretManager` and `ClientToAMTokenSecretManagerInRM`.
+`AMRMTokenSecretManager` runs a `java.util.Timer` with two `TimerTask`s —
+`MasterKeyRoller` (rolls the current AMRM master key every
+`yarn.resourcemanager.am-rm-tokens.master-key-rolling-interval-secs`,
+default 86400) and `NextKeyActivator` — both mutating key state under the
+manager's `readWriteLock` write lock while token validation reads under the
+read lock. `RMContainerTokenSecretManager` and `NMTokenSecretManagerInRM`
+roll their keys the same way (`...container-tokens.master-key-rolling-interval-secs`
+and the NM-token equivalent); the current master keys ride every NM
+heartbeat.
+
+#### DelegationTokenRenewer threading
+
+`DelegationTokenRenewer` is added to the active services only when
+`UserGroupInformation.isSecurityEnabled()`. Its executor
+(`createNewThreadPoolService`) is a `ThreadPoolExecutor` sized from
+`yarn.resourcemanager.delegation-token-renewer.thread-count` (default 50);
+renewal work is submitted asynchronously via `DelegationTokenRenewerEvent`s
+(with a `DelegationTokenRenewerPoolTracker` accounting in-flight work), and
+a `DelegationTokenCancelThread` cancels expired tokens on its own thread.
+Renewals therefore run on pool threads, never on the RM dispatcher.
 
 ## 8. NodeManager
 
@@ -310,6 +562,24 @@ check output from `NodeHealthChecker` (disk `DirectoryCollection` health,
 health scripts). Losing the heartbeat loop (RM unreachable) triggers
 shutdown-or-keep-running per `NodeManagerEvent`.
 
+#### StatusUpdaterRunnable internals
+
+The single "Node Status Updater" thread builds each `NodeStatus` from the
+NM context (container statuses, `NodeHealthChecker` health report, node
+labels/attributes handlers, `getRegisteringCollectors()` for ATS v2, the
+current container-token and NM-token master keys and `tokenSequenceNo`),
+optionally attaches `LogAggregationReport`s, and calls
+`resourceTracker.nodeHeartbeat`. From the `NodeHeartbeatResponse` it applies
+`getNextHeartBeatInterval()` (adaptive sleep), `updateMasterKeys()` (rolling
+NM-token keys with `tokenSequenceNo` checks), `handleShutdownOrResyncCommand()`
+(a REBOOT forces re-registration), removal of acked cleaned containers, and —
+via events on the NM dispatcher — `CMgrCompletedContainersEvent`,
+`CMgrCompletedAppsEvent` (with keep-alive tracking of apps to be cleaned),
+`CMgrUpdateContainersEvent` and `CMgrSignalContainersEvent`; system
+credentials for apps are pushed through
+`context.getContainerManager().handleCredentialUpdate()`. Registration
+failures retry inside `registerWithRM()` with backoff.
+
 ### 8.2 ContainerManagerImpl and container state machine
 
 `containermanager/ContainerManagerImpl` implements `ContainerManagementProtocol`.
@@ -325,6 +595,19 @@ DONE, PAUSING, PAUSED, RESUMING`. Events include `ContainerInitEvent`,
 `ContainerExitEvent`, `ContainerKillEvent`, `ContainerReInitEvent`,
 `ContainerPauseEvent` (pause/resume support for opportunistic upgrade flows).
 
+#### ContainerImpl state machine and locking
+
+`ContainerImpl` guards its state with a `ReentrantReadWriteLock`
+(`readLock`/`writeLock` fields); transitions run on the NM dispatcher thread
+that delivers `ContainerEvent`s. A `StartContainersRequest` is validated
+(`NMTokenSecretManagerInNM` + container tokens, application ACLs, audited
+via `NMAuditLogger`) before a `ContainerInitEvent` per container is posted;
+localization moves the container to `SCHEDULED`, where
+`ContainersLauncher` gets its launch task. Kill/reinitialize/pause/resume
+arrive as `ContainerKillEvent`/`ContainerReInitEvent`/
+`ContainerPauseEvent`/`ContainerResumeEvent` (also from `CMgr*` handling),
+and exit statuses as `ContainerExitEvent`.
+
 ### 8.3 Localization service
 
 `containermanager/localizer/ResourceLocalizationService` runs the download
@@ -335,6 +618,22 @@ DOWNLOADING → LOCALIZED / FAILED) driven by `LocalizerResourceRequestEvent`s;
 shared cache (`localizer/sharedcache`), respecting `LocalDirsHandlerService`
 and `LocalCacheDirectoryManager` disk bookkeeping. `PublicLocalizer` handles
 public visibility resources in parallel.
+
+#### ResourceLocalizationService internals
+
+A `CompositeService` holding per-app/per-public `LocalResourcesTrackerImpl`
+trackers; each tracked `LocalizedResource` is itself a small state machine
+(`INIT → DOWNLOADING → LOCALIZED/FAILED`). Public resources are downloaded
+by the `PublicLocalizer` inner `Thread` handing work to the fixed
+"PublicLocalizer #%d" pool (`createLocalizerExecutor`, size
+`yarn.nodemanager.localizer.fetch.thread-count`); private resources run one
+`LocalizerRunner` `Thread` per localizer id (user/application context),
+spawning `ContainerLocalizer` downloaders. A single-thread
+`HadoopScheduledThreadPoolExecutor` (`cacheCleanup`) schedules `CacheCleanup`
+at `yarn.nodemanager.localizer.cache.cleanup.interval-ms` and deletion is
+delegated to `DeletionService`; disk accounting per local directory is done
+by `LocalCacheDirectoryManager`, and shared-cache fetches are delegated to
+the `localizer/sharedcache` classes.
 
 ### 8.4 Launcher and executors
 
@@ -347,6 +646,28 @@ base, `DefaultContainerExecutor` (shell-based), `LinuxContainerExecutor`
 (delegates to the setuid `container-executor` binary; supports Docker and
 Java-based runtimes via `linux/` runtime classes, e.g. DockerLinuxContainer
 runtime selection).
+
+#### ContainersLauncher internals
+
+`ContainersLauncher` is the `ContainersLauncherEventType` handler: each event
+becomes a `ContainerLaunch`, `ContainerRelaunch`, `RecoveredContainerLaunch`,
+`RecoverPausedContainerLaunch` or `ContainerCleanup` task submitted to the
+`containerLauncher` cached thread pool; `serviceStop()` calls
+`shutdownNow()`. `ContainerLaunch` materializes the launch script,
+environment and tokens and invokes the configured `ContainerExecutor`
+(`yarn.nodemanager.container-executor.class`); exit statuses come back as
+`ContainerExitEvent`s and relaunches follow `ContainerRetryPolicy`/
+`SlidingWindowRetryPolicy`.
+
+#### Container execution plumbing
+
+`DefaultContainerExecutor` (top-level `nodemanager/` package) runs shell
+processes as the NM user; `LinuxContainerExecutor` funnels every privileged
+operation through `PrivilegedOperationExecutor` and the setuid
+container-executor binary (section 18.5), and selects the per-container
+runtime (`DefaultLinuxContainerRuntime`, `DockerLinuxContainerRuntime`,
+`RuncContainerRuntime`, `JavaSandboxLinuxContainerRuntime` via
+`DelegatingLinuxContainerRuntime`) from `YARN_CONTAINER_RUNTIME_TYPE`.
 
 ### 8.5 Monitoring, aux services, log aggregation
 
@@ -362,6 +683,44 @@ runtime selection).
   (`LogAggregationService` + per-app `AppLogAggregatorImpl` uploading container
   logs to HDFS as TFile); `logaggregation/tracker/NMLogAggregationStatusTracker`
   reports aggregation status to the RM for the UI.
+
+#### ContainersMonitorImpl threads
+
+Three dedicated threads: `MonitoringThread` polls each running container's
+process tree every `yarn.nodemanager.container-monitor.interval-ms`
+(defaulting to `yarn.nodemanager.resource-monitor.interval-ms`) through the
+configured `ResourceCalculatorPlugin`, kills containers that breach their
+memory/virtual-memory limits (`ContainerExitEvent` with failure
+diagnostics) and feeds `ContainerMetrics`; `LogMonitorThread` runs at
+`yarn.nodemanager.container-log-monitor.interval-ms` and enforces the
+`.dir-size-limit-bytes`/total-size limits; and, when cGroups
+elastic-memory control is enabled, `CGroupElasticMemoryController` listens
+for OOM events.
+
+#### AuxServices lifecycle
+
+`AuxServices` keeps its `serviceMap`/`serviceRecordMap`/`serviceMetaData` as
+`Collections.synchronizedMap` instances and makes `serviceInit`/`serviceStart`
+/`serviceStop` and manifest-driven replacement
+(`maybeReadManifestFile`/`loadServices`/`maybeRemoveAuxService`)
+`synchronized`, so aux-service reload is atomic with event handling.
+`AuxServicesEvent`s (`APPLICATION_INIT`, `APPLICATION_STOP`,
+`CONTAINER_INIT`, `CONTAINER_STOP`) are delivered to the registered
+`AuxiliaryService` instances so they can create/clean per-app state (shuffle
+data, ATS collector state, AMRMProxy proxies).
+
+#### Log handling internals
+
+`LogAggregationService` keeps a
+`ConcurrentMap<ApplicationId, AppLogAggregator> appLogAggregators` and a
+fixed `ExecutorService threadPool` of `getAggregatorThreadPoolSize(conf)`
+threads; `serviceStop()` shuts the pool down and waits for in-flight
+aggregators before finishing. `AppLogAggregatorImpl` runs as one pool task
+per finished application and uploads logs through the
+`LogAggregationFileController` SPI (section 19.2).
+`NonAggregatingLogHandler` instead schedules delayed local log deletion on
+its own `ScheduledThreadPoolExecutor`; `NMLogAggregationStatusTracker`
+carries per-app aggregation status into the next heartbeat.
 
 ## 9. Application lifecycle end-to-end
 
@@ -400,7 +759,8 @@ The full loop across modules (all steps verified against the classes above):
 
 **Failure handling:**
 
-- *AM dies*: `AMLivelinessMonitor` expires the attempt (`AM_EXPIRED`) →
+- *AM dies*: `AMLivelinessMonitor` expires the attempt
+  (`RMAppAttemptEventType.EXPIRE`) →
   `RMAppAttemptImpl.FAILED`; `RMAppImpl` retries with a new attempt until
   `maxAppAttempts`; AM container restart reuses saved
   `ContainerLaunchContext` from the state store.
@@ -415,6 +775,50 @@ The full loop across modules (all steps verified against the classes above):
   work-preserving restart, reacquires containers from NMs
   (`RMContainerRecoverEvent`).
 
+#### Submit path: client to RMAppManager
+
+`YarnClientImpl` gets a `NewApplication` (`getNewApplication` — the RM
+reserves an `ApplicationId`), fills the `ApplicationSubmissionContext`, and
+`submitApplication` reaches `ClientRMService.submitApplication` (ACL +
+`RMAuditLogger`), then `RMAppManager.submitApplication` (validation, state
+store persist, `RMAppEventType.START`). Submission is asynchronous from the
+client's point of view: the call returns after acceptance, and the client
+follows progress by polling `ApplicationReport`.
+
+#### Attempt allocation and AM launch
+
+`RMAppAttemptImpl` posts the AM-resource request into the scheduler
+(`SCHEDULED`); when the grant arrives, `AMContainerAllocatedTransition`
+persists the attempt (`ALLOCATED_SAVING`) and posts
+`AMLauncherEvent(AMLauncherEventType.LAUNCH)`. `ApplicationMasterLauncher`
+queues it, an `AMLauncher` task in the launcher pool calls the target NM's
+`ContainerManagementProtocol` (`startContainers`), and the AM's
+`registerApplicationMaster` on `ApplicationMasterService` moves the attempt
+to `RUNNING`; from then on `allocate()` heartbeats drive both progress and
+liveness (`ApplicationMasterService` calls
+`AMLivelinessMonitor.receivedPing` on every AM call).
+
+#### AM runtime loop: AMRMClientAsync and NMClientAsync
+
+User AMs are wired through `AMRMClientAsyncImpl` — a single
+`HeartbeatThread` calls `AMRMClientImpl.allocate()` at the configured
+interval and hands results to the `AbstractCallbackHandler` (containers
+allocated/completed, shutdown, scheduler resync/reboot commands) on the
+heartbeat thread. `NMClientAsyncImpl` dispatches start/stop/query events on
+its dedicated event-dispatcher thread and runs the container operations on a
+`ThreadPoolExecutor` over `NMClientImpl`, which manages the per-node
+`NMTokenCache`; container start failures surface through the callback
+handler so the AM can retry or finish.
+
+#### Finish and cleanup
+
+`finishApplicationMaster` (`FinalApplicationStatus`) puts the attempt through
+`FINAL_SAVING` (state-store write) → `FINISHING` → `FINISHED`; the app
+follows with `FINAL_SAVING`/`FINISHING`/`FINISHED`, `AMLauncherEventType`
+CLEANUP events kill any surviving AM container, logs are aggregated on the
+NM side, and `RMAppManager` trims the finished app from memory/state store
+per its completion limits.
+
 ## 10. ApplicationHistoryService
 
 Module `hadoop-yarn-server-applicationhistoryservice` (ATS v1).
@@ -428,6 +832,21 @@ the `ApplicationHistoryProtocol` (historically through the
 `AMApplicationMasterService` path). **Behaviour:** a write-through store lets
 `ApplicationReport` survive RM state-store eviction; the AHS web UI serves
 finished-app reports and logs.
+
+#### ApplicationHistoryServer composition and store threading
+
+`ApplicationHistoryServer` (`CompositeService`) registers, in order: a
+secret-manager service, the `TimelineDataManager`, `ApplicationHistoryClientService`
+(the `ApplicationHistoryProtocol` RPC service), the
+`ApplicationHistoryManagerImpl`-style history manager service itself, and a
+`JvmPauseMonitor`. The store SPI is `ApplicationHistoryStore` with
+`FileSystemApplicationHistoryStore` (HDFS; writes go through per-writer
+`synchronized` `HistoryFileWriter` streams keyed by `HistoryDataKey`),
+`MemoryApplicationHistoryStore` (tests) and `NullApplicationHistoryStore`;
+`ApplicationHistoryManagerOnTimelineStore` adapts the same reader/writer
+interfaces onto a TimelineService v2 store. History writes are performed
+inside `ApplicationHistoryManagerImpl` on the calling (RPC) thread — there
+is no internal event bus in ATS v1.
 
 ## 11. TimelineService v2
 
@@ -461,6 +880,34 @@ them through the writer SPI to HBase or document store; readers serve REST
 queries. The RM is wired as a `TimelineWriter` consumer for app-level
 lifecycle data (`RMApplicationHistoryWriter` under `resourcemanager/ahs`).
 
+#### Collector internals and flush path
+
+`TimelineCollector` (`CompositeService`) buffers entities per collector and
+flushes them on a `ThreadPoolExecutor(1, 1, 3, SECONDS)` with a
+`DiscardOldestPolicy`; each flush runs `flushBufferedTimelineEntities()`
+under `synchronized (writer)` and retries on failure sleeping
+`writeRetryInterval` (section 17.5). `TimelineCollectorManager` owns the
+per-app collector lifecycle and exposes `TimelineCollectorWebService`
+(REST). On the NM side, `NodeTimelineCollectorManager` (started through the
+`PerNodeTimelineCollectorsAuxService` auxiliary service) hosts ephemeral
+collectors for AMs it localizes; on the RM side,
+`RMTimelineCollectorManager` (`resourcemanager/timelineservice/`) hosts
+single-node collectors and `RMApplicationHistoryWriter` converts
+app/attempt/container lifecycle into timeline entities.
+
+#### Reader and storage SPIs
+
+`TimelineReaderServer` hosts the reader REST web services
+(`TimelineReaderWebServices`) on top of `TimelineReaderManager` over the
+`TimelineReader` SPI; storage is selected via `YarnConfiguration`
+(`TimelineWriter`/`TimelineReader` classes: `HBaseTimelineWriterImpl`/
+`HBaseTimelineReaderImpl` for HBase,
+`DocumentStoreTimelineWriterImpl`/`DocumentStoreTimelineReaderImpl` for the
+document store, `NoOpTimelineWriterImpl`/`NoOpTimelineReaderImpl` defaults),
+`TimelineSchemaCreator` bootstraps HBase tables, `OfflineAggregationWriter`
+handles flow-activity aggregation and `TimelineStorageMonitor` checks store
+liveness.
+
 ## 12. Router and GlobalPolicyGenerator (federation)
 
 Federation lets multiple RMs (sub-clusters) appear as one cluster. The
@@ -488,6 +935,40 @@ daemons:
   policy weights and hygiene; it issues RM admin calls rather than moving
   running containers.
 
+#### Router internals
+
+`Router` (`CompositeService`) adds `RouterClientRMService` (the
+`ApplicationClientProtocol` proxy on `yarn.router.clientrm.address`) and
+starts the router web app. `RouterClientRMService` keeps a per-user
+`Map<String, RequestInterceptorChainWrapper> userPipelineMap` (an
+LRU-bounded `Collections.synchronizedMap` cache) of
+`ClientRequestInterceptor` pipelines built from the configured
+`FederationClientInterceptor` class; each call resolves the sub-cluster
+through the federation state store, forwards over the RM protocol and
+audits through `RouterAuditLogger`/`RouterMetrics`. The `cleaner/` package
+runs `SubClusterCleaner` (a `Runnable` that marks sub-clusters whose
+heartbeat exceeds `ROUTER_SUBCLUSTER_EXPIRATION_TIME` as LOST);
+`security/` and `webapp/` cover SPNEGO login and the federation UI.
+
+#### GlobalPolicyGenerator internals
+
+`GlobalPolicyGenerator` (`CompositeService`) builds its `GPGContextImpl`
+(state-store facade via `FederationStateStoreFacade`, `GPGPolicyFacade`,
+`FederationRegistryClient` for YARN-registry registration) and one
+`ScheduledThreadPoolExecutor` of
+`yarn.federation.gpg.scheduled.executor.threads` (default 10) from which
+`serviceStart()` schedules three `Runnable`s at fixed rates:
+`SubClusterCleaner` (`yarn.federation.gpg.subcluster.cleaner.interval-ms`),
+the configured `ApplicationCleaner` (`yarn.federation.gpg.application.cleaner.class`,
+default `DefaultApplicationCleaner`, at
+`yarn.federation.gpg.application.cleaner.interval-ms`) and
+`PolicyGenerator` (`yarn.federation.gpg.policy.generator.interval`, default
+1 h), whose `GlobalPolicy` implementations
+(`LoadBasedGlobalPolicy`, `UniformWeightedLocalityGlobalPolicy`,
+`NoOpGlobalPolicy`) re-weight sub-cluster queue capacities through the
+`GPGPolicyFacade`. `doSecureLogin()` performs the Kerberos login; metrics
+run under `DefaultMetricsSystem` with `JvmMetrics.initSingleton("GPG", null)`.
+
 ## 13. WebAppProxy
 
 Module `hadoop-yarn-server-web-proxy`. `WebAppProxyServer` runs
@@ -501,6 +982,19 @@ support under `amfilter/`). **Behaviour:** if the AM restarts and changes
 address, the proxy re-resolves and redirects; if the app is finished, it
 falls back to AHS/timeline log URLs.
 
+#### WebAppProxyServlet request path
+
+`WebAppProxyServlet.doGet` extracts the application id from the
+`ProxyUriUtils`-style URL, fetches the current app report through the
+servlet-context-configured `AppReportFetcher` (`DefaultAppReportFetcher`
+against the RM or `FedAppReportFetcher` through the Router), enforces
+`ApplicationAccessType.VIEW_APP` before proxying, and follows redirects
+when the AM moves. In secure deployments the servlet pulls the
+servlet-context `ProxyCA` (`WebAppProxy.PROXY_CA` attribute) to sign
+AM-provided certificates; when the app is finished it falls back to the
+aggregated log URLs. `WebAppProxy`/`WebAppProxyServer` own the `HttpServer2`
+proxy server, the `AppReportFetcher` instance and the `ProxyCA`.
+
 ## 14. SharedCacheManager
 
 Module `hadoop-yarn-server-sharedcachemanager`. Implements
@@ -510,6 +1004,21 @@ side). `ClientProtocolService`, `SharedCacheCleaner` (LRU-style eviction per
 `LocalCacheCleaner` on the NM side) and checksum-based store integrity.
 **Behaviour:** reduces localization bandwidth by deduplicating commonly used
 resources (e.g. jars).
+
+#### SharedCacheManager service composition and cleaners
+
+`SharedCacheManager` (`CompositeService`) registers, in order: the
+`SCMStore` service (the checksum-addressed metadata store SPI —
+`InMemorySCMStore` by default under `store/`), `CleanerService` (a
+`CompositeService` that starts the `AppChecker`/`RemoteAppChecker`
+app-alive check as a dependent service and runs its `CleanerTask` on a
+2-thread `ScheduledExecutorService` at the configured period in minutes),
+`SharedCacheUploaderService` (the `SCMUploaderProtocol` surface for NMs
+uploading resources), `ClientProtocolService` (the `ClientSCMProtocol`
+surface for clients) and `SCMAdminProtocolService` (admin). On the NM side,
+localization hits the shared cache through `localizer/sharedcache` and
+eviction of local shared-cache files is done by `LocalCacheCleaner`
+(section 8.3).
 
 ## 15. hadoop-yarn-registry, hadoop-yarn-csi, and the applications modules
 
@@ -667,12 +1176,15 @@ types observed in source):
 
 All expiry monitors extend `org.apache.hadoop.yarn.util.AbstractLivelinessMonitor`
 (hadoop-yarn-common — not server-common in this checkout): each instance runs
-its **own checker thread** that scans a `ConcurrentHashMap` of tracked keys and
-invokes the registered `expireAt` callback, which posts an expiry event on the
-dispatcher (`AMLivelinessMonitor` → `RMAppAttemptEventType.AM_EXPIRED`,
-`NMLivelinessMonitor` → node events, `AMFinishingMonitor`,
-`ContainerAllocationExpirer` → `RMContainerEventType.EXPIRED`). Monitors must
-never act on state machine state directly, only via events.
+its **own checker thread** ("Ping Checker for <name>") that scans a plain
+`HashMap` guarded by `synchronized register/receivedPing/unregister` every
+`monitorInterval` (default `expireInterval/3`) and invokes the subclass
+`expire()` callback, which posts an expiry event on the dispatcher
+(`AMLivelinessMonitor` → `RMAppAttemptEventType.EXPIRE`,
+`NMLivelinessMonitor` → `RMNodeEventType.EXPIRE`,
+`ContainerAllocationExpirer` → `ContainerExpiredSchedulerEvent` on the
+scheduler dispatcher). Monitors must never act on state machine state
+directly, only via events.
 
 ### 17.4 NodeManager concurrency
 
@@ -759,7 +1271,9 @@ Secret managers and their jobs (all verified to exist):
 - `ClientToAMTokenSecretManagerInRM` — tokens for client→AM calls.
 - `RMDelegationTokenSecretManager` — client delegation tokens;
   `DelegationTokenRenewer` renews submitted apps' tokens on their behalf for
-  the application lifetime (per-app renewer pool).
+  the application lifetime (per-app renewer pool; instantiated only in
+  secure mode by `RMActiveServices`, pool sized by
+  `yarn.resourcemanager.delegation-token-renewer.thread-count`).
 - NM side: `ContainerManagerImpl` validates `NMToken` + container token on
   every `StartContainersRequest`/`StopContainersRequest`/`GetContainerStatusesRequest`
   before any container work happens.
@@ -996,6 +1510,16 @@ Wire format: all four core protocols are protobuf-based (section 3/4); the
   aux-services.
 - `yarn.timeline-service.*` — enable, address, principal/keytab, collector
   reader/writer store class names.
+- Depth-3 additions from the internal-structure sections:
+  `yarn.resourcemanager.amlauncher.thread-count`,
+  `yarn.resourcemanager.delegation-token-renewer.thread-count`,
+  `yarn.resourcemanager.am-rm-tokens.master-key-rolling-interval-secs`,
+  `yarn.resourcemanager.store.class`,
+  `yarn.resourcemanager.application-master-service.processors`,
+  `yarn.nodemanager.container-monitor.interval-ms`,
+  `yarn.nodemanager.localizer.cache.cleanup.interval-ms`,
+  the `yarn.federation.gpg.*` family (scheduled executor threads,
+  subcluster/application cleaner intervals, policy generator interval).
 - Every key above is declared with its default in `YarnConfiguration`
   (hadoop-yarn-api), which is the single source of truth for config-name
   compatibility checks in PR review.

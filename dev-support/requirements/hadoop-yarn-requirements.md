@@ -129,6 +129,67 @@ cover explicitly.
   On RM restart, the `RMStateStore` implementations must replay applications/attempts
   (`RMAppRecoverEvent`) and, with work-preserving restart, reacquire containers from NMs
   (`RMContainerRecoverEvent`) (arch §9, `recovery/RMStateStore`).
+- **FR-59 — Active-service graph and recovery ordering.**
+  `ResourceManager.createAndInitActiveServices()` must build the full
+  `RMActiveServices` graph and rebuild it on every active/standby transition;
+  `RMActiveServices.serviceStart()` must start the state store
+  (`RMStateStoreFactory.getStore(conf)`, `NullRMStateStore` when
+  `yarn.resourcemanager.recovery.enabled` is false) and run recovery
+  (`checkVersion()`, `loadState()`, `recover(state)`) before the remaining
+  active services start (arch §7, `RMActiveServices`).
+- **FR-60 — Dispatcher registration topology.**
+  On the RM bus, `SchedulerEventType` must be handled by a dedicated
+  `EventDispatcher` running its own dispatch thread,
+  `RMAppEventType`/`RMAppAttemptEventType`/`RMNodeEventType` by the
+  `ApplicationEventDispatcher`/`ApplicationAttemptEventDispatcher`/
+  `NodeEventDispatcher` inner classes, and `RMContainerEventType`,
+  `AMLauncherEventType`, `RMAppManagerEventType` and `RMFatalEvent` by
+  handlers registered on the same bus (arch §7.1, `EventDispatcher`,
+  `ResourceManager`).
+- **FR-61 — RMFatalEvent coverage.**
+  `RMFatalEventDispatcher` must handle `RMFatalEvent`s whose
+  `RMFatalEventType` covers `STATE_STORE_FENCED`, `STATE_STORE_OP_FAILED`,
+  `EMBEDDED_ELECTOR_FAILED`, `TRANSITION_TO_ACTIVE_FAILED` and
+  `CRITICAL_THREAD_CRASH` by failing over or shutting down — state-store and
+  elector failures must surface here, not as silent errors (arch §7.1,
+  `RMFatalEventDispatcher`).
+- **FR-62 — Completed-app bookkeeping.**
+  `RMAppManager` must keep `maxCompletedAppsInMemory` and
+  `maxCompletedAppsInStateStore` (the state-store cap clamped to the
+  in-memory cap at init) and trim the oldest applications via
+  `checkAppNumCompletedLimit()` on every finished app, asking the state store
+  to remove the excess (arch §7.2, `RMAppManager`).
+- **FR-63 — Admin ACL gate and elector path.**
+  Every `AdminService` operation (`refreshQueues`, `refreshNodes`,
+  `refreshNodesResources`, `refreshSuperUserGroupsConfiguration`,
+  `transitionToActive`/`transitionToStandby`, …) must pass
+  `checkAcls(method)`/`checkAccess(method)` against `yarn.admin.acl` before
+  executing, and elector failures (`ActiveStandbyElectorBasedElectorService`,
+  `CuratorBasedElectorService`) must reach the RM as `RMFatalEvent`s (arch
+  §7.2, `AdminService`).
+- **FR-64 — AMS processing chain.**
+  `ApplicationMasterService.allocate()` must forward through the
+  `AMSProcessingChain` built around `DefaultAMSProcessor`, extended with any
+  processors listed in
+  `yarn.resourcemanager.application-master-service.processors` (e.g.
+  `VolumeAMSProcessor`, which installs a `VolumeManager` in the RM context);
+  with opportunistic scheduling enabled the chain instance must be
+  `OpportunisticContainerAllocatorAMService` (arch §7.2,
+  `AMSProcessingChain`).
+- **FR-65 — Persist before launch.**
+  A granted AM container must be persisted via the `ALLOCATED_SAVING`
+  transition before `ApplicationMasterLauncher` is asked to launch it, and
+  attempt transitions must post `SchedulerEvent`s
+  (`AppAttemptAddedSchedulerEvent`/`AppAttemptRemovedSchedulerEvent`) and
+  `AMLauncherEvent(AMLauncherEventType.LAUNCH)` to the RM bus (arch §7.3,
+  `RMAppAttemptImpl`).
+- **FR-66 — State-store pluggability.**
+  `RMStateStore` implementations must remain selectable via
+  `yarn.resourcemanager.store.class` (`ZKRMStateStore`,
+  `FileSystemRMStateStore`, `LeveldbRMStateStore`, `MemoryRMStateStore`,
+  `NullRMStateStore`) behind the `RMStateStoreEventType` transition set
+  (`STORE_APP`, `STORE_APP_ATTEMPT`, `STORE_MASTERKEY`,
+  `STORE_DELEGATION_TOKEN`, `FENCED`, …) (arch §7.3, `RMStateStore`).
 
 ### 1.3 ResourceManager — scheduler behaviour
 
@@ -155,6 +216,12 @@ cover explicitly.
 - **FR-22 — Preemption contract.**
   Preemption must be implemented against the `PreemptableResourceScheduler` contract; a scheduler PR
   must not preempt outside that interface (arch §7.4, `PreemptableResourceScheduler`).
+- **FR-67 — Scheduler shared-state structure.**
+  `AbstractYarnScheduler` must keep node lookup in `ClusterNodeTracker` and
+  per-application `SchedulerApplication` maps, with per-app `AppSchedulingInfo`
+  mapping `SchedulerRequestKey`s to `AppPlacementAllocator`s; allocation input
+  must arrive only as `SchedulerEvent`s (arch §7.4, `AbstractYarnScheduler`,
+  `AppSchedulingInfo`).
 
 ### 1.4 ResourceManager — node tracking and liveness
 
@@ -183,6 +250,34 @@ cover explicitly.
   `NMLivelinessMonitor` expiry or an unhealthy report must lead to killing all `RMContainer`s on the
   node (`KILLED`) and rescheduling the affected work; the AM sees released containers and re-asks
   (arch §9, `NMLivelinessMonitor`, `RMNodeImpl`).
+- **FR-68 — Resource-tracker thread discipline.**
+  `ResourceTrackerService.registerNodeManager`/`nodeHeartbeat` must run on
+  `ResourceTracker` RPC handler threads, update `DecommissioningNodesWatcher`
+  for graceful-decommission progress, and mutate `RMNodeImpl` only via events
+  on the RM dispatcher (arch §7.5, `ResourceTrackerService`).
+- **FR-69 — Node update buffering.**
+  `RMNodeImpl` must buffer container updates in a
+  `ConcurrentLinkedQueue<UpdatedContainerInfo> nodeUpdateQueue` drained by
+  `StatusUpdateWhenHealthyTransition` per heartbeat, with
+  `DeactivateNodeTransition` handling DECOMMISSION/LOST/UNHEALTHY deactivation
+  (arch §7.5, `RMNodeImpl`).
+- **FR-70 — Liveness monitor intervals and expiry events.**
+  The monitors must keep their configured expiry intervals —
+  `yarn.resourcemanager.am.liveness-monitor.expiry-interval-ms` (default
+  15 min), `yarn.resourcemanager.nm.liveness-monitor.expiry-interval-ms`
+  (default 10 min), `yarn.resourcemanager.rm.container-allocation.expiry-
+  interval-ms` (default 10 min) — and fire the documented expiry events:
+  `RMAppAttemptEventType.EXPIRE`, `RMNodeEventType.EXPIRE`, and
+  `ContainerExpiredSchedulerEvent` on the scheduler dispatcher respectively
+  (arch §7.6, `AbstractLivelinessMonitor`).
+- **FR-71 — AM launch pool.**
+  `ApplicationMasterLauncher` must drain its `masterEvents` queue on a
+  `LauncherThread` and run each launch/cleanup as an `AMLauncher` task in a
+  fixed pool of `yarn.resourcemanager.amlauncher.thread-count` (default 50)
+  threads, calling the target NM through `NMProxy` with
+  `yarn.resourcemanager.nodemanager-connect-retries` applied; `serviceStop()`
+  must shut the pool down (arch §7.6, `ApplicationMasterLauncher`,
+  `AMLauncher`).
 
 ### 1.5 NodeManager — container lifecycle
 
@@ -241,6 +336,15 @@ cover explicitly.
   On application finish, `ContainerManagerImpl` must notify the configured `LogHandler`:
   `NonAggregatingLogHandler` (retain locally, scheduled delete) or `LogAggregationService` (upload
   to remote FS) (arch §8.5/§19.2, `NonAggregatingLogHandler`, `LogAggregationService`).
+- **FR-72 — Heartbeat content and key maintenance.**
+  `NodeStatusUpdaterImpl`'s status thread must build each `NodeStatus` with the
+  current container-token/NM-token master keys and `tokenSequenceNo`, apply
+  `updateMasterKeys()` (with `tokenSequenceNo` checks),
+  `handleShutdownOrResyncCommand()` (a REBOOT forces re-registration) and the
+  adaptive `getNextHeartBeatInterval()` sleep, dispatch
+  `CMgrCompletedAppsEvent`/`CMgrUpdateContainersEvent`/`CMgrSignalContainersEvent`
+  on the NM dispatcher, and push app system credentials via
+  `handleCredentialUpdate()` (arch §8.1, `NodeStatusUpdaterImpl`).
 
 ### 1.6 Application lifecycle end-to-end
 
@@ -262,6 +366,19 @@ cover explicitly.
   `finishApplicationMaster` must move the attempt RUNNING→FINISHING→FINISHED and the app to FINISHED
   carrying `FinalApplicationStatus`, with logs aggregated and the app cleaned from the RM completion
   lists (arch §9, `RMAppAttemptImpl`, `RMAppImpl`).
+- **FR-73 — AM-call liveness.**
+  `ApplicationMasterService` must call `AMLivelinessMonitor.receivedPing` on
+  every AM call, so `allocate()` heartbeats drive both progress and liveness
+  (arch §9, `ApplicationMasterService`, `AMLivelinessMonitor`).
+- **FR-74 — Asynchronous submission.**
+  `YarnClientImpl` must obtain the `ApplicationId` via `getNewApplication`
+  before `submitApplication`, and submission must remain asynchronous from the
+  client's point of view — the call returns after acceptance and progress is
+  followed by polling `ApplicationReport` (arch §9, `YarnClientImpl`).
+- **FR-75 — Surviving-AM cleanup.**
+  Application finish must post `AMLauncherEventType` CLEANUP events that kill
+  any surviving AM container, in addition to NM-side log aggregation and
+  `RMAppManager` completion-list trimming (arch §9, `AMLauncher`).
 
 ### 1.7 ApplicationHistoryService and TimelineService v2
 
@@ -283,6 +400,20 @@ cover explicitly.
 - **FR-49 — RM lifecycle timeline events.**
   `RMApplicationHistoryWriter` must write app/attempt lifecycle events as timeline entities through
   the `TimelineWriter` SPI (arch §11/§19.4, `RMApplicationHistoryWriter`).
+- **FR-76 — ATS v1 composition and store threading.**
+  `ApplicationHistoryServer` must keep its composition (secret-manager service,
+  `TimelineDataManager`, `ApplicationHistoryClientService`, the history manager,
+  `JvmPauseMonitor`); `FileSystemApplicationHistoryStore` must keep writing
+  through per-writer `synchronized` `HistoryFileWriter` streams keyed by
+  `HistoryDataKey`, and history writes must run on the calling (RPC) thread —
+  ATS v1 has no internal event bus (arch §10, `ApplicationHistoryServer`,
+  `FileSystemApplicationHistoryStore`).
+- **FR-77 — Timeline reader serving path.**
+  `TimelineReaderServer` must host `TimelineReaderWebServices` over
+  `TimelineReaderManager` on the `TimelineReader` SPI, with
+  `TimelineSchemaCreator` bootstrapping HBase tables and
+  `TimelineStorageMonitor` checking store liveness (arch §11,
+  `TimelineReaderServer`).
 
 ### 1.8 Router, GlobalPolicyGenerator, WebAppProxy
 
@@ -306,6 +437,28 @@ cover explicitly.
   If the AM restarts and changes address, the proxy must re-resolve and redirect; if the application
   is finished, it must fall back to AHS/timeline log URLs; and `ProxyCA` must sign AM-provided
   certificates for the AM HTTPS filter path (arch §13, `ProxyCA`, `AppReportFetcher`).
+- **FR-78 — Router pipeline cache and cleaner.**
+  `RouterClientRMService` must keep its per-user LRU-bounded
+  `Collections.synchronizedMap` `userPipelineMap` of `ClientRequestInterceptor`
+  pipelines, and the router's `SubClusterCleaner` must mark sub-clusters whose
+  heartbeat exceeds `ROUTER_SUBCLUSTER_EXPIRATION_TIME` as LOST (arch §12,
+  `RouterClientRMService`, `SubClusterCleaner`).
+- **FR-79 — GPG scheduled tasks.**
+  The GPG must run its three periodic tasks — `SubClusterCleaner`, the
+  configured `ApplicationCleaner` (default `DefaultApplicationCleaner`) and
+  `PolicyGenerator` — from one `ScheduledThreadPoolExecutor` of
+  `yarn.federation.gpg.scheduled.executor.threads` (default 10), with
+  `GlobalPolicy` implementations (`LoadBasedGlobalPolicy`,
+  `UniformWeightedLocalityGlobalPolicy`, `NoOpGlobalPolicy`) re-weighting
+  sub-cluster queue capacities through `GPGPolicyFacade` (arch §12,
+  `GlobalPolicyGenerator`).
+- **FR-80 — Proxy federation report fetching.**
+  In federation deployments `WebAppProxyServlet` must resolve app reports
+  through `FedAppReportFetcher` (via the Router) instead of
+  `DefaultAppReportFetcher`, and in secure deployments must pull the `ProxyCA`
+  from the servlet-context `WebAppProxy.PROXY_CA` attribute to sign
+  AM-provided certificates (arch §13, `WebAppProxyServlet`,
+  `FedAppReportFetcher`).
 
 ### 1.9 SharedCacheManager
 
@@ -314,6 +467,13 @@ cover explicitly.
   reference it in `LocalResource` (visibility PUBLIC, type SHARED_CACHE on the NM localizer side),
   with checksum-based store integrity; `SharedCacheCleaner` (with NM-side `LocalCacheCleaner`) must
   evict entries by LRU policy (arch §14, `ClientSCMProtocol`, `SharedCacheCleaner`).
+- **FR-81 — Shared-cache service composition.**
+  `SharedCacheManager` must keep its registered service set — the `SCMStore`
+  SPI (`InMemorySCMStore` default), `CleanerService` (starting the
+  `AppChecker`/`RemoteAppChecker` app-alive check and running its
+  `CleanerTask` on a 2-thread scheduled executor), `SharedCacheUploaderService`
+  (`SCMUploaderProtocol`), `ClientProtocolService` (`ClientSCMProtocol`) and
+  `SCMAdminProtocolService` (arch §14, `SharedCacheManager`).
 
 ### 1.10 Application-facing modules
 
@@ -408,6 +568,59 @@ cover explicitly.
   `synchronized(writer)`), retry failures with `writeRetryInterval`, and preserve the
   `DiscardOldestPolicy` semantics — a stalled writer means data loss, not unbounded queue growth
   (arch §17.5, `TimelineCollector`). *(supersedes R-NFR-13)*
+- **NFR-C-15 — RMApp/RMAppAttempt lock idiom.**
+  `RMAppImpl` and `RMAppAttemptImpl` must guard their generated `stateMachine`
+  with a `ReentrantReadWriteLock` — `handle()` takes the write lock around
+  `doTransition`, report construction takes the read lock; transitions must run
+  on the RM dispatcher thread and a PR must not introduce additional blocking
+  inside transitions (arch §7.3, `RMAppImpl`, `RMAppAttemptImpl`).
+- **NFR-C-16 — FairScheduler preemption-thread lifecycle.**
+  `FSPreemptionThread` must be started in `serviceStart()` with an
+  uncaught-exception handler installed, and `serviceStop()` must interrupt and
+  `join(THREAD_JOIN_TIMEOUT_MS)` it — preemption-thread death must be neither
+  silent nor allowed to outlive the daemon (arch §7.4, `FairScheduler`,
+  `FSPreemptionThread`).
+- **NFR-C-17 — DelegationTokenRenewer threading.**
+  Renewal work must run on the `DelegationTokenRenewer` pool sized from
+  `yarn.resourcemanager.delegation-token-renewer.thread-count` (default 50),
+  submitted asynchronously via `DelegationTokenRenewerEvent`s with
+  `DelegationTokenRenewerPoolTracker` accounting in-flight work, and
+  `DelegationTokenCancelThread` must cancel expired tokens on its own thread —
+  renewals must never run on the RM dispatcher (arch §7.7,
+  `DelegationTokenRenewer`).
+- **NFR-C-18 — RMStateStore dispatcher isolation.**
+  `RMStateStore` must execute state-store writes on its own dispatcher — never
+  on the RM main thread — and post completion events (`RMStateStoreAppEvent`,
+  `RMStateStoreAppAttemptEvent`, …) back to the RM dispatcher (arch §7.3,
+  `RMStateStore`).
+- **NFR-C-19 — ContainerImpl locking.**
+  `ContainerImpl` must guard its state with a `ReentrantReadWriteLock` and
+  execute transitions only on the NM dispatcher thread that delivers
+  `ContainerEvent`s (arch §8.2, `ContainerImpl`).
+- **NFR-C-20 — Log-aggregation thread model.**
+  `LogAggregationService` must keep its
+  `ConcurrentMap<ApplicationId, AppLogAggregator> appLogAggregators` and a
+  fixed pool of `getAggregatorThreadPoolSize(conf)` threads running one
+  `AppLogAggregatorImpl` task per finished application, with `serviceStop()`
+  shutting the pool down and waiting for in-flight aggregators;
+  `NonAggregatingLogHandler` must schedule delayed local deletion on its own
+  `ScheduledThreadPoolExecutor` (arch §8.5, `LogAggregationService`,
+  `NonAggregatingLogHandler`).
+- **NFR-C-21 — Client-library async threading.**
+  `AMRMClientAsyncImpl` must keep a single `HeartbeatThread` calling
+  `AMRMClientImpl.allocate()` and handing results (containers, `AMCommand`s)
+  to the `AbstractCallbackHandler` on the heartbeat thread;
+  `NMClientAsyncImpl` must dispatch start/stop/query events on its dedicated
+  event-dispatcher thread and run container operations on a
+  `ThreadPoolExecutor` over `NMClientImpl` (arch §9, `AMRMClientAsyncImpl`,
+  `NMClientAsyncImpl`).
+- **NFR-C-22 — Aux-service reload atomicity.**
+  `AuxServices` must keep `serviceMap`/`serviceRecordMap`/`serviceMetaData` as
+  `Collections.synchronizedMap` instances and keep
+  `serviceInit`/`serviceStart`/`serviceStop` and manifest-driven replacement
+  (`maybeReadManifestFile`/`loadServices`/`maybeRemoveAuxService`)
+  `synchronized`, so aux-service reload is atomic with event handling (arch
+  §8.5, `AuxServices`).
 
 ### 2.2 Security (NFR-S)
 
@@ -464,6 +677,17 @@ cover explicitly.
   and distribute master keys to NMs over the `ResourceTracker` channel; `NMTokenSecretManagerInRM`
   must issue the per-node NM tokens that authenticate `ContainerManagementProtocol` calls (arch
   §18.2, `RMContainerTokenSecretManager`, `NMTokenSecretManagerInRM`).
+- **NFR-S-10 — Secret-manager key rolling.**
+  `RMSecretManagerService` must construct and own the container/NM/AMRM/
+  ClientToAM token secret managers; `AMRMTokenSecretManager` must roll the AMRM
+  master key via its `MasterKeyRoller` TimerTask every
+  `yarn.resourcemanager.am-rm-tokens.master-key-rolling-interval-secs`
+  (default 86400) with `NextKeyActivator`, both mutating key state under the
+  manager's write lock while validation reads under the read lock;
+  `RMContainerTokenSecretManager` and `NMTokenSecretManagerInRM` must roll keys
+  the same way (`...container-tokens.master-key-rolling-interval-secs` and the
+  NM-token equivalent) with the current master keys riding every NM heartbeat
+  (arch §7.7, `RMSecretManagerService`, `AMRMTokenSecretManager`).
 
 ### 2.3 Logging and auditability (NFR-L)
 
@@ -497,6 +721,12 @@ cover explicitly.
   (`RMApplicationHistoryWriter`) and AM-reported events/metrics as per-application entities
   (`AppLevelTimelineCollector`), queryable via the reader REST API, independent of the audit log
   (arch §19.4, `RMApplicationHistoryWriter`).
+- **NFR-L-6 — Event-queue gauges.**
+  The RM's `EventQueueSizeMetricThread` must keep sampling both the RM
+  dispatcher and the scheduler `EventDispatcher` queues every second and
+  publishing the `rmEventQueueSize`/`schedulerEventQueueSize` gauges to
+  `ClusterMetrics`; a PR must not remove this queue-depth observability (arch
+  §7, `RMActiveServices`, `ClusterMetrics`).
 
 ### 2.4 Integration (NFR-I)
 
@@ -527,6 +757,12 @@ cover explicitly.
   wrappers and `impl.pb.client` proxies (arch §3/§4, `HadoopYarnProtoRPC`); and the NM must keep
   working when cGroups are unavailable by falling back to process-tree enforcement
   (`ContainersMonitorImpl` + `ResourceCalculatorProcessTree`) (arch §20.2, `ContainersMonitorImpl`).
+- **NFR-I-6 — ATS v1-on-v2 adaptation.**
+  `ApplicationHistoryManagerOnTimelineStore` must keep adapting the v1
+  `ApplicationHistoryWriter`/`ApplicationHistoryReader` interfaces onto a
+  TimelineService v2 store, so v1 history clients (`ApplicationHistoryProtocol`)
+  keep working against a v2 backend (arch §10,
+  `ApplicationHistoryManagerOnTimelineStore`).
 
 ---
 
@@ -549,6 +785,13 @@ requirement IDs that decide it.
 - [ ] Are app/attempt/container state machines extended without breaking documented states? (FR-11–FR-13, FR-26, FR-34)
 - [ ] Do liveness/expiry paths act only via events, and does thread death fail fast? (NFR-C-4, NFR-C-11, FR-27–FR-29)
 - [ ] Does recovery still replay apps and reacquire containers on restart? (FR-12, FR-16, FR-43)
+- [ ] Is the active-service graph rebuilt on HA transitions with state-store recovery completed before children start? (FR-59)
+- [ ] Do critical-thread and state-store/elector failures surface as `RMFatalEvent`s, and do state-store writes stay off the RM dispatcher thread? (FR-61, NFR-C-18)
+- [ ] Do RMApp/RMAppAttempt transitions keep the read-write lock idiom, with AM containers persisted (`ALLOCATED_SAVING`) before launch? (NFR-C-15, FR-65)
+- [ ] Does delegation-token renewal stay on the renewer pool, never on the dispatcher? (NFR-C-17)
+- [ ] For FairScheduler: is the preemption thread started with an uncaught-exception handler and interrupted+joined on stop? (NFR-C-16)
+- [ ] Do event registrations (`EventDispatcher` topology), the AM launch pool, and the documented liveness-monitor expiry events stay intact? (FR-60, FR-70, FR-71)
+- [ ] Does the AM-call liveness ping survive refactors, and does finish still post `AMLauncherEventType.CLEANUP`? (FR-73, FR-75)
 
 ### 3.3 NodeManager / localization
 
@@ -557,6 +800,9 @@ requirement IDs that decide it.
 - [ ] Is exactly one launcher task per container preserved, including retry and recovery paths? (NFR-C-7, FR-37)
 - [ ] Are memory-limit breaches still fatal to the container, with diagnostics? (FR-39, NFR-C-9)
 - [ ] Does the heartbeat loop stay on its single thread, with correct shutdown join? (NFR-C-10, FR-30, FR-32)
+- [ ] Do heartbeats keep master-key/`tokenSequenceNo` maintenance, REBOOT re-registration, adaptive intervals, and credential pushes via `handleCredentialUpdate()`? (FR-72)
+- [ ] Does `ContainerImpl` keep its read-write lock with dispatcher-thread transitions, and is aux-service reload atomic with event handling? (NFR-C-19, NFR-C-22)
+- [ ] Does log aggregation keep one pool task per finished app with a bounded pool drained on stop? (NFR-C-20)
 
 ### 3.4 Security
 
@@ -565,12 +811,14 @@ requirement IDs that decide it.
 - [ ] Do tokens reach containers as serialized Credentials, with renewal for the app lifetime? (NFR-S-4, NFR-S-9)
 - [ ] Does container execution preserve user isolation via the setuid binary? (NFR-S-6, NFR-I-2)
 - [ ] Are cGroups controller/version rules respected? (NFR-S-7, NFR-I-5)
+- [ ] Do secret-manager master keys keep rolling under their read/write locks, with current keys riding every NM heartbeat? (NFR-S-10)
 
 ### 3.5 Logging / audit
 
 - [ ] Does every state-changing operation produce exactly one audit record with the identifier chain? (NFR-L-1, NFR-L-2)
 - [ ] Is log aggregation still pluggable, readable per container, and status-tracked? (NFR-L-3, FR-41)
 - [ ] Are metrics still registered in the `yarn` metrics2 context? (NFR-L-4)
+- [ ] Do the RM event-queue-size gauges keep feeding `ClusterMetrics`? (NFR-L-6)
 - [ ] Are lifecycle transitions still written to the timeline as an audit trail? (NFR-L-5, FR-49)
 
 ### 3.6 Auxiliary daemons (AHS/Timeline, Router/GPG, proxy, SCM)
@@ -580,6 +828,11 @@ requirement IDs that decide it.
 - [ ] Does the GPG remain control-plane-only (no container moves)? (FR-51)
 - [ ] Does the proxy keep ACL checks, attempt-aware URLs, and history fallback? (FR-52, FR-53)
 - [ ] Are shared-cache uploads still checksum-deduplicated with LRU eviction? (FR-54)
+- [ ] Does ATS v1 keep writing on the calling thread through per-writer `HistoryFileWriter` streams, with the v1-on-v2 adapter intact? (FR-76, NFR-I-6)
+- [ ] Does the timeline reader keep serving REST over the reader SPI with schema bootstrap and storage monitoring? (FR-77)
+- [ ] Does the Router keep its per-user interceptor pipeline cache and `SubClusterCleaner` LOST marking, and does the GPG keep its three scheduled control-plane tasks? (FR-78, FR-79)
+- [ ] In federation, does the proxy resolve reports through `FedAppReportFetcher` and keep `ProxyCA` signing from the servlet context? (FR-80)
+- [ ] Does the shared cache keep its service composition, including the `SCMUploaderProtocol` surface and the app-checker-driven cleaner? (FR-81)
 - [ ] Do port defaults and endpoint keys remain unchanged? (NFR-I-1)
 
 ---
