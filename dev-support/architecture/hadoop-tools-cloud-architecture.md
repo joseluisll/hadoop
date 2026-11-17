@@ -6,6 +6,14 @@ This document covers two groupings of the Hadoop tree: the `hadoop-cloud-storage
 the `hadoop-tools` aggregation of side tools (cloud connectors S3A/ABFS, DistCp, HAR, and assorted MapReduce/YARN utilities). All
 class names are taken directly from the source tree at `hadoop-cloud-storage-project/` and `hadoop-tools/`.
 
+> **Document method.** This document follows the shared definition and method in
+> [README.md](README.md) (*About these documents — definition and method*): a
+> source-grounded orientation document pinned to the **As-of** trunk commit
+> above, depth-2 scope, fixed section skeleton, merged-trunk state only.
+> Updates land exclusively through dedicated arch/req review sessions;
+> PR-review sessions record gaps as candidates in `notes/arch-req-candidates.md`
+> instead of editing this file.
+
 ## Table of contents
 
 1. [Cloud storage connectors (hadoop-cloud-storage-project)](#1-cloud-storage-connectors)

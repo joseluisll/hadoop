@@ -7,6 +7,14 @@ Hadoop codebase. Depth 2: the modules of `hadoop-common-project/`, and inside
 `hadoop-common` its first-level packages. All class names are real files under
 `hadoop-common-project/*/src/main/java/`.
 
+> **Document method.** This document follows the shared definition and method in
+> [README.md](README.md) (*About these documents — definition and method*): a
+> source-grounded orientation document pinned to the **As-of** trunk commit
+> above, depth-2 scope, fixed section skeleton, merged-trunk state only.
+> Updates land exclusively through dedicated arch/req review sessions;
+> PR-review sessions record gaps as candidates in `notes/arch-req-candidates.md`
+> instead of editing this file.
+
 ## Table of contents
 
 1. [Overview and module layout](#1-overview-and-module-layout)

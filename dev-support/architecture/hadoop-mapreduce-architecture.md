@@ -8,6 +8,14 @@ actual source tree. Depth: the component plus its first-level subcomponents (the
 described end to end: submission → AM allocation → map task (sort/spill) → shuffle → reduce →
 commit → history events.
 
+> **Document method.** This document follows the shared definition and method in
+> [README.md](README.md) (*About these documents — definition and method*): a
+> source-grounded orientation document pinned to the **As-of** trunk commit
+> above, depth-2 scope, fixed section skeleton, merged-trunk state only.
+> Updates land exclusively through dedicated arch/req review sessions;
+> PR-review sessions record gaps as candidates in `notes/arch-req-candidates.md`
+> instead of editing this file.
+
 ## Table of contents
 
 1. [Module layout](#1-module-layout)
