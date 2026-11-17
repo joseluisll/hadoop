@@ -71,6 +71,39 @@ connector-specific failure classes exist (`RenameFailedException` appears in the
 through pluggable provider chains (`AWSCredentialProviderList`, `COSCredentialsProviderList`, hadoop-bos's `credentials/` package,
 ABFS's `oauth2/` token providers, GCS's `HadoopCredentialsConfiguration`).
 
+#### 1.1.1 Stream and block-buffer contract
+
+- Output buffering is a per-connector re-implementation of one pattern: S3A
+  buffers through `S3ADataBlocks` (`DiskBlock`, `ByteBufferBlock`, `ArrayBlock`),
+  OBS through `OBSDataBlocks`, Aliyun OSS through `OSSDataBlocks`, COS through
+  `BufferPool` and BOS through `BosBlockBuffer`. In every case the object
+  becomes visible only at close/commit time; no connector in this tree exposes
+  partial-object visibility.
+- Input is whole-object or ranged. S3A selects the implementation through
+  `impl/streams/ObjectInputStreamFactory` (`ClassicObjectInputStreamFactory`
+  plus the prefetch and analytics factories, §2.1.3); ABFS uses
+  `AbfsAdaptiveInputStream`/`AbfsPrefetchInputStream` backed by
+  `services/ReadBufferManagerV1`/`ReadBufferManagerV2`; GCS uses
+  `GoogleCloudStorageClientReadChannel`; TOS uses
+  `object/ObjectRangeInputStream`/`ObjectMultiRangeInputStream`.
+- Server-side copy for rename exists only where the store API allows it
+  (COS `CosNCopyFileTask`, OSS `AliyunOSSCopyFileTask`); elsewhere rename is
+  list-then-copy-then-delete over the store client.
+
+#### 1.1.2 Credential and delegation-token contract
+
+- Provider chains are per-store: `AWSCredentialProviderList` (S3A),
+  `COSCredentialsProviderList` (COS), the BOS `credentials/` package
+  (`BceCredentialsProvider`, `ConfigurationCredentialsProvider`,
+  `EnvironmentVariableCredentialsProvider`, `HadoopCredentialsProvider`),
+  ABFS's `oauth2/AccessTokenProvider` implementations and GCS's
+  `HadoopCredentialsConfiguration`.
+- Delegation tokens exist only in S3A
+  (`auth/delegation/AbstractDelegationTokenBinding` managed by
+  `S3ADelegationTokens`) and ABFS (`security/AbfsDelegationTokenManager` with
+  `AbfsDelegationTokenIdentifier`); the remaining stores in this tree ship no
+  token binding at all.
+
 Delegation tokens: only a subset of stores implement them. The reference design is S3A's
 `org.apache.hadoop.fs.s3a.auth.delegation.AbstractDelegationTokenBinding` with `S3ADelegationTokens` as the manager; ABFS has an
 equivalent (`AbfsDelegationTokenManager`). The GCS, OBS, COS, BOS and TOS modules in this tree ship **no** delegation-token
@@ -104,11 +137,27 @@ Notes on the table:
   here mostly use the config-key path; S3A's token and multipart-uploader extension points are the ones wired through
   META-INF/services.
 
+#### 1.2.1 Resolution order at runtime
+
+- `FileSystem.getFileSystemClass(scheme, conf)` consults `fs.<scheme>.impl`
+  first and falls back to the `FileSystem.SERVICE_FILE_SYSTEMS` map populated
+  once per JVM by `FileSystem.loadFileSystems()` from
+  `META-INF/services/org.apache.hadoop.fs.FileSystem` resources. The returned
+  class is instantiated and cached per the standard `FileSystem` cache rules;
+  `fs.har.impl.disable.cache` opts HAR instances out of that cache rather than
+  changing the lookup itself.
+
 ### 1.3 hadoop-cloud-storage (umbrella)
 
 No source code: the entire module is a single `pom.xml` (packaging `jar`, "Apache Hadoop Cloud Storage"). It declares the common
 dependency set (hadoop-common plus shared cloud libraries) and serves as the dependency/aggregation artifact inherited by the
 other cloud modules. All real code lives in the sibling per-store modules.
+
+#### 1.3.1 Module contents
+
+The module has exactly one file, `pom.xml` (packaging `jar`); there is no
+`src/` tree, no classes and no configuration resources, so there is no
+depth-3 structure to describe.
 
 ### 1.4 GCS — hadoop-gcp
 
@@ -129,6 +178,43 @@ Package `org.apache.hadoop.fs.gs`, scheme `gs://`.
 
 At runtime a `gs://bucket/path` open performs a metadata lookup, then streams via the read channel with configurable read-ahead;
 writes stage into the write channel and commit on close.
+
+#### 1.4.1 Front-end / store-layer split
+
+- `GoogleHadoopFileSystem` translates Hadoop paths to object names inside its
+  single root bucket and delegates to `GoogleCloudStorageFileSystem`, which
+  wraps the `GoogleCloudStorage` client interface. Store-level state is
+  modelled as `GoogleCloudStorageItemInfo`/`FileInfo` keyed by
+  `StorageResourceId`, with path helpers `StringPaths`/`UriPaths`.
+- `Gs extends DelegateToFileSystem` instantiates a fresh
+  `GoogleHadoopFileSystem` for the FileContext API; the two API surfaces share
+  configuration, not instances.
+
+#### 1.4.2 Read/write channel internals
+
+- `GoogleCloudStorageClientReadChannel implements SeekableByteChannel` wraps
+  the GCS `Storage` client for one `StorageResourceId`; its inner
+  `ContentReadChannel` re-issues ranged reads, skips forward through an
+  8 KB `SKIP_BUFFER_SIZE` buffer, detects gzip encoding and consults
+  `FileAccessPatternManager`; `Fadvise` selects the default read mode.
+- `GoogleCloudStorageClientWriteChannel implements WritableByteChannel`
+  stages bytes and finalizes the object in `close()`;
+  `GoogleHadoopFSInputStream`/`GoogleHadoopOutputStream` adapt both channels
+  to the Hadoop stream APIs. Statistics flow through
+  `GcsInstrumentation`/`GcsStatistics`/`GcsStorageStatistics`;
+  `GcsListOperation` and `ListObjectOptions`/`ListFileOptions` parameterize
+  listings.
+
+#### 1.4.3 Configuration, credentials and error translation
+
+- `GoogleHadoopFileSystemConfiguration` owns the `fs.gs.*` keys and
+  `HadoopCredentialsConfiguration` the credential surface (§5.4); both are
+  built on the typed `HadoopConfigurationProperty` wrapper. `VerificationAttributes`
+  and `RedactedString` are support types for checksum verification and
+  sensitive-string handling.
+- Store failures cross into Hadoop only as IOExceptions produced by
+  `ApiErrorExtractor`/`ErrorTypeExtractor` with `IoExceptionHelper` and
+  `GoogleCloudStorageExceptions`.
 
 ### 1.5 BOS, COS, TOS, HuaweiCloud OBS (brief)
 
@@ -151,10 +237,64 @@ writes stage into the write channel and commit on close.
   (`OBSPosixBucketUtils`, `OBSObjectBucketUtils`), supports server-side encryption (`SseWrapper`), and surfaces rename conflicts as
   `RenameFailedException`/`FileConflictException`.
 
+#### 1.5.1 BOS internals (hadoop-bos)
+
+`BaiduBosFileSystem` (with `BaiduBosFileSystemAdapter`) delegates to
+`BosNativeFileSystemStore`, whose two listing layouts are
+`HierarchyBosNativeFileSystemStore` and `NonHierarchyBosNativeFileSystemStore`;
+`BosClientProxy`/`BosClientProxyImpl` wrap the BOS SDK client. Writes buffer
+through `BosBlockBuffer` inside `BosOutputStream`, with `UploadPartThread`
+performing part uploads off the writing thread; reads go through
+`BosInputStream` over `PartialListing` pages. Retry behaviour is chosen
+between `BosRandomRetryPolicy` and `BosTryOnceThenFail`; all store failures
+extend `exceptions/BosException`.
+
+#### 1.5.2 COS internals (hadoop-cos)
+
+`CosNFileSystem` works against the `NativeFileSystemStore` SPI implemented by
+`CosNativeFileSystemStore`. `CosNInputStream` issues block reads via
+`CosNFileReadTask` against a shared `BufferPool` of byte buffers;
+`CosNOutputStream` uploads multipart blocks. Rename uses server-side
+`CosNCopyFileTask`/`CosNCopyFileContext`. Credentials resolve through
+`auth/COSCredentialsProviderList` over `AbstractCOSCredentialsProvider`
+implementations; keys live in `CosNConfigKeys`.
+
+#### 1.5.3 TOS internals (hadoop-tos)
+
+`TosFileSystem extends RawFileSystem` sits over an `object/ObjectStorage`
+from `ObjectStorageFactory`, with `object/FileStore`/`PrefixStorage`/
+`DirectoryStorage` abstracting key layouts, ranged reads via
+`object/ObjectRangeInputStream`/`ObjectMultiRangeInputStream` and staged
+multipart writes via `object/staging/StagingPart`. Its `commit/` package is a
+magic-style committer: `MagicOutputStream` writes through pending state
+(`Pending`, `PendingSet`, `SuccessData`), `CommitterFactory` selects the
+`Committer`, `commit/ops/` (`PendingOps`, `RawPendingOps`) owns the
+commit/abort calls and `commit/mapred/Committer` is the MapReduce binding.
+Credentials use the `object/tos/auth/` chain
+(`DefaultCredentialsProviderChain`); worker threads come from
+`common/ThreadPools`.
+
+#### 1.5.4 OBS internals (hadoop-huaweicloud)
+
+`OBSFileSystem` distinguishes posix-named buckets (`OBSPosixBucketUtils`)
+from object buckets (`OBSObjectBucketUtils`) and delegates listings to
+`OBSListing`/`OBSFsDFSListing`. Writes go through `OBSBlockOutputStream` over
+`OBSDataBlocks`, with `OBSWriteOperationHelper` driving the multipart calls
+and the client built by `OBSClientFactory`/`DefaultOBSClientFactory`
+(`BasicSessionCredential` for temporary credentials). Server-side encryption
+is applied by `SseWrapper`; rename conflicts surface as
+`RenameFailedException`/`FileConflictException`.
+
 ### 1.6 hadoop-cloud-storage-dist
 
 Distribution/aggregation module: assembles the connector jars above into the cloud-storage tarball published with a Hadoop
 release. No Java code.
+
+#### 1.6.1 Assembly contents
+
+Like §1.3 the module is `pom.xml` only; its structure is the tarball assembly
+(dependency set plus distribution format), with nothing to describe at
+depth 3.
 
 ---
 
@@ -233,6 +373,128 @@ of submitting clients; `MarshalledCredentialBinding`/`MarshalledCredentials` ser
 Runtime flow: `s3a://bucket/key` open → `StoreContext` lookup → prefetching or plain `S3AInputStream`; write → block- buffered
 multipart upload through `S3ABlockOutputStream`, committed by the chosen output committer inside MapReduce/Spark jobs.
 
+#### 2.1.1 AWS client wiring (`S3ClientFactory`, `impl/ClientManager`)
+
+- `S3AFileSystem.initialize()` assembles an
+  `S3ClientFactory.S3ClientCreationParameters` carrying the credential set,
+  endpoint/region, path-style, user-agent suffix, audit execution
+  interceptors, multipart thresholds, checksum settings, CSE materials,
+  S3 Express session settings and the analytics-accelerator flag, and hands
+  it to `createClientManager(...)`. Clients are created lazily by
+  `impl/ClientManagerImpl`, which holds four `LazyAutoCloseableReference`
+  slots — `s3Client`, `s3AsyncClient`, `unencryptedS3Client` (CSE-free) and
+  `S3TransferManager` (built from the async client via
+  `S3ClientFactory.createS3TransferManager`). The getters are
+  `synchronized` and refuse use after `close()`.
+- `DefaultS3ClientFactory` owns endpoint/region resolution
+  (`configureEndpointAndRegion`, §7.1) and two static
+  `impl/LazySharedThreadPoolHolder` scheduled executors shared across S3
+  clients — `s3a-s3-sync-scheduler` and `s3a-s3-async-scheduler`, each
+  controlled by its own enable/size/keep-alive `fs.s3a.*` keys with default
+  size 5 and 60 s keep-alive.
+
+#### 2.1.2 Store layer and operations (`S3AStore`, `impl/`)
+
+- `S3AStoreImpl`, assembled by `S3AStoreBuilder`, owns the `StoreContext`
+  (built via `StoreContextBuilder`), the `RequestFactoryImpl`, statistics
+  contexts and the read/write capacity gates. Mutating work is expressed as
+  `AbstractStoreOperation` subclasses executed through
+  `ExecutingStoreOperation`: `RenameOperation`, `DeleteOperation`,
+  `BulkDeleteOperation` (with `BulkDeleteRetryHandler`), `MkdirOperation`,
+  `CopyFromLocalOperation` and `GetContentSummaryOperation`.
+- `ClientManager`/`ClientManagerImpl` separate client lifecycle from store
+  policy; `ErrorTranslation` maps SDK failures onto the typed exception set;
+  `InputStreamCallbacksImpl` binds audit spans and the unbounded executor to
+  SDK streaming calls; `OpenFileSupport`, `StatusProbeEnum` and
+  `ActiveOperationContext` carry per-operation state.
+
+#### 2.1.3 Input stream selection (`impl/streams`, `prefetch/`)
+
+- `StreamIntegration`/`InputStreamType` choose the input factory from
+  `fs.s3a.input.stream.type` (`Constants.INPUT_STREAM_TYPE`): the classic
+  `S3AInputStream` via `ClassicObjectInputStreamFactory`, the `prefetch/`
+  stack (`S3APrefetchingInputStream`, `S3ARemoteInputStream`,
+  `S3ABlockManager`/`S3ACachingBlockManager`) via
+  `PrefetchingInputStreamFactory`, or the analytics-accelerator stream
+  (`AnalyticsStream`/`AnalyticsStreamFactory`, configuration prefix
+  `fs.s3a.analytics.accelerator`). The active store declares what it
+  supports through `StreamFactoryRequirements`; unsupported combinations
+  fail at stream creation, not mid-read.
+- Vectored reads (`VectoredIOContext`) group ranges per
+  `fs.s3a.vectored.read.min.seek.size` and
+  `fs.s3a.vectored.read.max.merged.size` with the active-range bound in
+  `Constants.AWS_S3_VECTOR_ACTIVE_RANGE_READS`; each stream gets a
+  permit-limited `SemaphoredDelegatingExecutor` subset of the bounded pool
+  sized `streamThreads + vectoredActiveRangeReads`.
+
+#### 2.1.4 Output streams and multipart upload
+
+- `S3ABlockOutputStream` (built via `BlockOutputStreamBuilder`) buffers
+  through `S3ADataBlocks` and uploads parts with
+  `WriteOperationHelper`/`WriteOperations` under
+  `ProgressableProgressListener` callbacks; `MultipartUtils` computes part
+  layouts. `impl.S3AMultipartUploader` (the META-INF/services
+  `MultipartUploader`) is the alternate upload API whose
+  `PartHandlePayload` carries per-part state.
+- Client-side-encryption uploads route through
+  `CSES3AFileSystemOperations`/`CSEV1CompatibleS3AFileSystemOperations`
+  over `BaseS3AFileSystemOperations`, with `CSEMaterials`/`CSEUtils` and
+  `EncryptionS3ClientFactory` supplying key handling; `PutObjectOptions`,
+  `UploadContentProviders` and `SDKStreamDrainer` support the PUT path.
+
+#### 2.1.5 Committer internals (`commit/`)
+
+- `AbstractS3ACommitter`/`AbstractS3ACommitterFactory` are the base and
+  `S3ACommitterFactory` resolves the configured committer name. The durable
+  format is the JSON pending set — `files/SinglePendingCommit`,
+  `files/PendingSet`, `files/SuccessData`, `files/UploadEtag` extending
+  `files/PersistentCommitData`; `impl/CommitOperations` (with
+  `CommitContext` and `AuditContextUpdater`) performs commit/abort/revert
+  through `CommitUtilsWithMR`.
+- Magic-path detection lives in `MagicCommitIntegration`/`MagicCommitPaths`;
+  uploads under magic prefixes are tracked by `PutTracker` subclasses —
+  `MagicCommitTracker`, `S3MagicCommitTracker`, `InMemoryMagicCommitTracker`
+  — selected by `MagicCommitTrackerUtils`. `commit/staging/` adds the
+  local-disk `StagingCommitter` family (`DirectoryStagingCommitter`,
+  `PartitionedStagingCommitter`) with `ConflictResolution` modes;
+  `LocalTempDir`, `ValidationFailure` and `PathCommitException` complete the
+  package.
+- Maintenance CLIs: `tools/BucketTool` and `tools/MarkerTool` (with
+  `MarkerToolOperations`/`MarkerToolOperationsImpl`), plus the S3Guard
+  remnants `s3guard/S3Guard`/`S3GuardTool`.
+
+#### 2.1.6 Auth chain and signer plumbing (`auth/`)
+
+- `CredentialProviderListFactory` assembles the `AWSCredentialProviderList`
+  (§5.1); providers extend `AbstractAWSCredentialProvider`/
+  `AbstractSessionCredentialsProvider`. Assumed roles are modelled by
+  `RoleModel`/`RolePolicies` and assumed through `STSClientFactory`;
+  `ProfileAWSCredentialsProvider` reads SDK profiles and
+  `MarshalledCredentialProvider` serves credentials carried in delegation
+  tokens.
+- Request signing is extensible: `SignerManager`/`SignerFactory` select
+  `CustomSdkSigner`/`CustomHttpSigner` implementations wired into clients by
+  `AwsSignerInitializer`. `NoAuthWithAWSException` and
+  `NoAwsCredentialsException` distinguish "no credentials found" from
+  "credentials rejected".
+
+#### 2.1.7 Threading, spans and shutdown ordering
+
+- Executors (§4.1): the `-bounded` `BlockingThreadPoolExecutorService`
+  (active threads = `fs.s3a.threads.max`, waiting queue = max + totalTasks
+  + shared prefetch threads), the `-unbounded` `ThreadPoolExecutor` (core =
+  max, unbounded `LinkedBlockingQueue`, core-thread timeout), the optional
+  `ExecutorServiceFuturePool` wrapping a `SemaphoredDelegatingExecutor`
+  around the bounded pool, and the per-stream vectored executors of
+  §2.1.3. The transfer manager runs on the unbounded pool
+  (`withTransferManagerExecutor(unboundedThreadPool)`).
+- `close()` → `stopAllServices()` ordering: close the store (which closes
+  the client manager and all SDK clients) → shut the future pool → the
+  bounded pool → the unbounded pool → `delegationTokens`,
+  `signerManager`, `auditManager` → the credential list → finally
+  `S3AInstrumentation`. Every step tolerates partial initialization because
+  `stopAllServices()` also runs when `initialize()` fails part-way.
+
 ### 2.2 ABFS — hadoop-azure
 
 Package `org.apache.hadoop.fs.azurebfs`, schemes `abfs://` and `abfss://` (TLS), bound in core-default via `fs.abfs.impl`,
@@ -259,6 +521,76 @@ Package `org.apache.hadoop.fs.azurebfs`, schemes `abfs://` and `abfss://` (TLS),
 Runtime: metadata operations hit the DFS endpoint when the account has a hierarchical namespace (atomic rename, ACL semantics),
 else the blob endpoint (rename emulated); requests are signed per call (SAS/OAuth/shared-key) by the client layer.
 
+#### 2.2.1 Client layer (`services/AbfsClient*`)
+
+- `AzureBlobFileSystemStore` holds an `AbfsClientHandler` which owns both an
+  `AbfsDfsClient` and an `AbfsBlobClient` and selects per call by
+  `AbfsServiceType`; the default and ingress service types come from
+  configuration (`fs.azure.ingress.service.type`,
+  `ConfigurationKeys.FS_AZURE_INGRESS_SERVICE_TYPE`).
+- `AbfsClient` (abstract) executes `AbfsHttpOperation`s —
+  `AbfsJdkHttpOperation`, `AbfsApacheHttpClient`, `AbfsAHCHttpOperation` —
+  on connections managed by `AbfsConnectionManager`,
+  `AbfsManagedHttpClientContext`, `AbfsManagedHttpRequestExecutor` and
+  `AbfsHttpClientConnectionFactory`. Client-side throttling is applied by
+  `AbfsClientThrottlingIntercept` (+ `AbfsNoOpThrottlingIntercept`) and
+  measured by `AbfsClientThrottlingAnalyzer`; counters flow through
+  `AbfsBackoffMetrics`/`AbfsMetricsManager`/`AbfsOperationMetrics`.
+  `AbfsAclHelper` performs ACL handling on the DFS path and
+  `SharedKeyCredentials` signs shared-key requests; every request carries a
+  `utils/TracingContext` correlation id.
+
+#### 2.2.2 Read path
+
+- `AbfsInputStream` has two strategies, `AbfsAdaptiveInputStream` and
+  `AbfsPrefetchInputStream`. Prefetching is implemented by
+  `ReadBufferManagerV1`/`ReadBufferManagerV2`: V2 is guarded by a static
+  `ReentrantLock`, runs a bounded `ThreadPoolExecutor` of `ReadBufferWorker`
+  threads with optional CPU-based dynamic scaling (monitor thread, min/max
+  pool sizes, upscale/downscale percentages) and serves reads from a shared
+  byte-array buffer pool (`bufferPool`, min/max sizes, `freeList`/
+  `removedBufferList`).
+- `VectoredReadHandler` implements vectored reads with a
+  `VectoredReadStrategy` and falls back to direct reads when pooled buffers
+  are exhausted; `AbfsInputStreamContext`/`AbfsClientContext(Builder)` carry
+  per-request parameters and `ResourceUtilizationStats` reports buffer
+  utilization. Sliding-window latency is tracked by
+  `SlidingWindowHdrHistogram`; retry behaviour is configured through
+  `RetryPolicyConstants`/`StaticRetryPolicy`/
+  `TailLatencyRequestTimeoutRetryPolicy`.
+
+#### 2.2.3 Write path
+
+- `AbfsOutputStream` buffers into `AbfsBlock`/`AbfsBlobBlock` (state in
+  `AbfsBlockStatus`) and flushes on `hflush`/`hsync` where the backend
+  allows; stream statistics come from `AbfsOutputStreamStatisticsImpl` and
+  `AbfsIoUtils` provides stream helpers.
+
+#### 2.2.4 Rename, leases and atomicity
+
+- `AbfsLease` implements the infinite-lease protocol for atomic rename on
+  HNS accounts (§4.4). On blob (non-HNS) accounts rename atomicity is the
+  `RenameAtomicity` protocol: `preRename()` writes a
+  `RenamePendingJsonFormat` journal before the rename, and `postRename()`/
+  `redo()` complete or repair the rename from that journal after a crash.
+- Listings page through `AbfsListResult`/`AbfsListStatusRemoteIterator`;
+  metadata types are `AbfsLocatedFileStatus`/`VersionedFileStatus`.
+
+#### 2.2.5 Auth, extensions and tokens
+
+- `oauth2/` providers (§5.3) are selected by `AbfsConfiguration`;
+  `oauth2/IdentityTransformer` (with `LocalIdentityTransformer`) transforms
+  user/group identities for ACL get/set requests.
+- `extensions/` adds `SASTokenProvider`, `EncryptionContextProvider`,
+  `CustomDelegationTokenManager` and the `BoundDTExtension` interface that
+  `AbfsDelegationTokenManager` implements; `security/` holds the identifier,
+  the fetchers (`AbfsDtFetcher`, `AbfssDtFetcher`), the renewer
+  (`AbfsTokenRenewer`) and the encryption-context adapters
+  (`ContextEncryptionAdapter`, `NoContextEncryptionAdapter`).
+- `diagnostics/` provides the typed configuration validators
+  (`ConfigurationBasicValidator` and its primitive subclasses) used to
+  enforce bounds on buffer-size and related keys.
+
 ### 2.3 ADLS Gen1 — hadoop-azure-datalake (brief)
 
 Package `org.apache.hadoop.fs.adl`, scheme `adl://`. `AdlFileSystem` implements `FileSystem` over the Azure Data Lake Store REST
@@ -267,6 +599,16 @@ supplied through `AzureADTokenProvider` adapters (`SdkTokenProviderAdapter`, `To
 client id/credential/refresh URL, MSI port, device-code, …). `Adl` is the FileContext binding. ADLS Gen1 is in maintenance mode
 upstream; Gen2 (ABFS) is the successor.
 
+#### 2.3.1 Internals
+
+`AdlFileSystem` is the whole front-end: `AdlFsInputStream`/
+`AdlFsOutputStream` do the buffering, `AdlFileStatus`/`AdlPermission` carry
+metadata and `Adl` is the `DelegateToFileSystem`. Auth is OAuth2 through
+`oauth2/AzureADTokenProvider` implementations adapted from the Azure SDK by
+`SdkTokenProviderAdapter`, with `TokenProviderType` selecting the mode and
+keys in `AdlConfKeys`. The module ships no delegation tokens, no metrics
+package and no commit framework.
+
 ### 2.4 Aliyun OSS — hadoop-aliyun (brief)
 
 Package `org.apache.hadoop.fs.aliyun.oss`, bound via `fs.oss.impl` and the `OSS` `AbstractFileSystem` class. `AliyunOSSFileSystem
@@ -274,16 +616,38 @@ extends FileSystem` delegates to `AliyunOSSFileSystemStore`, with `AliyunOSSInpu
 `AliyunOSSFileReaderTask`/`ReadBuffer`), block-buffered output (`OSSDataBlocks`, `AliyunOSSBlockOutputStream`), server-side copy
 for rename (`AliyunOSSCopyFileTask`/`Context`) and statistics wrappers (`OutputStreamStatistics`, `BlockOutputStreamStatistics`).
 
+#### 2.4.1 Internals
+
+`AliyunOSSFileSystem` delegates to `AliyunOSSFileSystemStore`; reads use
+`AliyunOSSInputStream` with background `AliyunOSSFileReaderTask` workers
+filling `ReadBuffer` objects, writes use `AliyunOSSBlockOutputStream` over
+`OSSDataBlocks`. Rename copies server-side via `AliyunOSSCopyFileTask`/
+`AliyunOSSCopyFileContext`; listings go through `OSSListRequest`/
+`OSSListResult` with `FileStatusAcceptor` filtering entries. Credentials
+come from `AliyunCredentialsProvider`; counters from the `statistics/`
+package (`BlockOutputStreamStatistics`, `OutputStreamStatistics`).
+
 ### 2.5 OpenStack Swift — hadoop-openstack (brief)
 
 **This module is empty.** The directory contains only a `pom.xml` whose description states: "This module used to contain code to
 support integration with OpenStack. It has been deleted as unsupported; the JAR is still published so as to not break applications
 which declare an explicit maven/ivy/SBT dependency on the module." No Swift `FileSystem` exists in the current tree.
 
+#### 2.5.1 Module contents
+
+No source packages exist — there is no depth-3 structure; the module is
+`pom.xml` only.
+
 ### 2.6 hadoop-kafka (brief)
 
 Not a filesystem: a single class, `org.apache.hadoop.metrics2.sink.KafkaSink`, a Metrics2 **sink** that pushes Hadoop (YARN/HDFS)
 metrics to a Kafka topic. The module's only other code is its test `TestKafkaMetrics`.
+
+#### 2.6.1 Internals
+
+One class: `org.apache.hadoop.metrics2.sink.KafkaSink implements MetricsSink,
+Closeable` writes serialized metrics events to a configured Kafka topic;
+there is no other main-source file in the module.
 
 ### 2.7 HAR — hadoop-archives
 
@@ -305,6 +669,31 @@ writes the parts sequentially.
 and translates every `getFileStatus`/`open` on an inner path into a positional read of a byte range inside the appropriate
 `part-*` file. Archives are immutable and read-only — `create`, `rename`, `setOwner` fail. `fs.har.impl.disable.cache`
 (core-default) exists because archive instances cache per-host state.
+
+#### 2.7.1 Archive creation job internals (`HadoopArchives`)
+
+- `HadoopArchives implements Tool` (archive version `VERSION = 3`) drives a
+  two-phase MapReduce job; options are parsed from
+  `-archiveName/-p/-r/...` and inputs are labelled by its constants
+  (`har.src.list`, `har.dest.path`, `har.tmp.dir`, `har.job.dir`,
+  `har.src.count`, `har.total.size`, `har.archive.name`, `har.parent.path`,
+  `har.block.size`, `har.replication.factor`, `har.partfile.size`).
+- The listing phase walks the source tree into `FileStatusDir` wrappers and
+  serializes each entry as a `HarEntry` (`Writable`); `HArchiveInputFormat`
+  feeds the mappers, `HArchivesMapper` writes file bytes into `part-*` files
+  and emits index records keyed by source-path hash (`IntWritable`), and
+  `HArchivesReducer` merges those records into `_index`/`_masterindex`.
+
+#### 2.7.2 Archive read path internals (`HarFileSystem`)
+
+- `HarFileSystem` (hadoop-common) parses `har://` URIs against a host
+  filesystem, loads `_masterindex`/`_index`, and serves
+  `getFileStatus`/`open` by translating inner paths to positional
+  (part file, offset, length) reads. Parsed metadata is cached per URI in
+  the static synchronized `harMetaCache` (an `LruCache<URI, HarMetaData>`),
+  refreshed only on cache miss; `HarFs` is the `AbstractFileSystem`.
+  Mutating operations (`create`, `rename`, `setOwner`) are unsupported —
+  archives are read-only.
 
 ### 2.8 DistCp v2 — hadoop-distcp
 
@@ -334,6 +723,55 @@ copies a file list.
   path if atomic-commit was opted, (4) deletes target files missing at source when opted (`-delete`), and (5) cleans partially
   copied files from failed attempts. `CopyOutputFormat` wires the mapper/committer pair; `DeletedDirTracker` supports `-delete`
   bookkeeping; `tools/util/ProducerConsumer` and `WorkRequest*` provide parallel worker plumbing.
+
+#### 2.8.1 Driver and options
+
+`DistCp.execute()` builds the copy listing, assembles the MapReduce job from
+`DistCpOptions` (parsed by `OptionsParser` into `DistCpOptionSwitch` flags),
+wraps them in a `DistCpContext`, and submits; `DistCpConstants` holds the
+config-key equivalents and job labels. `DistCpSync` (with `DiffInfo`)
+implements the snapshot-diff fast path for `-diff`/`-update` and reports
+whether the delta sync succeeded so the job can fall back to a full copy.
+
+#### 2.8.2 Copy listing internals
+
+`CopyListing` defines the build-and-iterate contract over
+`CopyListingFileStatus` records. `SimpleCopyListing` recursively walks the
+source with concurrent listing bounded by `-numListstatusThreads`;
+`GlobbedCopyListing` expands globbed source paths and delegates the listing
+build to a `SimpleCopyListing`; `FileBasedCopyListing` reads an explicit
+list file. `CopyFilter` implementations (`TrueCopyFilter`,
+`RegexCopyFilter`, `RegexpInConfigurationFilter`) prune entries before the
+listing file is written.
+
+#### 2.8.3 Mapper and copy execution
+
+`CopyMapper` dispatches per record to `RetriableFileCopyCommand` (chunked
+streaming copy with checksum comparison in `DistCpUtils`) and
+`RetriableDirectoryCreateCommand`, both wrapped by the generic
+`RetriableCommand` retry loop; `ThrottledInputStream` enforces `-bandwidth`
+per stream. Attribute preservation (`-p`) is applied through `DistCpUtils`.
+
+#### 2.8.4 Dynamic splitting (`tools.mapred.lib`)
+
+`DynamicInputFormat` divides the copy listing into `DynamicInputChunk`
+sequence files on DFS; each map's `DynamicRecordReader` iterates its chunk
+and claims a new one when exhausted, rescanning the chunk directory only
+after an idle period (`TIME_THRESHOLD_FOR_DIR_SCANS` = 5 minutes). Chunk
+sizing comes from `DynamicInputChunkContext` and the `distcp.dynamic.*`
+keys (`distcp.dynamic.split.ratio`, `distcp.dynamic.min.records_per_chunk`,
+`distcp.dynamic.max.chunks.ideal`, `distcp.dynamic.max.chunks.tolerable`).
+
+#### 2.8.5 Commit and cleanup
+
+`CopyCommitter extends FileOutputCommitter` runs the five-step finalize of
+§4.5; `CopyOutputFormat` binds the mapper/committer pair and forwards job
+credentials (§5.6); `DeletedDirTracker` tracks deleted directories (a
+sorted, directory-before-descendants deletion model backed by a small
+guava `Cache`) so the committer can skip re-deleting children of deleted
+directories under `-delete`. `tools/util/ProducerConsumer`,
+`WorkRequest`/`WorkRequestProcessor`/`WorkReport` are the shared worker
+plumbing.
 
 ### 2.9 Job replay and benchmark tools
 
@@ -372,6 +810,88 @@ copies a file list.
   `HdfsCompatServer`, `HdfsCompatLocal`) used to compare behaviour across HDFS versions.
 - **hadoop-tools-dist** — distribution module assembling all tools into the released `hadoop-tools` tarball; no source code.
 
+#### 2.9.1 hadoop-rumen internals
+
+Sub-package layout: parsers (`HadoopLogsAnalyzer`, `JobHistoryParser`,
+`JobBuilder`, `JobHistoryParserFactory`, `JobConfigurationParser` and the
+line-based `*HistoryEventEmitter` classes for pre-2.0 logs), the `Logged*`
+object model (`LoggedJob`, `LoggedTask`, `LoggedTaskAttempt`, topology
+`MachineNode`/`RackNode`/`ParsedHost`), replay (`JobTraceReader`,
+`JobStoryProducer`, `ZombieJobProducer`/`ZombieJob`/`ZombieCluster`,
+`TraceBuilder`, `Folder` for trace concatenation) and the `anonymization/`,
+`datatypes/`, `serializers/` and `state/` support packages. JSON
+(de)serialization goes through `JsonObjectMapperParser`/
+`JsonObjectMapperWriter`; `Outputter`/`InputDemuxer` abstract file
+sinks/sources.
+
+#### 2.9.2 hadoop-gridmix internals
+
+`Gridmix` composes job generation (`JobFactory` subclasses
+`SerialJobFactory`/`ReplayJobFactory`/`StressJobFactory` paced by
+`GridmixJobSubmissionPolicy`), submission plumbing (`JobSubmitter`,
+`JobMonitor`), trace-driven input (`LoadJob`, `LoadSplit`, `GridmixSplit`,
+record factories), synthetic data generation (`GenerateData`,
+`GenerateDistCacheData`, `InputStriper`, `FilePool`, `PseudoLocalFs`) and
+user resolution (`UserResolver` → `EchoUserResolver`/
+`RoundRobinUserResolver`/`SubmitterUserResolver`). `Statistics`/
+`StatListener` and the `Summarizer` family collect run metrics.
+
+#### 2.9.3 hadoop-sls internals
+
+`SLSRunner`/`RMRunner` drive the simulation. Scheduler side:
+`scheduler/SchedulerWrapper`, `SLSCapacityScheduler`, `SLSFairScheduler`,
+`SLSSchedulerCommons` and the per-scheduler `SchedulerMetrics`. Node/AM
+side: `NMRunner`, `NMSimulator`, `AMRunner`, `AMDefinition` (with
+Rumen/SLS/Synth variants), the `appmaster/AMSimulator` subclasses,
+`MockAMLauncher`, `ContainerSimulator` and `TaskRunner`. Trace ingestion is
+`RumenToSLSConverter` or `synthetic/SynthTraceJobProducer`/`SynthJob`;
+the web UI is `web/SLSWebApp`.
+
+#### 2.9.4 hadoop-archive-logs internals
+
+Two classes: `HadoopArchiveLogs` (Tool) scans aggregated-log directories
+against its filters and, per qualifying file, launches a YARN
+distributed-shell container through `HadoopArchiveLogsRunner` that runs the
+`HadoopArchives` tool over that file.
+
+#### 2.9.5 hadoop-resourceestimator internals
+
+Sub-packages: `translator/` (`api/LogParser`, `api/SingleLineParser` with
+`impl/NativeSingleLineParser`/`RmSingleLineParser`, `validator/
+ParserValidator`), `skylinestore/api` (`SkylineStore`,
+`HistorySkylineStore`, `PredictionSkylineStore`) with `impl/InMemoryStore`
+and typed exceptions, `solver/` (`api/Solver`, `impl/BaseSolver`/
+`LpSolver`, `preprocess/SolverPreprocessor`) and `service/`
+(`ResourceEstimatorService`, `ResourceEstimatorServer`, `ShutdownHook`).
+Common types (`common/api/ResourceSkyline`, `RecurrenceId`) and
+serialization (`common/serialization/ResourceSerDe`) are shared.
+
+#### 2.9.6 hadoop-dynamometer internals
+
+Four modules. `blockgen` turns an FSImage XML into block images
+(`GenerateBlockImagesDriver`, `XMLParser`/`XMLParserMapper`,
+`GenerateDNBlockInfosReducer`, `BlockInfo`). `infra` launches the YARN
+application running a real NameNode with simulated DataNodes (`Client`,
+`ApplicationMaster`, `SimulatedDataNodes`, `DynoResource`, `DynoInfraUtils`,
+`AMOptions`, `BlockPlacementPolicyAlwaysSatisfied`,
+`AllowAllImpersonationProvider`). `workload` replays operations
+(`VirtualInputFormat`, `CreateFileMapper`) including the
+`workloadgenerator/audit/` replay path (`AuditReplayMapper`,
+`AuditReplayThread`, audit-log parsers). `dist` assembles the release.
+
+#### 2.9.7 hadoop-benchmark, hadoop-compat-bench, hadoop-tools-dist
+
+- `hadoop-benchmark`: one Tool, `org.apache.hadoop.benchmark.
+  VectoredReadBenchmark` (HDFS vectored-read throughput).
+- `hadoop-compat-bench`: `HdfsCompatSuite`/`HdfsCompatTool` drive
+  per-feature case classes (`HdfsCompatBasics`, `HdfsCompatAcl`,
+  `HdfsCompatSnapshot`, `HdfsCompatStoragePolicy`, `HdfsCompatSymlink`,
+  `HdfsCompatDirectory`, `HdfsCompatServer`, `HdfsCompatXAttr`, …) with the
+  scope wrappers (`HdfsCompatSuiteForShell`, `...ForTpcds`, `...ForAll`) and
+  lifecycle helpers (`HdfsCompatCasePrepare`/`SetUp`/`TearDown`/
+  `Cleanup`).
+- `hadoop-tools-dist`: assembly only; no source.
+
 ### 2.10 Streaming and pipes
 
 - **hadoop-streaming** (`org.apache.hadoop.streaming`): lets any executable or script act as mapper/reducer. `HadoopStreaming` is
@@ -387,6 +907,37 @@ copies a file list.
   library and examples (`HadoopPipes.cc`, headers `Pipes.hh`/`TemplateFactory.hh`, serialization in
   `SerialUtils.hh`/`SerialUtils.cc`, plus examples `wordcount-simple.cc`, `wordcount-part.cc`, `wordcount-nopipe.cc`, `sort.cc`).
   The Java-side plumbing lives in hadoop-mapreduce's `mapred.pipes`; this module ships the native C++ runtime and build wiring.
+
+#### 2.10.1 Streaming internals
+
+- Entry: `HadoopStreaming` → `StreamJob` (option parsing, `JobConf`
+  assembly, `JarBuilder`, `PathFinder` for executable lookup). The generic
+  engine is `PipeMapRed`: `PipeMapper`/`PipeReducer` (with `PipeCombiner`
+  extending `PipeReducer` for combiner runs) spawn the subprocess and pump
+  records through the `io/` adapters — `InputWriter`/`OutputReader`
+  implementations `TextInputWriter`, `KeyOnlyTextInputWriter`,
+  `RawBytesInputWriter`/`RawBytesOutputReader`,
+  `TypedBytesInputWriter`/`TypedBytesOutputReader` — chosen by
+  `IdentifierResolver`; `PipeMapRunner` runs the mapper task.
+- Record reading is `mapreduce/StreamInputFormat` +
+  `StreamBaseRecordReader`/`StreamXmlRecordReader`, with mapred-API twins of
+  the same names in `streaming/`. Wire formats: the `typedbytes` package
+  (`Type`, `Record`, `TypedBytesInput`/`TypedBytesOutput`,
+  `TypedBytesRecordInput`/`Output`, `TypedBytesWritable*`) and the legacy
+  `record/` package (`BinaryRecordInput`/`BinaryRecordOutput`,
+  `CsvRecordOutput`); `LoadTypedBytes`/`DumpTypedBytes` convert between
+  typed bytes and HDFS files; `Environment` exports job context into the
+  subprocess environment.
+
+#### 2.10.2 Pipes internals
+
+The module ships only the native build: `src/main/native/pipes/` (C++ API in
+`api/hadoop/` — `Pipes.hh`, `TemplateFactory.hh` — implementation in
+`impl/HadoopPipes.cc`) plus `src/main/native/utils/` (`SerialUtils.hh/.cc`,
+`StringUtils.hh/.cc`) and `src/main/native/examples/impl/`
+(`wordcount-simple.cc`, `wordcount-part.cc`, `wordcount-nopipe.cc`,
+`sort.cc`). The pom's native profile compiles these; the Java-side binding
+classes live in hadoop-mapreduce's `mapred.pipes`.
 
 ### 2.11 Small utilities
 
@@ -407,11 +958,51 @@ copies a file list.
   `BalanceJournalInfoHDFS`) so a migration survives restarts; options in
   `FedBalanceOptions`/`FedBalanceConfigs`/`FedBalanceContext`.
 
+#### 2.11.1 hadoop-datajoin internals
+
+Package `org.apache.hadoop.contrib.utils.join`: `DataJoinJob` assembles the
+job around the `JobBase` helper; users subclass `DataJoinMapperBase` (tags
+each record with source and group key, emitting `TaggedMapOutput` records)
+and `DataJoinReducerBase` (cross-product/merge of tagged records via
+`ResetableIterator`, with `ArrayListBackedIterator` the in-memory
+implementation).
+
+#### 2.11.2 hadoop-extras internals
+
+Two tools: `org.apache.hadoop.mapred.tools.GetGroups` (prints resolved
+groups) and `org.apache.hadoop.tools.DistCh` (bulk metadata changes), the
+latter built on `DistTool`'s job-plumbing helpers. The `org.apache.hadoop.tools`
+package here retains only `DistTool`/`DistCh` and package-info.
+
+#### 2.11.3 hadoop-fs2img internals
+
+`FileSystemImage` (Tool) walks the source tree via `FSTreeWalk`/`TreeWalk`/
+`TreePath`, maps files to blocks with a `BlockResolver`
+(`FixedBlockResolver`, `FixedBlockMultiReplicaResolver`,
+`NullBlockAliasMap`) and ownership via `UGIResolver` (`FsUGIResolver`,
+`SingleUGIResolver`), and serializes the result with `ImageWriter`.
+
+#### 2.11.4 hadoop-federation-balance internals
+
+`FedBalance` (Tool) runs a `procedure/BalanceProcedureScheduler` over
+`BalanceJob`s of `BalanceProcedure` steps, journaled through
+`BalanceJournal`/`BalanceJournalInfoHDFS` so a migration survives restarts;
+the migration itself is `DistCpProcedure` (diff-driven DistCp until the
+difference drops under `DIFF_THRESHOLD`) followed by `TrashProcedure`
+(trash-based source deletion honouring `TrashOption`). Options and tunables
+are `FedBalanceOptions`/`FedBalanceConfigs`; runtime state is
+`FedBalanceContext`.
+
 ### 2.12 Miscellaneous tools
 
 Every module in `hadoop-tools/pom.xml` — streaming, distcp, federation-balance, dynamometer, archives, archive-logs, rumen,
 gridmix, datajoin, tools-dist, extras, pipes, openstack, sls, resourceestimator, azure, aws, kafka, azure- datalake, aliyun,
 fs2img, benchmark, compat-bench — is covered above; nothing remains unlisted.
+
+#### 2.12.1 Coverage map
+
+All modules of `hadoop-tools/pom.xml` are treated above at depth 3 or as
+brief subsections; there is no additional code in this grouping to describe.
 
 ---
 
@@ -502,6 +1093,10 @@ pool pair described below.)
 - Job commit completes pending multipart uploads in place; concurrent committers of *different* jobs are
   safe, but two writers committing the same final destination path must remain undefined (single-writer
   per destination is a caller responsibility — a requirement worth making explicit).
+- Whether tracking state is held in memory or intercepted at the S3 client is decided by
+  `MagicCommitTrackerUtils` (`isTrackMagicCommitsInMemoryEnabled`,
+  `isCleanupMagicCommitterEnabled`); `MagicS3GuardCommitter` verifies at construction
+  (`verifyIsMagicCommitPath`) that its work path really is a magic path.
 
 ### 4.4 ABFS HTTP client and leases (`AbfsClient`, `AbfsLease`)
 
@@ -519,6 +1114,12 @@ pool pair described below.)
 - Buffer sizes are validated in `AbfsConfiguration`: default read buffer 4 MB
   (`DEFAULT_READ_BUFFER_SIZE`), default write buffer 8 MB (`DEFAULT_WRITE_BUFFER_SIZE`, append-blob cap
   4 MB); `AbfsOutputStream` must never flush a block larger than the configured write buffer.
+- Client ownership: the store holds both endpoint clients through
+  `AbfsClientHandler` (DFS + blob) and selects per call by `AbfsServiceType`
+  (ingress type configured via `fs.azure.ingress.service.type`). ABFS
+  prefetch threads are owned by `ReadBufferManagerV2`: a static-`ReentrantLock`-guarded
+  manager running a bounded `ReadBufferWorker` pool (optional CPU-based dynamic scaling)
+  over a shared byte-array buffer pool.
 
 ### 4.5 DistCp concurrency and atomic commit
 
@@ -607,7 +1208,10 @@ pool pair described below.)
   `RefreshTokenBasedTokenProvider`, `WorkloadIdentityTokenProvider`, `CustomTokenProviderAdapter`.
 - Delegation tokens: `AbfsDelegationTokenManager` (implements `BoundDTExtension`) with
   `AbfsDelegationTokenIdentifier`; `DtFetcher`/`TokenIdentifier`/`TokenRenewer` service entries are
-  declared in the jar. A PR adding an OAuth flow must plug in through `AccessTokenProvider`, not bypass it.
+  declared in the jar. `extensions/` supplies the pluggable side inputs — `SASTokenProvider` for SAS
+  keys and `EncryptionContextProvider` for encryption contexts; `security/` holds the fetchers
+  (`AbfsDtFetcher`, `AbfssDtFetcher`) and renewer (`AbfsTokenRenewer`). A PR adding an OAuth flow must
+  plug in through `AccessTokenProvider`, not bypass it.
 
 ### 5.4 GCS auth
 
@@ -668,7 +1272,9 @@ pool pair described below.)
 ### 6.2 Other connectors' observability
 
 - ABFS: `AbfsPerfTracker` (round-trip perf sampling), `AbfsInputStreamStatisticsImpl`/
-  `AbfsOutputStreamStatisticsImpl`, and `AbfsClientThrottlingAnalyzer` for throttle diagnostics.
+  `AbfsOutputStreamStatisticsImpl`, and `AbfsClientThrottlingAnalyzer` for throttle diagnostics;
+  requests carry a `utils/TracingContext` correlation id, giving server-side log correlation for
+  every `AbfsClient` call.
 - GCS: `GcsStorageStatistics`/`GcsStatistics`/`GcsInstrumentation` publish per-operation statistics;
   `ApiErrorExtractor`/`ErrorTypeExtractor` turn HTTP/gRPC failures into typed IOExceptions.
 - DistCp: the MapReduce counters of `CopyMapper`/`CopyCommitter` plus the job report are the audit record;
@@ -697,6 +1303,12 @@ pool pair described below.)
   (`SSL_CHANNEL_MODE`), `fs.s3a.proxy.ssl.enabled` (`PROXY_SECURED`).
 - Extension points wired through META-INF/services: `FileSystem`, `MultipartUploader`
   (`impl.S3AMultipartUploader`), `DtFetcher` (`S3ADtFetcher`), `TokenIdentifier`.
+- Async/transfer-manager surface: `ClientManager.getOrCreateTransferManager()`
+  lazily builds an `S3TransferManager` from the lazy `S3AsyncClient` via
+  `S3ClientFactory.createS3TransferManager`; client behaviour (checksums,
+  CSE, analytics accelerator, audit interceptors) must be added through
+  `S3ClientFactory.S3ClientCreationParameters`, not by bypassing the
+  factory.
 
 ### 7.2 ABFS, GCS and the minor stores
 
@@ -720,7 +1332,9 @@ pool pair described below.)
 `-blocksperchunk`, `-copybuffersize`, `-bandwidth` (MB/s per map), `-filters`, `-direct`, `-xtrack`,
 `-numListstatusThreads`, `-useiterator`. Config-key equivalents live in `DistCpConstants`
 (`distcp.preserve.status` default `"-prbugpct"`, `distcp.max.maps`, `distcp.copy.strategy`,
-`distcp.ignore.failures`, `distcp.copy.overwrite`, `distcp.update.mod.time`, …). `DistCpSync` +
+`distcp.ignore.failures`, `distcp.copy.overwrite`, `distcp.update.mod.time`, …). Dynamic-strategy
+tuning keys are `distcp.dynamic.split.ratio`, `distcp.dynamic.min.records_per_chunk`,
+`distcp.dynamic.max.chunks.ideal` and `distcp.dynamic.max.chunks.tolerable`. `DistCpSync` +
 `DiffInfo` implement the `-diff`/`-update` snapshot-delta path; `CopyFilter` implementations
 (`TrueCopyFilter`, `RegexCopyFilter`, `RegexpInConfigurationFilter`) drive `-filters`.
 

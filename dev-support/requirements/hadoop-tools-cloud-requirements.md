@@ -91,6 +91,31 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   pending commits in the `commit/files/` JSON pending-set format (`SinglePendingCommit`,
   `PendingSet`, `SuccessData`, `UploadEtag`), and at job-commit list and commit (or abort) all
   pending PUTs, honoring `ConflictResolution` modes (fail/replace/append/skip) (arch §2.1).
+- **FR-34 — Store operations as first-class objects.** S3A mutating work must be expressed as
+  `impl.AbstractStoreOperation` subclasses executed through `ExecutingStoreOperation`
+  (`RenameOperation`, `DeleteOperation`, `BulkDeleteOperation` with `BulkDeleteRetryHandler`,
+  `MkdirOperation`, `CopyFromLocalOperation`, `GetContentSummaryOperation`); SDK failure mapping must
+  stay in `impl.ErrorTranslation` and SDK streaming calls must stay bound to audit spans via
+  `InputStreamCallbacksImpl` — a PR must not inline raw SDK mutation logic into `S3AFileSystem`
+  (arch §2.1.2, `AbstractStoreOperation`).
+- **FR-35 — Lazy client manager lifecycle.** S3 clients must be created lazily by
+  `impl.ClientManagerImpl`, which holds the four `LazyAutoCloseableReference` slots (`s3Client`,
+  `s3AsyncClient`, `unencryptedS3Client`, `S3TransferManager`) with `synchronized` getters that refuse
+  use after `close()`; a PR must not eagerly create SDK clients at `initialize()` time or bypass the
+  manager (arch §2.1.1, `ClientManagerImpl`).
+- **FR-36 — Input stream selection.** The read implementation must be chosen by
+  `impl.streams.StreamIntegration`/`InputStreamType` from `fs.s3a.input.stream.type`
+  (`Constants.INPUT_STREAM_TYPE`): the classic `S3AInputStream` (`ClassicObjectInputStreamFactory`),
+  the `prefetch/` stack (`PrefetchingInputStreamFactory`) or the analytics-accelerator stream
+  (`fs.s3a.analytics.accelerator` prefix); the active store's `StreamFactoryRequirements` declares
+  support, and an unsupported combination must fail at stream creation, never mid-read (arch §2.1.3,
+  `StreamIntegration`).
+- **FR-37 — Committer plumbing and pending-set persistence.** The durable pending-set types must
+  extend `files.PersistentCommitData` (`SinglePendingCommit`, `PendingSet`, `SuccessData`,
+  `UploadEtag`); commit/abort/revert must execute through `impl.CommitOperations` (via
+  `CommitUtilsWithMR`), the magic-PUT tracker must be selected by `MagicCommitTrackerUtils`, and
+  `MagicS3GuardCommitter` must keep verifying at construction (`verifyIsMagicCommitPath`) that its
+  work path is a magic path (arch §2.1.5, `CommitOperations`).
 
 ### 1.3 ABFS — hadoop-azure
 
@@ -106,6 +131,16 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   (`AbfsAdaptiveInputStream`, `AbfsPrefetchInputStream`); writes use `AbfsOutputStream` buffering
   blocks (`AbfsBlobBlock`, `AbfsBlock`, `AbfsBlockStatus`) and flush on `hflush`/`hsync` only where
   the backend allows it (arch §2.2).
+- **FR-38 — ABFS dual-client service-type selection.** `AzureBlobFileSystemStore` must hold both
+  endpoint clients through `AbfsClientHandler` and select DFS vs blob per call by `AbfsServiceType`,
+  with the ingress service type taken from `fs.azure.ingress.service.type`
+  (`ConfigurationKeys.FS_AZURE_INGRESS_SERVICE_TYPE`) — a PR must not hardcode a single endpoint for
+  all calls (arch §2.2.1, `AbfsClientHandler`).
+- **FR-39 — ABFS blob-endpoint rename atomicity.** On non-HNS (blob) accounts, rename atomicity must
+  remain the `RenameAtomicity` protocol: `preRename()` writes the `RenamePendingJsonFormat` journal
+  before the rename and `postRename()`/`redo()` complete or repair it from that journal after a
+  crash — removing the journal write or the redo path breaks crash-safe rename (arch §2.2.4,
+  `RenameAtomicity`).
 
 ### 1.4 GCS — hadoop-gcp
 
@@ -121,6 +156,25 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   `fs.gs.block.size` 64 MB, `fs.gs.outputstream.buffer.size` 8 MB, `fs.gs.inputstream.fadvise`
   default `Fadvise.RANDOM`, plus in-place-seek limit, min-range-request size, gzip-encoding,
   rewrite chunk size, marker file pattern) (arch §1.4, §7.2).
+- **FR-40 — GCS front-end/store split.** `GoogleHadoopFileSystem` must translate Hadoop paths to
+  object names inside its single root bucket and delegate to `GoogleCloudStorageFileSystem` over the
+  `GoogleCloudStorage` client; store-level state must be modelled as
+  `GoogleCloudStorageItemInfo`/`FileInfo` keyed by `StorageResourceId` with path helpers
+  `StringPaths`/`UriPaths`, and the `Gs` FileContext delegate must share configuration, not instances,
+  with the front-end (arch §1.4.1, `GoogleCloudStorageFileSystem`).
+- **FR-41 — GCS channel internals.** `GoogleCloudStorageClientReadChannel` (a `SeekableByteChannel`
+  over the GCS `Storage` client for one `StorageResourceId`, with inner `ContentReadChannel`) must
+  keep re-issued ranged reads, forward skip through its 8 KB `SKIP_BUFFER_SIZE` buffer, gzip-encoding
+  detection and `FileAccessPatternManager`/`Fadvise` tuning; `GoogleCloudStorageClientWriteChannel`
+  must stage bytes and finalize the object only in `close()`, with listings parameterized by
+  `GcsListOperation`/`ListObjectOptions`/`ListFileOptions` (arch §1.4.2,
+  `GoogleCloudStorageClientReadChannel`).
+- **FR-42 — GCS configuration types and error boundary.** The `fs.gs.*` and credential surfaces must
+  stay built on the typed `HadoopConfigurationProperty` wrapper with `VerificationAttributes`
+  (checksum verification) and `RedactedString` (sensitive strings) as support types, and store
+  failures must cross into Hadoop only as IOExceptions produced by
+  `ApiErrorExtractor`/`ErrorTypeExtractor` (with `IoExceptionHelper`/`GoogleCloudStorageExceptions`)
+  — raw gRPC/HTTP exceptions must not escape the connector (arch §1.4.3, `ApiErrorExtractor`).
 
 ### 1.5 Other object stores
 
@@ -152,6 +206,18 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   (`SdkTokenProviderAdapter`, `TokenProviderType`, keys in `AdlConfKeys`); ADLS Gen1 is in
   maintenance mode and ABFS is the successor — a PR must not extend Gen1 with new features presented
   as strategic (arch §2.3).
+- **FR-43 — TOS commit/abort ownership and staging writes.** TOS staged multipart writes must go
+  through `object/staging/StagingPart` over an `ObjectStorage` obtained from `ObjectStorageFactory`,
+  and the `commit/ops/` package (`PendingOps`, `RawPendingOps`) must remain the sole owner of
+  commit/abort calls behind the `Committer`/`CommitterFactory` selection (arch §1.5.3, `PendingOps`).
+- **FR-44 — OBS listing and multipart plumbing.** OBS listings must delegate through
+  `OBSListing`/`OBSFsDFSListing` and multipart writes must stay driven by `OBSWriteOperationHelper`
+  over `OBSBlockOutputStream`/`OBSDataBlocks` (arch §1.5.4, `OBSWriteOperationHelper`).
+- **FR-45 — BOS listing layouts and off-thread part upload.** BOS listing-layout selection must stay
+  in the `BosNativeFileSystemStore` implementations (`HierarchyBosNativeFileSystemStore` vs
+  `NonHierarchyBosNativeFileSystemStore`) over `BosClientProxy`, part uploads must keep running off
+  the writing thread (`UploadPartThread` inside `BosOutputStream`), and store failures must extend
+  `exceptions.BosException` (arch §1.5.1, `UploadPartThread`).
 
 ### 1.6 DistCp v2 — hadoop-distcp
 
@@ -179,6 +245,22 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   `-atomic`/`-tmp` was opted, (4) delete target files missing at source when `-delete` was opted
   (bookkeeping via `DeletedDirTracker`), and (5) clean partially copied files from failed attempts
   (arch §2.8, §4.5).
+- **FR-46 — DistCp retriable copy commands.** `CopyMapper` must dispatch each record to
+  `RetriableFileCopyCommand` (chunked streaming copy with checksum comparison in `DistCpUtils`;
+  failure classification via `CopyReadException`) or `RetriableDirectoryCreateCommand`, both wrapped
+  by the generic `RetriableCommand` retry loop — a PR must not move the retry loop into the mapper
+  body (arch §2.8.3, `RetriableFileCopyCommand`).
+- **FR-47 — DistCp dynamic chunk claiming.** Under `-strategy dynamic`, `DynamicRecordReader` must
+  keep claiming a new `DynamicInputChunk` when its chunk is exhausted and rescan the chunk directory
+  only after the idle period (`TIME_THRESHOLD_FOR_DIR_SCANS` = 5 minutes); chunk sizing must come
+  from `DynamicInputChunkContext` and the `distcp.dynamic.*` keys (`distcp.dynamic.split.ratio`,
+  `distcp.dynamic.min.records_per_chunk`, `distcp.dynamic.max.chunks.ideal`,
+  `distcp.dynamic.max.chunks.tolerable`) (arch §2.8.4, `DynamicRecordReader`).
+- **FR-48 — DistCp `-delete` bookkeeping.** `DeletedDirTracker` must keep its sorted,
+  directory-before-descendants deletion model (backed by a small Guava cache) so the committer can
+  skip re-deleting children of already-deleted directories under `-delete`; the `tools/util`
+  worker plumbing (`ProducerConsumer`, `WorkRequest`/`WorkRequestProcessor`/`WorkReport`) must stay
+  the shared parallel-worker path (arch §2.8.5, `DeletedDirTracker`).
 
 ### 1.7 HAR — hadoop-archives
 
@@ -194,6 +276,12 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   `org.apache.hadoop.tools.HadoopArchives implements Tool`) is the MapReduce job creating archives
   via `hadoop archive -archiveName foo.har -p <parent> <src>* <dest>`, keying its indexing
   mapper/reducer off source path hashes and writing parts sequentially (arch §2.7).
+- **FR-49 — HAR creation job pipeline.** `HadoopArchives` must keep its two-phase MapReduce structure
+  (archive `VERSION = 3`; the `har.*` job constants such as `har.src.list`, `har.dest.path`,
+  `har.tmp.dir`; the listing phase producing `FileStatusDir`/`HarEntry` records fed by
+  `HArchiveInputFormat`; `HArchivesMapper` writing `part-*` files and emitting index records keyed by
+  source-path hash; `HArchivesReducer` merging them into `_index`/`_masterindex`) (arch §2.7.1,
+  `HadoopArchives`).
 
 ### 1.8 Streaming and pipes
 
@@ -293,6 +381,31 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   follow the same contract as S3A §4.2: buffer locally, upload on a worker, make the object visible
   only at close (arch §4.6). `KafkaSink` remains a single-threaded metrics pusher and introduces no
   filesystem concurrency semantics (arch §4.6).
+- **NFR-C-11 — S3A shared client scheduler executors.** The two static
+  `impl.LazySharedThreadPoolHolder` scheduled executors shared across S3 clients
+  (`s3a-s3-sync-scheduler`, `s3a-s3-async-scheduler`) must stay off unless enabled by their
+  `fs.s3a.*` enable keys and, when enabled, be sized and kept alive by their size/keep-alive keys
+  with defaults 5 threads and 60 s; a PR must not start them unconditionally at client creation
+  (arch §2.1.1, `LazySharedThreadPoolHolder`).
+- **NFR-C-12 — S3A vectored-read bounding.** Vectored reads must group ranges per
+  `fs.s3a.vectored.read.min.seek.size` and `fs.s3a.vectored.read.max.merged.size` with the
+  active-range bound in `Constants.AWS_S3_VECTOR_ACTIVE_RANGE_READS`, and each stream must receive
+  only a permit-limited `SemaphoredDelegatingExecutor` subset of the bounded pool sized
+  `streamThreads + vectoredActiveRangeReads` — unbounded vectored fan-out is a violation
+  (arch §2.1.3, `VectoredIOContext`).
+- **NFR-C-13 — S3A transfer-manager executor and shutdown ordering.** The `S3TransferManager` must
+  run on the unbounded pool (`withTransferManagerExecutor(unboundedThreadPool)`), and
+  `S3AFileSystem.close()` must keep the `stopAllServices()` order — store (which closes the client
+  manager and all SDK clients) → future pool → bounded pool → unbounded pool → delegation tokens,
+  signer manager, audit manager → credential list → instrumentation — with every step tolerating
+  partial initialization because `stopAllServices()` also runs when `initialize()` fails part-way
+  (arch §2.1.7, `S3AFileSystem.stopAllServices`).
+- **NFR-C-14 — ABFS read-buffer manager threading.** ABFS prefetch must stay owned by
+  `ReadBufferManagerV1`/`ReadBufferManagerV2`: V2 is guarded by a static `ReentrantLock`, runs a
+  bounded `ThreadPoolExecutor` of `ReadBufferWorker` threads with optional CPU-based dynamic scaling
+  (monitor thread, min/max pool sizes, upscale/downscale percentages) over a shared byte-array buffer
+  pool (`bufferPool`, `freeList`/`removedBufferList`); a PR must not move buffer recycling onto the
+  reader thread (arch §2.2.2, §4.4, `ReadBufferManagerV2`).
 
 ### 2.2 Security
 
@@ -353,6 +466,26 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   `MarshalledCredentialBinding`/`MarshalledCredentials` serialize credentials into identifiers, and
   `EncryptionSecrets`/`EncryptionSecretOperations` must propagate encryption secrets alongside
   delegation tokens so committers on different hosts encrypt/decrypt identically (arch §5.2).
+- **NFR-S-9 — S3A auth plumbing extension points.** Credential providers must extend
+  `AbstractAWSCredentialProvider`/`AbstractSessionCredentialsProvider` (assumed roles modelled by
+  `RoleModel`/`RolePolicies` and assumed through `STSClientFactory`; profile and token-carried
+  credentials via `ProfileAWSCredentialsProvider` and `MarshalledCredentialProvider`), custom request
+  signing must plug in only through `SignerManager`/`SignerFactory` (`CustomSdkSigner`/
+  `CustomHttpSigner` wired into clients by `AwsSignerInitializer`), and the distinction between "no
+  credentials found" (`NoAuthWithAWSException`) and "credentials rejected"
+  (`NoAwsCredentialsException`) must be preserved (arch §2.1.6, §5.1, `SignerManager`).
+- **NFR-S-10 — ABFS extension surface.** SAS keys (`extensions.SASTokenProvider`) and encryption
+  contexts (`extensions.EncryptionContextProvider`, with `security.ContextEncryptionAdapter`/
+  `NoContextEncryptionAdapter`) must enter requests only through the pluggable `extensions/`
+  interfaces alongside `CustomDelegationTokenManager`/`BoundDTExtension`, and ACL get/set identity
+  transformations must stay in `oauth2.IdentityTransformer` — a PR must not bypass them with direct
+  header injection (arch §2.2.5, §5.3, `SASTokenProvider`).
+- **NFR-S-11 — No hard Kerberos requirement in hadoop-tools.** No hadoop-tools module may add a hard
+  Kerberos dependency: rumen/SLS consume offline job-history logs, streaming/pipes/datajoin inherit
+  the MR job's UGI only, dynamometer's infra contains no mandatory Kerberos path, and Gridmix submits
+  as a target UGI only via `UserResolver.getTargetUgi` (e.g. `EchoUserResolver`), which on a secured
+  cluster relies on proxy-user configuration (`hadoop.proxyuser.*`), not tool-side keytabs
+  (arch §5.6, `EchoUserResolver`).
 
 ### 2.3 Logging and auditability
 
@@ -390,6 +523,14 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   obligations, not filesystem events: the MapReduce counters of `CopyMapper`/`CopyCommitter` plus
   the job report are the audit record, `-log <dir>` must persist per-file copy logs to the given
   DFS folder, and `-v` toggles verbose reporting (arch §6.2).
+- **NFR-L-7 — ABFS request correlation.** Every `AbfsClient` request must keep carrying a
+  `utils.TracingContext` correlation id, and client-side throttle/backoff counters must stay visible
+  through `AbfsBackoffMetrics`/`AbfsMetricsManager`/`AbfsOperationMetrics` — dropping the correlation
+  id removes server-side log correlation for every ABFS call (arch §2.2.1, §6.2, `TracingContext`).
+- **NFR-L-8 — HAR and listing audit limits.** HAR and the flat prefix listers have no audit hooks:
+  a PR must not claim HAR-operation or "list was audited" guarantees beyond standard FS logging and
+  connector metrics, and must not add such audit claims to HAR-derived requirements (arch §6.2,
+  `HarFileSystem`).
 
 ### 2.4 Integration points
 
@@ -425,6 +566,15 @@ Kafka client library (hadoop-kafka ships only a Metrics2 sink).
   older `HarFileSystem` versions read them; minor-store config families (`fs.obs.*`, `fs.cosn.*`,
   `fs.bos.*`, `fs.tos.*`) stay documented per module rather than in core-default.xml (arch §1.2,
   §7.2, §7.4).
+- **NFR-I-7 — S3A transfer-manager and client-factory surface.**
+  `ClientManager.getOrCreateTransferManager()` must lazily build the `S3TransferManager` from the
+  lazy `S3AsyncClient` via `S3ClientFactory.createS3TransferManager`, and client behaviour
+  (checksums, CSE materials, analytics accelerator, audit execution interceptors, multipart
+  thresholds) must be added through `S3ClientFactory.S3ClientCreationParameters`, never by bypassing
+  the factory (arch §7.1, §2.1.1, `S3ClientCreationParameters`).
+- **NFR-I-8 — ADL Gen1 maintenance surface.** `AdlFileSystem` ships no delegation tokens, no metrics
+  package and no commit framework; a PR must not add any of these to hadoop-azure-datalake, and Gen1
+  work must stay maintenance-mode only with ABFS as the successor (arch §2.3.1, `AdlFileSystem`).
 
 ### 2.5 Mapping from architecture NFR candidates
 
@@ -470,28 +620,39 @@ document; on conflict, this document wins.
 - [ ] Committer changes route through `S3ACommitterFactory` (FR-11); magic/staging semantics per FR-12, FR-13, NFR-C-3.
 - [ ] Credential chain order, v1 mapping, forbidden-provider rejection (NFR-S-1); no secrets in logs/toString (NFR-S-2); DT default-off and fail-closed lifetime (NFR-S-3); identifiers/prefix stable (NFR-S-8).
 - [ ] Encryption completeness (NFR-S-4); region resolution (NFR-I-1); typed IOExceptions + `RemoteFileChangedException` (NFR-L-4); audit-span rejection testable (NFR-L-1); IOStatistics not renamed without migration (NFR-L-2).
+- [ ] Store ops still first-class `AbstractStoreOperation`s via `ExecutingStoreOperation`, failure mapping in `ErrorTranslation` (FR-34); client manager lazy lifecycle and post-close refusal intact (FR-35).
+- [ ] `fs.s3a.input.stream.type` selection honours `StreamFactoryRequirements`; unsupported combos fail at stream creation (FR-36); pending sets still extend `PersistentCommitData` with commit/abort via `CommitOperations` and tracker selection via `MagicCommitTrackerUtils` (FR-37).
+- [ ] Shared scheduler executors still opt-in (NFR-C-11); vectored reads bounded by seek/merge/active-range limits (NFR-C-12); `S3TransferManager` on the unbounded pool and `stopAllServices()` shutdown order intact (NFR-C-13).
+- [ ] Custom signers only via `SignerManager`/`AwsSignerInitializer`; `NoAuthWithAWSException` vs `NoAwsCredentialsException` distinction kept (NFR-S-9); transfer manager / client behaviour only via `S3ClientCreationParameters` (NFR-I-7).
 
 ### 3.3 ABFS and GCS
 
 - [ ] DFS-vs-blob endpoint chosen by HNS support, not a user key (FR-15); `abfs`/`abfss` bindings intact (FR-1, FR-2); throttling-before-retry, lease and buffer bounds per NFR-C-4..NFR-C-6.
 - [ ] New OAuth flows implement `AccessTokenProvider`; auth-type/provider-type keys unchanged (NFR-S-6).
 - [ ] GCS single-bucket-rooted (FR-17); dual prefix reading (NFR-S-7) and statistics/error extractors preserved (NFR-L-5).
+- [ ] DFS-vs-blob per-call selection via `AbfsClientHandler`/`AbfsServiceType` with `fs.azure.ingress.service.type` (FR-38); blob-endpoint rename journal (`RenamePendingJsonFormat`) and `redo()` repair intact (FR-39); `ReadBufferManagerV2` worker-pool/buffer-pool threading unchanged (NFR-C-14).
+- [ ] SAS/encryption-context extensions stay pluggable and identity transforms in `IdentityTransformer` (NFR-S-10); `TracingContext` correlation id on every request (NFR-L-7).
+- [ ] GCS front-end/store split with single-root-bucket translation (FR-40); channel internals (`SKIP_BUFFER_SIZE`, gzip detection, `FileAccessPatternManager`, close-time finalize) kept (FR-41); `HadoopConfigurationProperty`/`RedactedString` types and IOException-only error boundary (FR-42).
 
 ### 3.4 Other stores (OSS, OBS, COS, BOS, TOS, ADL)
 
 - [ ] Buffered-I/O contract respected (NFR-C-10); OBS modes/SSE/conflicts (FR-19), COS SPI (FR-20), TOS commit mirror (FR-21), BOS plumbing (FR-22), OSS read-ahead/rename (FR-23), ADL maintenance-only (FR-24); no code added to `hadoop-openstack` or no-source dist modules (NFR-I-3).
+- [ ] TOS commit/abort still owned by `commit/ops/PendingOps` with `StagingPart` staged writes (FR-43); OBS listings/`OBSWriteOperationHelper` (FR-44); BOS listing layouts and `UploadPartThread` off the writing thread (FR-45); no DT/metrics/commit additions to ADL Gen1 (NFR-I-8).
 
 ### 3.5 DistCp
 
 - [ ] `DistCpOptionSwitch` ↔ `DistCpConstants` mapping consistent; deprecated flags stay deprecated (FR-25); new `CopyListing`/`CopyFilter` implementations don't bypass credentials (NFR-S-5) or unbound listing threads (NFR-C-8); `-atomic -tmp` all-or-nothing and committer duties intact (NFR-C-7, FR-28); `-bandwidth` per map (NFR-C-8); audit via counters/`-log`/`-v` (NFR-L-6).
+- [ ] Copy work still dispatched to `RetriableFileCopyCommand`/`RetriableDirectoryCreateCommand` under `RetriableCommand` (FR-46); dynamic chunk claiming/idle rescan and `distcp.dynamic.*` sizing unchanged (FR-47); `DeletedDirTracker` directory-before-descendants model kept (FR-48).
 
 ### 3.6 HAR and streaming/pipes
 
 - [ ] `_index`/`_masterindex` names and version header preserved (FR-29, NFR-I-6); immutability + host-FS auth (FR-30); `fs.har.impl.disable.cache` honoured (NFR-C-9); creation command surface unchanged (FR-31); streaming stdio model/`Environment` unchanged (FR-32); typedbytes round-trip byte-for-byte, XML unsplit, Pipes not conflated (NFR-I-2, FR-33).
+- [ ] HAR creation pipeline (`HArchivesMapper`/`HArchivesReducer`, hash-keyed index records, `VERSION = 3`) unchanged (FR-49); no audit-hook claims introduced for HAR or prefix listings (NFR-L-8).
 
 ### 3.7 Minor tools
 
 - [ ] Rumen trace-format changes checked against Gridmix/SLS consumers (FR-38); federation-balance chain resumable (FR-37); fs2img/dynamometer resolver SPIs kept (FR-36); auxiliary tools within named surface (FR-34, FR-35, FR-39, FR-40); new `KafkaSink`/S3A metrics redaction-reviewed (NFR-L-3).
+- [ ] No module gains a hard Kerberos dependency; Gridmix target-UGI path via `UserResolver.getTargetUgi` unchanged (NFR-S-11).
 
 ## References
 
