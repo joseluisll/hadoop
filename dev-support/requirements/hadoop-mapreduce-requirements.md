@@ -4,7 +4,7 @@
 
 **Status:** DRAFT
 **Date:** 2026-11-14
-**Source doc:** `notes/architecture/hadoop-mapreduce-architecture.md` (Architecture, ~914 lines)
+**Source doc:** `notes/architecture/hadoop-mapreduce-architecture.md` (Architecture, ~1465 lines, depth-3)
 **ID scheme:** `FR-x` functional · `NFR-C-x` concurrency · `NFR-S-x` security ·
 `NFR-L-x` logging/auditability · `NFR-I-x` integration. Numbering runs per document.
 
@@ -43,6 +43,10 @@ Derivation rules:
 - **FR-4 — Counter groups are fixed.** New framework-measurable quantities must be
   counters in `TaskCounter`, `JobCounter` or `FileSystemCounter` — not ad-hoc log lines or
   new parallel bookkeeping. (arch §2, §16.3, `TaskCounter`, `JobCounter`, `FileSystemCounter`)
+- **FR-31 — Counter caps are enforced.** The counter engine must enforce the framework
+  caps (`Limits`: counter/group count and name length) and throw
+  `LimitExceededException` when a job exceeds them; a PR must not bypass or
+  silently truncate counters instead of failing through `Limits`. (arch §2.1, `Limits`, `AbstractCounters`)
 
 ### 1.2 Task runtime: sort/spill (client-core, `org.apache.hadoop.mapred`)
 
@@ -63,6 +67,23 @@ Derivation rules:
   the configured `ShuffleConsumerPlugin`, default `Shuffle`), then sort/merge, then invoke
   the user reducer over a grouping `ValueIterator` whose value groups are decided by the
   grouping comparator. (arch §3, `ReduceTask`, `Shuffle`, `ValueIterator`)
+- **FR-32 — Sort/spill tunables keep their semantics.** `mapreduce.task.io.sort.mb`
+  (default 100) must size `kvbuffer`; `mapreduce.map.sort.spill.percent` (default 0.8) the
+  soft limit; `mapreduce.task.io.sort.factor` (default 10) the merge fan-in;
+  `map.sort.class` (default `QuickSort`) selects the `IndexedSorter`;
+  `mapreduce.map.combine.minspills` (default 3) gates the final-merge combine; spill-index
+  caching obeys `INDEX_CACHE_MEMORY_LIMIT` and the cached-spill-file cap. (arch §3.1, `MapOutputBuffer`)
+- **FR-33 — Spill output readable by the shuffle service.** After each spill the task must
+  normalize output-file permissions to `SHUFFLE_OUTPUT_PERM` so the node's shuffle service
+  can read them; a PR changing spill-file writing must preserve this. (arch §3.2, `MapTask`)
+- **FR-34 — Combiner gating.** The combiner must run per-spill when configured, and in the
+  final merge only when it did not run per-spill (`combinerRunner == null ||
+  numSpills < minSpillsForCombine`); it must never be applied twice to the same records.
+  (arch §3.3, `MapTask.mergeParts`)
+- **FR-35 — Shuffle consumer is pluggable via one key.** The reduce-side shuffle consumer
+  must be instantiated from `mapreduce.job.reduce.shuffle.consumer.plugin.class` (default
+  `org.apache.hadoop.mapreduce.task.reduce.Shuffle`) and initialized with a
+  `ShuffleConsumerPlugin.Context`; a PR must keep the plugin contract and default. (arch §3.4, `ReduceTask`, `ShuffleConsumerPlugin`)
 
 ### 1.3 Job submission (client-jobclient + client-core)
 
@@ -78,6 +99,19 @@ Derivation rules:
   `ResourceMgrDelegate.submitApplication()`; all subsequent status/kill/counter calls must go
   through `ClientServiceDelegate`, targeting the AM first and the JobHistoryServer after AM
   termination. (arch §4, `YARNRunner`, `ClientServiceDelegate`)
+- **FR-36 — Job dir identity and admin ACLs.** The staging job directory must be created
+  only after `submitClient.getNewJobID()` returns, named after that `JobID`, with
+  `JOB_DIR_PERMISSION = 0700`; queue admin ACLs must come from
+  `submitClient.getQueueAdmins()`. (arch §4.1, `JobSubmitter`, `JobSubmissionFiles`)
+- **FR-37 — Resource upload contract.** `JobResourceUploader` must expand wildcard paths
+  client-side, validate resource sizes/counts against the configured limits, and upload
+  `-libjars`/`-files`/`-archives` under the staging dir (`_libjars/`, `_files/`,
+  `_archives/`); `job.xml` must be written with token referrals stripped
+  (`TokenCache.cleanUpTokenReferral`). (arch §4.2, `JobResourceUploader`)
+- **FR-38 — Client endpoint resolution.** `ClientServiceDelegate` must resolve the live
+  `MRClientProtocol` endpoint (AM first, JHS after AM termination), wrap the AM proxy in a
+  remote-user UGI, `ClientCache` must memoize one delegate per job id, and
+  `NotRunningJob` must stub responses for jobs whose history is not yet loaded. (arch §4.3, `ClientServiceDelegate`, `ClientCache`)
 
 ### 1.4 MRAppMaster: state machines and allocator (client-app)
 
@@ -105,6 +139,28 @@ Derivation rules:
 - **FR-17 — Task failure cap.** A task must be retried up to `mapreduce.map.maxattempts` /
   `mapreduce.reduce.maxattempts` (default 4); when the cap is hit the task fails and the job
   fails, unless killed by user action. (arch §12, `TaskImpl`)
+- **FR-39 — Attempt bookkeeping invariants.** `TaskImpl` must swap the whole
+  `attempts` map reference atomically under its write lock (readers take the read lock) and
+  seed `nextAttemptNumber` from `(applicationAttemptId - 1) * 1000` so attempt numbering
+  never collides across AM retries; max-attempt limits come from
+  `mapreduce.map.maxattempts` / `mapreduce.reduce.maxattempts`. (arch §5.2, `TaskImpl`)
+- **FR-40 — Finishing funnel with monitor.** Successful/failed attempts must pass through
+  the `FINISHING` states (`SUCCESS_FINISHING_CONTAINER` / `FAIL_FINISHING_CONTAINER`)
+  waiting for the container to exit by itself, bounded by `mapreduce.task.exit.timeout`
+  (checked at `...check-interval-ms`) with fallback `*CONTAINER_CLEANUP` states; the
+  `TaskAttemptFinishingMonitor` must push the cleanup transition on timeout. (arch §5.3, `TaskAttemptImpl`, `TaskAttemptFinishingMonitor`)
+- **FR-41 — Heartbeat liveness accounting.** `TaskHeartbeatHandler` must keep
+  `runningAttempts`/`recentlyUnregisteredAttempts` and run one checker thread
+  ("TaskHeartbeatHandler PingChecker", cadence `mapreduce.task.timeout.check-interval-ms`,
+  default 30 s) that raises `TA_TIMED_OUT` when `mapreduce.task.timeout` is exceeded (floor:
+  2× the progress-report interval) and cleans up unregistered attempts after
+  `mapreduce.task.exit.timeout`. (arch §5.4, `TaskHeartbeatHandler`)
+- **FR-42 — Unregistration gating.** `RMCommunicator` must gate the final RM unregistration
+  on `isLastAMRetry` (`setShouldUnregister()`), so intermediate AM retries do not
+  unregister. (arch §5.5, `RMCommunicator`)
+- **FR-43 — Node decommission propagation.** `JOB_UPDATED_NODES` must propagate
+  decommission events to the job's per-node list of running attempts, killing affected
+  attempts. (arch §5.1, `JobImpl`)
 
 ### 1.5 Shuffle (client-shuffle + reduce-side fetcher in client-core)
 
@@ -123,6 +179,11 @@ Derivation rules:
   `MergeManagerImpl`'s in-memory threshold forces an on-disk merge (`OnDiskMapOutput`), and a
   final merge across all segments must produce the `RawKeyValueIterator` handed to
   `ReduceTask`. (arch §6, `MergeManagerImpl`)
+- **FR-44 — Merge manager structure.** `MergeManagerImpl` must own the in-memory and
+  on-disk segment sets and up to three background `MergeThread`s (mem-to-mem when enabled,
+  `InMemoryMerger` spilling at the configured memory fraction, `OnDiskMerger` merging at
+  the sort factor); `reserve()` must decide memory vs disk per fetch, and the final merge
+  must respect the combiner and the map-side spill compression. (arch §6.4, `MergeManagerImpl`, `MergeThread`)
 
 ### 1.6 JobHistoryServer (client-hs)
 
@@ -138,6 +199,19 @@ Derivation rules:
 - **FR-24 — History aging.** `HistoryFileManager` must scan both intermediate-done and done
   locations, maintain `JobListCache`, and age out old files governed by
   `mapreduce.jobhistory.cleaner.enable`/`...interval.ms`. (arch §7, §14.8, `HistoryFileManager`, `JobListCache`)
+- **FR-45 — History file format contract.** History files must be written through
+  `EventWriter` (version marker + embedded Avro schema, one `HistoryEvent` per line) in the
+  format selected by `mapreduce.jobhistory.jhist.format` (default `binary`; `Avro-Json` the
+  alternative), and flush behaviour must stay governed by
+  `yarn.app.mapreduce.am.history.max-unflushed-events` (with the post-completion
+  multiplier) and `...complete-event-flush-timeout`. (arch §7.1, `EventWriter`, `JobHistoryEventHandler`)
+- **FR-46 — Lazy single parse with placeholders.** `CompletedJob` must parse the history
+  file exactly once with `JobHistoryParser` and cache the result; until parsed, list views
+  must be served from `PartialJob`/`UnparsedJob` placeholders. (arch §7.3, `CompletedJob`, `JobHistory`)
+- **FR-47 — JHS state store.** The JHS state store must be selectable through the
+  `HistoryServerStateStoreService` factory (filesystem / LevelDB / null implementations)
+  and must persist JHS delegation tokens and applicationId state so a restarted JHS honours
+  existing tokens. (arch §7.4, `HistoryServerStateStoreService`, `HistoryServerLeveldbStateStoreService`)
 
 ### 1.7 Native task execution (client-nativetask)
 
@@ -228,6 +302,16 @@ Derivation rules:
   must funnel successful attempts through `FINISHING` so the first-attempt-to-commit-wins
   decision is atomic within the dispatcher thread, and speculative siblings are killed
   afterwards. (arch §14.10, §18.8, §18.10, `CommitterEventHandler`, `TaskAttemptImpl`)
+- **NFR-C-12 — AM shutdown ordering.** The staging-dir cleaner service must be registered
+  **before** the `ContainerAllocator` so that on `serviceStop` the allocator unregisters
+  with the RM first and only then staging is cleaned; `JobFinishEventHandler` must run
+  `shutDownJob()` on a fresh thread so the dispatcher thread is never blocked by shutdown
+  work. A PR that reorders service registration must re-verify this ordering. (arch §5.8, `MRAppMaster`)
+- **NFR-C-13 — Read-write lock view pattern.** `JobImpl`, `TaskImpl` and `TaskAttemptImpl`
+  must guard their mutable view (counters, diagnostics, task/attempt maps) with the
+  `readLock`/`writeLock` pair — readers (web/RPC/speculator) take the read lock, the
+  attempts map is swapped atomically under the write lock — while `State` transitions stay
+  dispatcher-only. (arch §5.1, §5.2, §5.3, `JobImpl`, `TaskImpl`, `TaskAttemptImpl`)
 
 ### 2.2 Security (NFR-S)
 
@@ -279,6 +363,10 @@ Derivation rules:
   `HSAuditLogger` records on success AND failure (`UNAUTHORIZED_USER` on denial); audit
   PRs in the MR domain must target the JHS layer (or YARN's loggers), not a non-existent
   MR daemon logger. (arch §15.7, §16.4, §18.16, `HSAuditLogger`, `HSAdminServer`)
+- **NFR-S-11 — Submission resource limits.** `JobResourceUploader` must enforce the
+  configured resource size/count limits at submission time (rejecting oversized or
+  excessive uploads before the application reaches the RM); a PR that relaxes or bypasses
+  the validation is a defect. (arch §4.2, `JobResourceUploader`)
 
 ### 2.3 Logging and auditability (NFR-L)
 
@@ -305,6 +393,15 @@ Derivation rules:
 - **NFR-L-5 — No duplicated audit trail.** MR must not duplicate YARN's audit log (RM/NM
   loggers already audit submission/kill/counter access); new MR-domain privileged
   operations must log through `HSAuditLogger`. (arch §16.4, `HSAuditLogger`)
+- **NFR-L-6 — History event-queue observability.** `JobHistoryEventHandler` must log its
+  `eventQueue` size every 1000 events; flush tuning keys
+  (`yarn.app.mapreduce.am.history.max-unflushed-events`,
+  `...complete-event-flush-timeout`) must keep governing the flush cadence (per FR-45).
+  (arch §7.1, `JobHistoryEventHandler`)
+- **NFR-L-7 — Shuffle metrics are the health surface.** `ShuffleHandler` must keep exposing
+  `ShuffleMetrics` (`shuffleOutputBytes`, `shuffleOutputsOK`, `shuffleOutputsFailed`,
+  `shuffleConnections`); a PR changing fetch serving must keep these counters accurate —
+  they are the observable health surface of the aux service. (arch §6.2, `ShuffleHandler`)
 
 ### 2.4 Integration (NFR-I)
 
@@ -338,6 +435,31 @@ Derivation rules:
   (`<staging>/<user>/.staging/<jobId>/`) must be AM-restart-safe (AM recovery is disabled
   by default, see FR-29) and must be cleaned by the post-unregistration staging cleaner on
   success; permissions per NFR-S-8. (arch §17.5, `JobSubmissionFiles`)
+- **NFR-I-7 — Container launcher pool keys.** `ContainerLauncherImpl` must size its
+  `HadoopThreadPoolExecutor` from `yarn.app.mapreduce.am.containerlauncher.threadpool-initial-size`
+  (initial) and `yarn.app.mapreduce.am.containerlauncher.thread-count-limit` (upper bound);
+  launch I/O must never run on the dispatcher thread. (arch §5.6, §14.1, `ContainerLauncherImpl`)
+- **NFR-I-8 — AM client surface keys.** The AM's `MRClientService` RPC server must be sized
+  by `yarn.app.mapreduce.am.job.client-thread-count` and must keep hosting the AM `WebApp`
+  (`AMWebApp`/`AMWebServices` REST DAOs). (arch §5.8, `MRClientService`)
+- **NFR-I-9 — Shuffle pipeline transport keys.** `ShuffleHandler` transport behaviour must
+  stay configurable only through its documented keys: `mapreduce.shuffle.port`,
+  `max.connections`, `max.threads`, `listen.queue.size`,
+  `connection-keep-alive.enable`/`.timeout`, `manage.os.cache`, `readahead.bytes`,
+  `transfer.buffer.size`, `transferTo.allowed`, `max.session-open-files`,
+  `ssl.file.buffer.size`; the Netty pipeline order (optional `SslHandler` →
+  `HttpServerCodec` → `HttpObjectAggregator` (64 KiB) → `ChunkedWriteHandler` → handler)
+  must be preserved, with zero-copy sends via `FadvisedFileRegion`/`FadvisedChunkedFile`.
+  (arch §6.1, `ShuffleHandler`)
+- **NFR-I-10 — Shuffle path-cache keys.** The `ShuffleHandler` attempt-path lookup cache
+  must stay tuned by `mapreduce.shuffle.pathcache.max-weight`,
+  `...expire-after-access-minutes` and `...concurrency-level`, backing off to the
+  per-attempt output/index files on miss. (arch §6.2, `ShuffleHandler`)
+- **NFR-I-11 — JHS state-store selection.** The JHS state store implementation must remain
+  selectable via the `HistoryServerStateStoreService` factory (filesystem / LevelDB / null)
+  and the JHS delegation-token secret manager must keep running its own rolling threads
+  (`JHSDelegationTokenSecretManager.startThreads()`); a PR must not move token persistence
+  into ad-hoc storage. (arch §7.4, §14.8, `HistoryServerStateStoreService`, `JHSDelegationTokenSecretManager`)
 
 ### 2.5 Mapping of the architecture doc's R-NFR candidates (superseded)
 
@@ -375,11 +497,16 @@ Derivation rules:
 - [ ] Changes to `MapOutputBuffer`/`SpillThread` keep the soft-limit block, single spill thread, and exactly-once merge (FR-5, FR-6, NFR-C-6).
 - [ ] New on-disk output stays in IFile format with checksums (FR-7).
 - [ ] Reduce-side changes keep copy → merge → grouped-reduce ordering and full thread join (FR-8, NFR-C-7).
+- [ ] Counter changes still fail through `Limits` instead of bypassing caps (FR-31).
+- [ ] Sort/spill tunables keep their semantics; spill files stay `SHUFFLE_OUTPUT_PERM`; combiner is not double-applied (FR-32, FR-33, FR-34).
+- [ ] Shuffle-consumer plugin contract and default unchanged (FR-35).
 
 ### 3.2 Submission
 - [ ] Staging files match the documented layout and permissions; job.xml has no token refs (FR-9, NFR-S-3, NFR-S-8).
 - [ ] New submission knobs are `mapreduce.*`/`yarn.app.mapreduce.*` keys reflected in the ASC mapping (NFR-I-1).
-- [ ] Client failover path (AM → JHS via `ClientServiceDelegate`) is preserved (FR-11).
+- [ ] Client failover path (AM → JHS via `ClientServiceDelegate`) is preserved (FR-11, FR-38).
+- [ ] Job dir naming/permissions and `getQueueAdmins` ACL sourcing preserved (FR-36).
+- [ ] Upload wildcard/limit validation and staging subdirs preserved (FR-37, NFR-S-11).
 
 ### 3.3 MRAppMaster
 - [ ] No new direct state mutation outside dispatcher transitions; everything is events (NFR-C-2, NFR-C-3).
@@ -389,18 +516,26 @@ Derivation rules:
 - [ ] Commit path keeps single `commitJob()` and FINISHING-state atomicity (NFR-C-11, FR-27).
 - [ ] Any new state transition emits a matching `HistoryEvent` (NFR-L-3).
 - [ ] Blacklisting and failure-cap behaviour preserved (FR-17, FR-28, FR-29).
+- [ ] Attempt bookkeeping (atomic map swap, attempt-number seeding) and the RW-lock view pattern preserved (FR-39, NFR-C-13).
+- [ ] FINISHING funnel + `TaskAttemptFinishingMonitor` and heartbeat timeout accounting preserved (FR-40, FR-41).
+- [ ] Unregistration gating (`isLastAMRetry`) and `JOB_UPDATED_NODES` handling preserved (FR-42, FR-43).
+- [ ] Service-registration order keeps allocator-unregister-before-staging-clean; shutdown work stays off the dispatcher (NFR-C-12).
 
 ### 3.4 Shuffle
 - [ ] Server changes keep the `mapreduce_shuffle` service id, port key, LevelDB recovery and reject unregistered jobs (FR-18, NFR-C-8).
 - [ ] Fetch auth is enforced on every request; InvalidToken feeds fetch-failure accounting (NFR-S-2, FR-20).
 - [ ] No per-job threads on the shuffle server; shared NIO group (NFR-C-8).
 - [ ] Fetcher pool sizes still derive from `parallelcopies`; `LocalFetcher` count stays 1 locally (NFR-C-7).
+- [ ] MergeManagerImpl merger trio, `reserve()` split and final-merge combiner/compression respected (FR-44).
+- [ ] Shuffle transport and path-cache keys unchanged; Netty pipeline order preserved; `ShuffleMetrics` kept accurate (NFR-I-9, NFR-I-10, NFR-L-7).
 
 ### 3.5 JobHistoryServer
 - [ ] History file naming/move flow (staging → intermediate-done → done) unchanged or extended compatibly (FR-22, NFR-I-4).
 - [ ] Scans and file moves stay off the `MRClientProtocol` handler threads (NFR-C-9).
 - [ ] New admin operations check the admin ACL and write `HSAuditLogger` records on success and failure (NFR-S-7, NFR-S-10).
 - [ ] RPC secret manager / policy provider wiring preserved (NFR-S-6).
+- [ ] History format/flush keys (`jhist.format`, unflushed-events) preserved; queue-size logging kept (FR-45, NFR-L-6).
+- [ ] Lazy single parse + placeholders and the JHS state-store factory preserved (FR-46, FR-47, NFR-I-11).
 
 ### 3.6 Security (cross-cutting)
 - [ ] No secret material in job.xml or any new staging file (NFR-S-3).
@@ -412,6 +547,7 @@ Derivation rules:
 - [ ] Native path still gated by `Platforms` compatibility and falls back silently to Java (FR-25, FR-26).
 - [ ] New env/config plumbing uses the documented keys; no hard-coded node paths; YARN env vars read, not assumed (NFR-I-1, NFR-I-2).
 - [ ] Staging-layout additions are AM-restart-safe and cleaned on success (NFR-I-6, FR-30).
+- [ ] Container-launcher pool and AM client-thread-count keys unchanged (NFR-I-7, NFR-I-8).
 
 ---
 

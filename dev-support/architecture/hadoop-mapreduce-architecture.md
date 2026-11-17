@@ -83,6 +83,58 @@ job-level commit (see §11). `Partitioner` decides which reducer receives each m
 framework counters live in `TaskCounter` and `JobCounter`, filesystem ones in
 `FileSystemCounter`.
 
+#### 2.1 Sub-packages of `org.apache.hadoop.mapreduce`
+
+- `task` — the client-side implementations of the context objects: `JobContextImpl`,
+  `TaskAttemptContextImpl`, `TaskInputOutputContextImpl`, `MapContextImpl`,
+  `ReduceContextImpl` (thin wrappers over a `JobConf` plus task/attempt IDs); the
+  `task.reduce` sub-package is the reduce-side shuffle plugin (§6).
+- `counters` — the engine behind `Counters`: `AbstractCounters`,
+  `CounterGroupFactory`, `FileSystemCounterGroup`, `FrameworkCounterGroup`,
+  `GenericCounter`, bounded by `Limits` (`LimitExceededException` when a job
+  exceeds the group/counter/name-length caps).
+- `lib.input` — `FileInputFormat` (split computation, `MultiFileSplit`,
+  `LocatedFileStatusFetcher`), `CombineFileInputFormat`/`CombineFileRecordReader`,
+  `TextInputFormat`/`LineRecordReader` (with `SplitLineReader`/
+  `CompressedSplitLineReader` for the compressed case), `KeyValueTextInputFormat`,
+  `NLineInputFormat`, `MultipleInputs`, `DelegatingInputFormat`/`DelegatingMapper`
+  (per-path mapper selection via `TaggedInputSplit`), and the `SequenceFile*`
+  input family.
+- `lib.output` — `FileOutputFormat` and the committer family: `FileOutputCommitter`,
+  the `PathOutputCommitter` SPI with `PathOutputCommitterFactory`,
+  `FileOutputCommitterFactory`, `BindingPathOutputCommitter` (chooses a committer
+  via `mapreduce.outputcommitter.factory.scheme.*` bindings), `NamedCommitterFactory`,
+  `PartialFileOutputCommitter`, and the manifest-based `ManifestCommitter`
+  (`lib.output.committer.manifest` with `stages`/`impl`/`files` sub-packages);
+  plus `MultipleOutputs`, `LazyOutputFormat`, `NullOutputFormat`, `FilterOutputFormat`,
+  `MapFileOutputFormat`, `TextOutputFormat`, `SequenceFileOutputFormat`.
+- `lib.map` (`MultithreadedMapper`, `WrappedMapper`, `RegexMapper`,
+  `TokenCounterMapper`, `InverseMapper`), `lib.reduce` (`IntSumReducer`,
+  `LongSumReducer`, `WrappedReducer`), `lib.join` (the `CompositeInputFormat`
+  join framework: `CompositeRecordReader`, `InnerJoinRecordReader`,
+  `OuterJoinRecordReader`, `OverrideRecordReader`, `TupleWritable`),
+  `lib.chain` (`ChainMapper`/`ChainReducer` task pipelining over `Chain`),
+  `lib.partition` (`HashPartitioner`, `TotalOrderPartitioner` with `InputSampler`,
+  `KeyFieldBasedPartitioner`/`KeyFieldBasedComparator`, `BinaryPartitioner`,
+  `RehashPartitioner`), `lib.jobcontrol` (`JobControl`/`ControlledJob`
+  dependent-job graphs), `lib.db` (`DBInputFormat`/`DBOutputFormat`,
+  `DataDrivenDBInputFormat`, `DBWritable`, Oracle/MySQL variants),
+  `lib.aggregate` (the `ValueAggregator` family) and `lib.fieldsel`
+  (`FieldSelectionMapper`/`FieldSelectionReducer`).
+- `split` — `JobSplit`, `JobSplitWriter`, `SplitMetaInfoReader`: the
+  `job.split`/`job.splitmetainfo` on-disk format read back by the AM and tasks.
+- `security` — `TokenCache` plus `security.token`/`security.token.delegation`
+  (job-token and MR delegation-token identifiers, secret managers, selectors).
+- `protocol` — `ClientProtocol`/`ClientProtocolProvider`: the provider interface
+  behind `Cluster.getClient()` (§4).
+- `tools` — `CLI`, the `mapred job`-style admin/status client; `util` —
+  `ConfigUtil`, `CountersStrings`, `MRJobConfUtil`, `ResourceBundles`,
+  `ProcessTree`; `filecache` and `checkpoint` (distributed-cache helpers and
+  checkpointing stubs); `server.jobtracker`/`server.tasktracker` — MRv1-era
+  leftovers (like the `JobTracker`/`JobInProgress` classes under `mapred`, these
+  have no role in the MRv2 runtime).
+- `v2` — only `LogParams`, the log-URL parameters attached to job reports.
+
 ## 3. Classic task runtime (client-core, `org.apache.hadoop.mapred`)
 
 **Purpose.** The code that actually executes inside a container, once the AM has launched it.
@@ -96,9 +148,13 @@ implementation, `TaskUmbilicalProtocol` (task ⇄ AM RPC), `TaskLog`, `JobConf`,
 **Behaviour — MapTask sort/spill.** `MapTask.run()` opens the output via `NewOutputCollector`
 (a `MapOutputCollector` that partitions through the `Partitioner`), then runs the user mapper
 in a loop. `MapOutputBuffer` is the interesting data structure: a large circular key/value
-byte buffer (`kvbuffer`) plus a parallel metadata array (`kvoffsets`/`kvindices`) holding
-(partition, key offset, value offset). Collecting appends serialized bytes into the buffer and
-records metadata; a lock (`spillLock`, conditions `spillReady`/`spillDone`) coordinates with a
+byte buffer (`kvbuffer`) with record metadata stored as an `IntBuffer` overlay
+(`kvmeta`, written into the same backing bytes; `NMETA = 4` ints per record:
+`VALSTART`, `KEYSTART`, `PARTITION`, `VALLEN`, i.e. `METASIZE = 16` bytes) plus
+the spill cursor fields `kvstart`/`kvend`/`kvindex` and
+`equator`/`bufstart`/`bufend`/`bufindex`/`bufvoid`. Collecting appends serialized
+bytes into the buffer and records metadata; a lock (`spillLock`, conditions
+`spillReady`/`spillDone`) coordinates with a
 dedicated `SpillThread`. When collected metadata crosses a *soft limit* —
 `kvbuffer.length * spillper`, where spillper is `mapreduce.map.sort.spill.percent` — the
 collect thread blocks while the spill thread sorts the in-memory span (quick-sort over the
@@ -117,6 +173,80 @@ change the result, i.e. when the number of values from one spill for a key is be
 described in §6. Its `run()` returns a `RawKeyValueIterator` over the merged map output;
 `ReduceTask` then wraps it in a grouping `ValueIterator` (grouping comparator decides value
 groups per key) and invokes the user reducer, writing through the `RecordWriter`.
+
+#### 3.1 `MapOutputBuffer` state containers
+
+- Buffers and cursors (all package-private fields of `MapOutputBuffer`): `kvbuffer`
+  (the `byte[]` that holds both serialized records and, from the `equator` the other
+  way, the `kvmeta` metadata overlay), `bufindex`/`bufmark`/`bufvoid` for collection,
+  `kvindex`/`kvend`/`kvstart` for metadata, `softLimit` and `bufferRemaining` for
+  spill accounting, `numSpills`, `sortSpillException` (volatile: the collector
+  rethrows a spill failure on the user thread).
+- The metadata layout is `VALSTART`/`KEYSTART`/`PARTITION`/`VALLEN` (`NMETA = 4`
+  ints, `METASIZE = 16` bytes per record).
+- `indexCacheList` (`ArrayList<SpillRecord>`) caches per-spill index records in
+  memory up to a byte limit (`INDEX_CACHE_MEMORY_LIMIT_DEFAULT = 1024 * 1024`), with
+  a configurable cap on cached spill files (`SPILL_FILES_COUNT_LIMIT_DEFAULT = -1`).
+- Tunables: `mapreduce.task.io.sort.mb` (`MRJobConfig.IO_SORT_MB`, default 100) sizes
+  `kvbuffer`; `mapreduce.map.sort.spill.percent` (`JobContext.MAP_SORT_SPILL_PERCENT`,
+  default 0.8) sizes the soft limit; `mapreduce.task.io.sort.factor`
+  (`MRJobConfig.IO_SORT_FACTOR`, default 10) is the merge fan-in; `map.sort.class`
+  (`MRJobConfig.MAP_SORT_CLASS`, default `QuickSort`) selects the `IndexedSorter`;
+  `mapreduce.map.combine.minspills` (`JobContext.MAP_COMBINE_MIN_SPILLS`, default 3)
+  gates the final-merge combine (§3.3).
+
+#### 3.2 Spill thread (`SpillThread`)
+
+- One `SpillThread` (thread name `"SpillThread"`) runs for the life of the collector:
+  it waits on `spillReady` while `spillInProgress` is false, then (outside
+  `spillLock`) runs `sortAndSpill()` — sorts the current metadata span with the
+  configured `IndexedSorter`, compares keys through the configured
+  `RawComparator`, optionally runs the combiner per partition through
+  `CombineOutputCollector`, and writes one spill file plus `SpillRecord` index via
+  `IFile`.
+- After each pass the spill thread resets `kvstart`/`bufstart` to the new equator,
+  clears `spillInProgress`, and signals `spillDone`; the collect thread re-arms
+  `bufferRemaining` to the soft limit.
+- `BlockingBuffer` is the `OutputStream` the serializers write into; it is the
+  component that can block the user's `collect()` when the buffer is full (holding
+  `spillLock` while awaiting `spillDone`).
+- After each spill the task normalizes output-file permissions to
+  `SHUFFLE_OUTPUT_PERM` so the shuffle service can read them.
+
+#### 3.3 Final merge (`mergeParts`)
+
+- `mergeParts()` runs on the task's main thread after the mapper returns (no
+  background merge thread). It merges all spill files with a fan-in of
+  `mapreduce.task.io.sort.factor` into the single partitioned output file and its
+  index, consulting `indexCacheList`/`SpillRecord` index files.
+- The combiner runs in the final merge only when it did not run per-spill:
+  `if (combinerRunner == null || numSpills < minSpillsForCombine)`.
+- Counters: `MAP_OUTPUT_RECORDS`, `MAP_OUTPUT_BYTES`, `FILE_BYTES_WRITTEN` and
+  `SPILLED_RECORDS` bookkeep collection vs. spill.
+
+#### 3.4 `ReduceTask` internals
+
+- `ReduceTask.run()` owns two `Progress` objects, `copyPhase` and `sortPhase`,
+  advanced by the shuffle plugin; the shuffle consumer is instantiated from
+  `mapreduce.job.reduce.shuffle.consumer.plugin.class` (`MRConfig.SHUFFLE_CONSUMER_PLUGIN`,
+  default `org.apache.hadoop.mapreduce.task.reduce.Shuffle`) and initialized with a
+  `ShuffleConsumerPlugin.Context` (attempt, umbilical, reporter, phases,
+  `RawComparator`, merged-input knobs).
+- After `shuffleConsumerPlugin.run()` returns the merged `RawKeyValueIterator`,
+  `runNewReducer()` wraps it (progress-reporting decorator) in a
+  `ReduceContextImpl` (`mapreduce.task`) whose value iterator groups values per
+  key using the grouping comparator; the user reducer runs inside it, writing
+  through the `RecordWriter`.
+- Task-level commit is in-container, not AM-side: `Task.commit()` loops
+  `while (!umbilical.canCommit(taskId))`, then calls `committer.commitTask()`
+  itself; `Task.done()` sends the final status update and `umbilical.done()`.
+  `TaskReporter` (inner class extending `StatusReporter`, `Runnable`) owns the
+  status/progress reporting loop.
+- `mapred` sub-packages: `jobcontrol` (MRv1-style `JobControl`/`ControlledJob`),
+  `join`, `lib` (+ `lib.aggregate`, `lib.db`), and `pipes` (Hadoop Pipes runtime);
+  plus the surviving framework classes this section describes (`Task`, `MapTask`,
+  `ReduceTask`, `IFile`, `Merger`, `MergeSorter`, `IndexCache`, `SpillRecord`,
+  `RamManager`, `TaskLog`, `TaskUmbilicalProtocol`, `ShuffleConsumerPlugin`).
 
 ## 4. Job submission flow (client-jobclient + client-core)
 
@@ -148,6 +278,48 @@ sets resources/ACLs/tokens, and calls `resMgrDelegate.submitApplication()` —
 through `ClientServiceDelegate`, which finds the current `MRClientProtocol` endpoint: first
 the AM, and after the AM finishes, the JobHistoryServer. `ClientCache` memoizes proxies per
 job; `NotRunningJob` stubs responses for jobs whose history is not yet loaded.
+
+#### 4.1 `JobSubmitter` internals
+
+- `JobSubmitter` (package-private, constructed by `Cluster` with the submit
+  `FileSystem` and the `ClientProtocol` proxy in `submitClient`) drives
+  `submitJobInternal()`: `submitClient.getNewJobID()` first, then the job
+  directory under the staging area is named after the returned `JobID` and
+  created via `JobSubmissionFiles.getStagingDir()` with `JOB_DIR_PERMISSION = 0700`.
+- `copyAndConfigureFiles()` delegates to `JobResourceUploader.uploadResources()`;
+  before writing `job.xml`, `writeConf()` strips token referrals with
+  `TokenCache.cleanUpTokenReferral()` (§15.2) and the shuffle secret is
+  generated/stored in `Credentials` (§15.1).
+- `writeSplits()` → `writeNewSplits()` → `JobSplitWriter.createSplitFiles()`
+  (map count = split count); the queue admin ACLs are obtained from
+  `submitClient.getQueueAdmins()`; the final `submitClient.submitJob(...)` hands
+  control to the cluster (YARN path below).
+
+#### 4.2 `JobResourceUploader` and staging contents
+
+- `JobResourceUploader` (constructed with the job-side `FileSystem` and a
+  `useWildcard` flag) implements `uploadResources()`/`uploadResourcesInternal()`:
+  it uploads the job jar, `-libjars`, `-files` and `-archives` (wildcard paths
+  expanded client-side), validates resource sizes/counts against configured
+  limits, and uploads `-libjars`/`-files`/`-archives` under the staging dir
+  (`_libjars/`, `_files/`, `_archives/`).
+- Resulting layout is tabulated in §17.5; the split metadata format classes are
+  `JobSplit`/`JobSplitWriter`/`SplitMetaInfoReader` (§2.1).
+
+#### 4.3 YARN client delegation chain (`YARNRunner` → RM)
+
+- `YarnClientProtocolProvider` maps the `ClientProtocol` SPI to `YARNRunner`;
+  `YARNRunner` creates the application id via `ResourceMgrDelegate.getApplicationId()`
+  (`ResourceMgrDelegate` wraps `YarnClientImpl`), then
+  `createApplicationSubmissionContext()` builds the `ApplicationSubmissionContext`
+  (fields tabled in §17.1) and `setupContainerLaunchContextForAM()` assembles the
+  AM `ContainerLaunchContext` (local resources from staging, credentials
+  ByteBuffer via `ts.writeTokenStorageToStream()`, launch command `MRAppMaster`).
+- After submission, all status/counter/kill calls route through
+  `ClientServiceDelegate`, which resolves the live `MRClientProtocol` endpoint
+  (AM first, then JHS) and wraps the AM proxy in a remote-user UGI (§15.5);
+  `ClientCache` keeps one delegate per job id; `NotRunningJob` answers for jobs
+  whose history is not yet loaded.
 
 ## 5. The MapReduce ApplicationMaster (client-app)
 
@@ -222,6 +394,140 @@ slack (`estimatedEndTime - estimatedReplacementEndTime`), capped by
 elected, the speculator adds a new attempt of the same task (`SpeculatorEvent` →
 `TaskEvent` `T_ADD_SPEC_ATTEMPT`); the first attempt to succeed wins, siblings are killed.
 
+#### 5.1 `JobImpl` internals
+
+- Internal states (`JobStateInternal`): `NEW`, `SETUP`, `INITED`, `RUNNING`,
+  `COMMITTING`, `SUCCEEDED`, `FAIL_WAIT`, `FAIL_ABORT`, `FAILED`, `KILL_WAIT`,
+  `KILL_ABORT`, `KILLED`, `ERROR`, `REBOOT` — the public `JobState` is derived.
+- State containers: the task sets `mapTasks`/`reduceTasks`
+  (`LinkedHashSet<TaskId>`, filled by `InitTransition` under `tasksSyncHandle`),
+  `completedTasksFromPreviousRun` (recovery-era map of `TaskInfo`),
+  `fetchFailuresMapping` (attempt → fetch-failure count),
+  `successAttemptCompletionEventNoMap`, `jobACLs` (via `JobACLsManager`),
+  `diagnostics`, and a per-node list of running attempts used to process
+  `JOB_UPDATED_NODES` decommission events.
+- Locking: a `ReentrantReadWriteLock` pair (`readLock`/`writeLock`) guards
+  the mutable view (counters, diagnostics, task maps) that web/RPC readers
+  touch concurrently with dispatcher-driven transitions; the `State` field
+  itself is only written inside transitions (§14.2).
+
+#### 5.2 `TaskImpl`, `MapTaskImpl`, `ReduceTaskImpl`
+
+- Internal states (`TaskStateInternal`): `NEW`, `SCHEDULED`, `RUNNING`,
+  `SUCCEEDED`, `FAILED`, `KILL_WAIT`, `KILLED`.
+- State containers: the `attempts` map is swapped atomically (the whole
+  `Map<TaskAttemptId, TaskAttempt>` reference is replaced under `writeLock`,
+  readers take `readLock`), `failedAttempts` (`HashSet`), and
+  `nextAttemptNumber`, seeded as `(applicationAttemptId - 1) * 1000` so attempt
+  numbering never collides across AM retries.
+- `T_ADD_SPEC_ATTEMPT` (from the speculator) and `T_ATTEMPT_*` events funnel
+  through the same dispatcher; `MapTaskImpl`/`ReduceTaskImpl` differ only in
+  task type, the splits consumed and attempt-count limits
+  (`mapreduce.map.maxattempts` vs `mapreduce.reduce.maxattempts`).
+
+#### 5.3 `TaskAttemptImpl` and the finishing funnel
+
+- Internal states (`TaskAttemptStateInternal`): `NEW`, `UNASSIGNED`, `ASSIGNED`,
+  `RUNNING`, `COMMIT_PENDING`, then the finishing funnel
+  `SUCCESS_FINISHING_CONTAINER` / `FAIL_FINISHING_CONTAINER` (waiting for the
+  container to exit by itself, bounded by `mapreduce.task.exit.timeout` —
+  `TASK_EXIT_TIMEOUT`), fallback `SUCCESS_CONTAINER_CLEANUP` /
+  `FAIL_CONTAINER_CLEANUP`, `FAIL_TASK_CLEANUP`/`KILL_CONTAINER_CLEANUP`/
+  `KILL_TASK_CLEANUP`, terminal `SUCCEEDED`/`FAILED`/`KILLED`.
+- The attempt caches its container assignment (`ContainerId`, node HTTP
+  address), and on launch pulls the shuffle secret from the task credentials
+  (`TokenCache.getShuffleSecretKey`, falling back to the job-token password,
+  §15.1) plus the per-job encrypted-spill key when configured — both are baked
+  into the container environment sent to the NodeManager.
+- Locking: same `ReentrantReadWriteLock` (`readLock`/`writeLock`) pattern as
+  `JobImpl` for concurrent report reads; transitions remain dispatcher-only.
+- The `FINISHING` states make the first-to-succeed-wins decision atomic:
+  `TaskAttemptFinishingMonitor` (its own service) times out attempts stuck in a
+  finishing state after `mapreduce.task.exit.timeout` (checked at
+  `mapreduce.task.exit.timeout.check-interval-ms`), pushing the cleanup
+  transition.
+
+#### 5.4 Task runtime RPC: `TaskAttemptListenerImpl` + `TaskHeartbeatHandler`
+
+- `TaskAttemptListenerImpl` (`org.apache.hadoop.mapred`, client-app) implements
+  `TaskUmbilicalProtocol` behind the PB translator
+  (`TaskUmbilicalProtocolPB`/`TaskUmbilicalProtocolServerSideTranslatorPB`).
+  State containers: `jvmIDToActiveAttemptMap`
+  (`ConcurrentMap<WrappedJvmID, Task>`), `launchedJVMs` (concurrent set),
+  `attemptIdToStatus` (`ConcurrentMap<TaskAttemptId, AtomicReference<TaskAttemptStatus>>`),
+  `taskAttemptLogProgressStamps`, plus `jobTokenSecretManager`, the
+  `AMPreemptionPolicy` and the per-job encrypted-spill key. An unregistered JVM
+  asking for a task gets `TASK_FOR_INVALID_JVM` (`JvmTask(null, true)`) — a
+  die signal, not a task.
+- Every umbilical call marks progress in `TaskHeartbeatHandler`, which keeps
+  `runningAttempts`/`recentlyUnregisteredAttempts` (`ConcurrentMap<TaskAttemptId,
+  ReportTime>`) and runs one checker thread (`"TaskHeartbeatHandler PingChecker"`,
+  cadence `mapreduce.task.timeout.check-interval-ms`, default 30 s) that raises
+  `TA_TIMED_OUT` (`mapreduce.task.timeout`, floor: 2× the progress-report
+  interval, `MRJobConfUtil.getTaskProgressReportInterval`) and cleans up
+  unregistered attempts after `mapreduce.task.exit.timeout`.
+
+#### 5.5 Container allocation: `RMCommunicator`, `RMContainerRequestor`, `RMContainerAllocator`
+
+- `RMCommunicator` owns the `ApplicationMasterProtocol` proxy and
+  registration/unregistration (`register()`, `setShouldUnregister()`,
+  `isLastAMRetry` gating the final unregistration).
+- `RMContainerRequestor` books each heartbeat: `ask`/`release` resource-request
+  deltas, blacklist additions/removals, response-id tracking, and container
+  accounting under its own synchronization before events are posted.
+- `RMContainerAllocator` runs its scheduling loop on one `eventHandlingThread`
+  (§14.3): drain `ContainerRequestEvent`s → priority-ordered `ResourceRequest`s
+  → `heartbeat()` → `getResources()` → `TaskAttemptContainerAssignedEvent`s.
+  Reduce ramp-down adds `preemptReducesIfNeeded()`
+  (`preemptReducersForHangingMapRequests`) which consults the
+  `AMPreemptionPolicy` (`NoopAMPreemptionPolicy`,
+  `CheckpointAMPreemptionPolicy`, `KillAMPreemptionPolicy` under
+  `app.rm.preemption`); `ContainerFailedEvent`s update node-failure accounting.
+- Local mode swaps in `LocalContainerAllocator` and `LocalContainerLauncher`;
+  `MRAppMaster` hides the choice behind the `ContainerAllocatorRouter`/
+  `ContainerLauncherRouter` composite services.
+
+#### 5.6 Container launch: `ContainerLauncherImpl`
+
+- One `HadoopThreadPoolExecutor launcherPool` (initial size
+  `yarn.app.mapreduce.am.containerlauncher.threadpool-initial-size`, upper bound
+  `yarn.app.mapreduce.am.containerlauncher.thread-count-limit`); each
+  `ContainerLauncherEvent` gets an `EventProcessor` runnable that talks to the
+  NodeManager (`startContainers`/`stopContainers`) and posts
+  `TA_CONTAINER_LAUNCHED`/`TA_CONTAINER_COMPLETED` back to the dispatcher —
+  launch I/O never runs on the dispatcher thread (§14.1).
+
+#### 5.7 Commit orchestration: `CommitterEventHandler`
+
+- `CommitterEventType` is `JOB_SETUP`, `JOB_COMMIT`, `JOB_ABORT`, `TASK_ABORT`.
+  An `eventHandlingThread` (`"CommitterEvent Handler"`) drains its queue and
+  feeds `EventProcessor` runnables into a `HadoopThreadPoolExecutor launcherPool`
+  (5, 5) — job setup/commit/abort and task aborts run there.
+- **Task-level commit runs in the container, not here**: the winning attempt's
+  `Task.commit()` polls `umbilical.canCommit()` (resolved by
+  `TaskAttemptListenerImpl` against `TaskImpl`'s commit decision) and then calls
+  `OutputCommitter.commitTask()` itself; `CommitterEventHandler` issues only the
+  aborts and the job-level calls. Job commit is single-threaded:
+  `jobCommitStarted()` refuses re-entry (`jobCommitThread`), and
+  `cancelJobCommit()` can interrupt a running `commitJob()` after
+  `commitThreadCancelTimeoutMs`
+  (`yarn.app.mapreduce.am.job.committer.cancel-timeout`).
+- Failure cleanup: `JOB_ABORT`/`TASK_ABORT` drive `OutputCommitter.abortJob()`/
+  `abortTask()` so partial output never becomes visible (§18.9).
+
+#### 5.8 Client and web service, AM shutdown
+
+- `MRClientService` (`app.client`) serves `MRClientProtocol` (the
+  `MRClientProtocolHandler`) over an RPC server sized by
+  `yarn.app.mapreduce.am.job.client-thread-count`
+  (`MRJobConfig.MR_AM_JOB_CLIENT_THREAD_COUNT`)
+  and hosts the AM `WebApp` (`AMWebApp`); `AMWebServices` exposes the REST DAOs.
+- Shutdown ordering: `MRAppMaster` adds the staging-dir cleaner service **before**
+  the `ContainerAllocator` so that on `serviceStop` the allocator unregisters
+  with the RM first and only then staging is cleaned; the `JobFinishEventHandler`
+  posts `shutDownJob()` onto a fresh anonymous thread specifically so the
+  dispatcher thread is never blocked by shutdown work.
+
 ## 6. Shuffle (client-shuffle + reduce-side fetcher in client-core)
 
 **Purpose.** Move each map task's partitioned output to the reducer that owns the partition.
@@ -260,6 +566,80 @@ fetch, the reduce reports fetch failures to the AM (`JOB_TASK_ATTEMPT_FETCH_FAIL
 which kills and reschedules the offending map attempt. Note `ShuffleHandler` here is the
 *server* only — the reduce-side fetcher code lives in client-core's `task.reduce` package.
 
+#### 6.1 `ShuffleHandler` service lifecycle and Netty pipeline
+
+- `ShuffleHandler` starts as an NM auxiliary service: `serviceInit` reads the
+  tunables (`mapreduce.shuffle.port`, `mapreduce.shuffle.max.connections`,
+  `mapreduce.shuffle.max.threads`, `mapreduce.shuffle.listen.queue.size`,
+  `mapreduce.shuffle.connection-keep-alive.enable`/`.timeout`,
+  `mapreduce.shuffle.manage.os.cache`, `mapreduce.shuffle.readahead.bytes`,
+  `mapreduce.shuffle.transfer.buffer.size`, `mapreduce.shuffle.transferTo.allowed`,
+  `mapreduce.shuffle.max.session-open-files`,
+  `mapreduce.shuffle.ssl.file.buffer.size`); `serviceStart` binds the Netty
+  server (one boss `NioEventLoopGroup` + worker group, `NioServerSocketChannel`,
+  open channels tracked in a `ChannelGroup allChannels` for clean shutdown).
+- The pipeline (`ShuffleChannelInitializer.initChannel`) is: optional
+  `SslHandler` (when an SSL factory is configured), `HttpServerCodec`,
+  `HttpObjectAggregator` (`MAX_CONTENT_LENGTH = 1 << 16`), `ChunkedWriteHandler`,
+  then `ShuffleHandler`'s handler — `ShuffleChannelHandler` (a
+  `SimpleChannelInboundHandler<FullHttpRequest>` whose `channelRead0` parses the
+  `mapOutput`/`mapOutputInfo` URLs) with `ShuffleChannelHandlerContext` carrying
+  the per-node state.
+- Zero-copy sends go through `FadvisedFileRegion`/`FadvisedChunkedFile`, which
+  wrap the spilled partition file with `manageOsCache`/readahead-bytes advice.
+
+#### 6.2 `ShuffleHandler` state, path cache and metrics
+
+- Per-job/attempt lookup goes through a Guava `LoadingCache<AttemptPathIdentifier,
+  AttemptPathInfo> pathCache` (tuned by `mapreduce.shuffle.pathcache.max-weight`,
+  `...expire-after-access-minutes`, `...concurrency-level`), backing off to the
+  per-attempt output/index files under the attempt's local dir.
+- Recovery: job registrations (`addJobToken` with user + job token) are
+  persisted in the LevelDB store named `mapreduce_shuffle_state` (schema key
+  `shuffle-schema-version`), so registrations survive NM restarts; the handler
+  owns its own `JobTokenSecretManager secretManager` and `userRsrc` (jobId →
+  user map) for authorization of every fetch (§15.1).
+- Metrics (`ShuffleMetrics`): `shuffleOutputBytes`, `shuffleOutputsOK`,
+  `shuffleOutputsFailed`, `shuffleConnections` — the observable health surface
+  of the aux service.
+
+#### 6.3 Reduce-side fetch pipeline (`Shuffle`, `ShuffleSchedulerImpl`, `EventFetcher`, `Fetcher`)
+
+- `Shuffle.init()` builds the `ShuffleSchedulerImpl` and
+  `ShuffleClientMetrics`; `Shuffle.run()` starts one `EventFetcher` thread and
+  `mapreduce.reduce.shuffle.parallelcopies` `Fetcher` threads (`Fetcher extends
+  Thread`), plus (for local jobs) exactly one `LocalFetcher`.
+- `EventFetcher` polls the umbilical (`getMapCompletionEvents`, returning a
+  `MapTaskCompletionEventsUpdate`) and feeds each event to
+  `ShuffleSchedulerImpl.resolve()`; the scheduler keeps `mapLocations`
+  (`HashMap<String, MapHost>`), `pendingHosts`, `remainingMaps` and
+  `finishedMaps[]` — most methods are `synchronized` on the scheduler itself.
+- Each `Fetcher.run()` loop takes a host from `scheduler.getHost()` (which
+  waits on `pendingHosts`), then `copyFromHost()` builds the
+  `http://host:port/mapOutput?job=...&map=...&reduce=...` URL, opens the
+  stream, validates the `ShuffleHeader`, and streams each map
+  output into a `MapOutput` reserved from `MergeManagerImpl` (`InMemoryMapOutput`
+  or `OnDiskMapOutput`). Failures: `abortConnect` gives back the remaining map
+  ids, `copyFailed` counts fetch failures per map/host, and repeated failures
+  (`mapreduce.reduce.shuffle.maxfetchfailures` accounting,
+  `penalize(host, delay)` penalties for flaky hosts) surface as
+  `TA_TOO_MANY_FETCH_FAILURE` upstream (§12).
+
+#### 6.4 Merge side: `MergeManagerImpl` and `MergeThread`
+
+- `MergeManagerImpl` owns `inMemoryMapOutputs`, `onDiskMapOutputs`
+  (`TreeSet<CompressAwarePath>`), and up to three background `MergeThread`s:
+  `memToMemMerger` (`IntermediateMemoryToMemoryMerger`, only when
+  memory-to-memory merge is enabled), `inMemoryMerger` (`InMemoryMerger`, spills
+  accumulated in-memory segments to disk when `usedMemory` crosses the
+  configured fraction of the shuffle buffer) and `onDiskMerger` (`OnDiskMerger`,
+  merges on-disk segments when their count crosses the factor).
+- `reserve()` decides memory vs disk per fetch; `close()`/`waitForMerge()` stops
+  accepting inputs, drains the mergers, and `finalMerge()` produces the single
+  `RawKeyValueIterator` (respecting the combiner and the map-side spill
+  compression) that `ReduceTask` consumes (§3.4). All merge threads must be
+  joined before `Shuffle.run()` returns (§14.6).
+
 ## 7. JobHistoryServer (client-hs)
 
 **Purpose.** A centralized, post-mortem view of every job: the durable store of job history
@@ -279,7 +659,8 @@ client-core `org.apache.hadoop.mapreduce.jobhistory`: `EventWriter`, `EventReade
 and `JobHistoryParser` to read them back.
 
 **Behaviour.** On the AM side, `JobHistoryEventHandler` receives every history event from the
-dispatcher and writes them (Avro-serialized, JSON codec via `EventWriter`) into
+dispatcher (queued onto its own handling thread, §7.1) and writes them (Avro-serialized via
+`EventWriter`, binary codec by default) into
 `<staging>/job_history/...` inside the job's staging dir. At job completion the handler
 finalizes the file and moves it to the JHS *intermediate-done* directory; a mover service in
 `HistoryFileManager` later moves it to the canonical *done* directory on HDFS
@@ -292,6 +673,66 @@ file with `JobHistoryParser` and reconstructs ACLs, tasks, attempts, and counter
 AM termination) plus the web UI; `HsWebApp` routes pages through `HsView`, backed by
 `HsJobBlock`, `HsTasksBlock` etc. For HA of the JHS itself, the state-store services persist
 delegation tokens and JHS application state (LevelDB or filesystem).
+
+#### 7.1 AM-side history event handling (`JobHistoryEventHandler`)
+
+- `JobHistoryEventHandler` (client-app, `org.apache.hadoop.mapreduce.jobhistory`)
+  is registered on the AM dispatcher for `jobhistory.EventType`, but its
+  `handle()` only enqueues into its own `LinkedBlockingQueue<JobHistoryEvent>
+  eventQueue` — the file I/O runs on its dedicated `"eventHandlingThread"`
+  (started in `serviceStart`), which drains the queue into `handleEvent()`
+  (§14.1, §16.2). The thread logs the queue size every 1000 events.
+- Events are written through `EventWriter` (client-core): the file starts with
+  the version marker `"Avro-Json"` (or `"Avro-Binary"`), the embedded Avro
+  schema, then one Avro-encoded `HistoryEvent` per line — `WriteMode.JSON`
+  (json encoder) or `WriteMode.BINARY` (binary encoder), selected by
+  `mapreduce.jobhistory.jhist.format` (`JHAdminConfig.MR_HS_JHIST_FORMAT`,
+  default `binary`).
+- Flush behaviour is tunable: `maxUnflushedCompletionEvents`
+  (`yarn.app.mapreduce.am.history.max-unflushed-events`), multiplied by
+  `postJobCompletionMultiplier` after the job-completion event;
+  `flushTimeout` (`yarn.app.mapreduce.am.history.complete-event-flush-timeout`).
+  On job completion the handler closes and moves the file out of staging toward
+  the done dir; `TimelineClient`/`TimelineV2Client` posting is wired in the
+  same handler when ATS is enabled (its own `atsEventDispatcher`).
+
+#### 7.2 `HistoryFileManager` and the done-dir lifecycle
+
+- `HistoryFileManager` keeps `jobListCache` (the `JobListCache` inner class: a
+  size/age-bounded `ConcurrentSkipListMap<JobId, HistoryFileInfo>`), the
+  `doneDirPrefixPath`/`doneDirFc` (`FileContext` for the done dir with
+  `HISTORY_DONE_DIR_UMASK`), and a `moveToDoneExecutor`
+  (`HadoopThreadPoolExecutor`, threads `"MoveIntermediateToDone Thread #%d"`,
+  sized by `mapreduce.jobhistory.move-intermediate-done.threadcount`) that moves
+  finalized files from intermediate-done to done (§14.8).
+- Each `HistoryFileInfo` owns the job history file, its conf file and summary
+  file, knows its originating intermediate-done directory, and throttles
+  re-scans (`scanIfNeeded()`, directory-mtime based); aged-out jobs are deleted
+  from done by the cleaner (§14.8 keys).
+
+#### 7.3 The read side: `JobHistory`, `CompletedJob`, page serving
+
+- `JobHistory` (the default `HistoryStorage`, wrapped by `CachedHistoryStorage`)
+  scans the intermediate-done directories on demand and returns
+  `PartialJob`/`UnparsedJob` placeholders until a job is fully parsed.
+- `CompletedJob` lazily parses the history file once with `JobHistoryParser`
+  (into `JobHistoryParser.JobInfo`/`TaskInfo`), then builds `CompletedTask`/
+  `CompletedTaskAttempt` maps, counters and ACLs (`JobACLsManager`) — the
+  read-only job model served by both RPC and web.
+- `HistoryClientService` starts the `HSClientProtocol` RPC server (secret
+  manager `JHSDelegationTokenSecretManager`, `ClientHSPolicyProvider` ACL
+  refresh under `hadoop.security.authorization`) and the `HsWebApp`/`HsView`
+  UI stack (§15.4).
+
+#### 7.4 JHS state stores
+
+- `HistoryServerStateStoreService` and its factory select the implementation:
+  `HistoryServerFileSystemStateStoreService`,
+  `HistoryServerLeveldbStateStoreService`, or
+  `HistoryServerNullStateStoreService`. They persist JHS delegation tokens and
+  the JHS applicationId state so a restarted JHS honours existing tokens
+  (§15.4). `HSAdminServer`/`HSAdmin` expose the admin refresh protocol with
+  `HSAuditLogger` records (§15.5, §16.4).
 
 ## 8. Native task execution (client-nativetask, brief)
 
@@ -314,6 +755,42 @@ batches of serialized K/V buffers; the native side partitions, sorts (with plugg
 comparators), and spills in the same IFile format, so the shuffle protocol is unchanged.
 Incompatible jobs fall back silently to the Java `MapOutputBuffer` path of §3.
 
+#### 8.1 Java-side bridge (`org.apache.hadoop.mapred.nativetask`)
+
+- **Runtime/gating**: `NativeRuntime` (loads the native library, dispatches
+  commands), `Platform`/`Platforms` (registry) and `HadoopPlatform` (the
+  compatibility probe); `NativeMapOutputCollectorDelegator` implements
+  `MapOutputCollector` and swaps in the native collector for compatible jobs;
+  `StatusReportChecker` bridges progress reporting.
+- **Command plumbing**: `Command`/`CommandDispatcher`, `INativeHandler`,
+  `NativeBatchProcessor`, `NativeDataTarget`/`NativeDataSource`,
+  `DataChannel`/`DataReceiver`, `TaskContext` — batches of serialized K/V
+  cross the JNI boundary through these.
+- **Handlers** (`handlers`): `CombinerHandler` (calls the Java combiner back
+  from native code), `NativeCollectorOnlyHandler`, `IDataLoader`.
+- **Buffers** (`buffer`): `InputBuffer`/`OutputBuffer`,
+  `ByteBufferDataReader`/`ByteBufferDataWriter`, `BufferPusher`/`BufferPuller`
+  (with the `BufferPushee`/`BufferPullee` endpoints).
+- **Serde** (`serde`): the `NativeSerialization` registry with `IKVSerializer`/
+  `INativeSerializer` implementations for the `Writable` basics
+  (`TextSerializer`, `IntWritableSerializer`, `LongWritableSerializer`,
+  `VIntWritableSerializer`, `VLongWritableSerializer`, `BytesWritableSerializer`,
+  `BoolWritableSerializer`, `ByteWritableSerializer`, `DoubleWritableSerializer`,
+  `FloatWritableSerializer`, `NullWritableSerializer`, `DefaultSerializer`,
+  `KVSerializer`, `SerializationFramework`).
+- **Util** (`util`): `NativeTaskOutputFiles`/`LocalJobOutputFiles` (the IFile
+  output layout), `ReadWriteBuffer`, `SizedWritable`, `BytesUtil`, `ConfigUtil`,
+  `OutputUtil`.
+
+#### 8.2 Native side and compatibility
+
+- The C++ tree under `src/main/native/src` mirrors the format layer (`IFile`
+  reader/writer, codecs such as `SnappyCodec`, sorters) so spill/shuffle bytes
+  are identical to the Java path (§6 protocol unchanged).
+- `HadoopPlatform` inspects key/value/comparator/codec classes per job; any
+  unsupported combination disables the native collector and the job runs the
+  Java collector — the fallback is silent by design.
+
 ## 9. Small modules: client-common, client-hs-plugins, client-uploader
 
 - **client-common.** PB-impl wrappers for everything clients, AM and JHS exchange over
@@ -326,6 +803,36 @@ Incompatible jobs fall back silently to the Java `MapOutputBuffer` path of §3.
   for the YARN shared cache, so containers reuse one uploaded copy instead of localizing
   per-job jars.
 
+#### 9.1 client-common (`org.apache.hadoop.mapreduce.v2`)
+
+- `api`/`api.impl.pb` + `protocolrecords`/`records` (`impl.pb`): the
+  `MRClientProtocol` request/response wrappers and record PB impls
+  (`GetJobReportRequest`, `FailTaskAttemptRequest`, `Counters`, `CounterGroup`,
+  `AMInfo`, ...), with the `api.impl.pb.client`/`api.impl.pb.service` proxy
+  pairs.
+- `jobhistory`: `JobHistoryUtils` (done-dir layout computation,
+  `HISTORY_DONE_DIR_UMASK`), `FileNameIndexUtils`/`JobIndexInfo` (history file
+  name parse/format), `JHAdminConfig` (all `mapreduce.jobhistory.*` keys).
+- `security`/`security.client`: `MRDelegationTokenRenewer`,
+  `ClientHSSecurityInfo`, `ClientHSTokenSelector` (§15.3/§15.4).
+- `util`: `MRApps` (staging-dir resolution, classpath env setup, task ID
+  mapping), `MRBuilderUtils`, `MRProtoUtils`, `MRWebAppUtil`,
+  `LocalResourceBuilder`.
+
+#### 9.2 client-hs-plugins
+
+- Single class `MapReduceTrackingUriPlugin`
+  (`org.apache.hadoop.mapreduce.v2.hs.webapp`): implements YARN's
+  `TrackingUriPlugin` so the RM web UI renders the JHS URL for finished
+  applications. No threads, no state.
+
+#### 9.3 client-uploader (`org.apache.hadoop.mapred.uploader`)
+
+- `FrameworkUploader` (CLI): collects the framework jars (`DefaultJars` as the
+  default list), packages them into the configured archive and uploads it to
+  the shared-cache filesystem; `UploaderException` for failures. A build-time
+  tool, not a runtime service.
+
 ## 10. hadoop-mapreduce-examples (brief)
 
 User-visible example jobs under `org.apache.hadoop.examples`: `WordCount` (the canonical
@@ -335,6 +842,24 @@ mapper/reducer/combiner example), `Sort`, `SecondarySort`, `Join`, `Grep`, `Mult
 `terasort` (TeraSort/TeraGen/TeraValidate, the standard benchmark family), `dancing`
 (sudoku via Knuth's dancing links), and `ExampleDriver`, which builds the programmatic
 `main` dispatch table used by the `hadoop jar hadoop-mapreduce-examples.jar <program>` CLI.
+
+#### 10.1 Example package layout
+
+- Root: the single-class demos (`WordCount`, `Sort`, `SecondarySort`, `Join`,
+  `Grep`, `MultiFileWordCount`, `RandomWriter`/`RandomTextWriter`,
+  `QuasiMonteCarlo`, `DBCountPageView`, `WordMean`, `WordMedian`,
+  `WordStandardDeviation`, `AggregateWordCount`/`AggregateWordHistogram`).
+- `terasort`: `TeraGen`/`TeraSort`/`TeraValidate` with `TeraInputFormat`/
+  `TeraOutputFormat`, `TeraScheduler`, `TeraChecksum`, and the supporting
+  `Unsigned16`/`Random16`/`GenSort` classes and `TeraSortConfigKeys`.
+- `pi`: `BaileyBorweinPlouffe` and the distributed computation framework
+  (`DistBbp`, `DistSum`, `Combinable`, `Container`, `Parser`,
+  `SummationWritable`, `TaskResult`).
+- `dancing`: `DancingLinks`, `Pentomino`/`OneSidedPentomino`,
+  `DistributedPentomino`, `Sudoku` (Knuth's dancing-links solver as a map/reduce
+  job).
+- `ExampleDriver` wires every program's `main` into the `ProgramDriver`-style
+  dispatch table (single entry point, `org.apache.hadoop.examples`).
 
 ## 11. End-to-end runtime flow
 
@@ -356,9 +881,11 @@ Putting the pieces together for a submitted job:
    `reduceSlowStart` maps are done.
 5. **Reduce.** `ReduceTask.runNewReducer()` iterates the merged, grouped iterator and calls
    the user reducer; output goes to the task's temp directory on the destination FS.
-6. **Commit.** Each task signals `TA_COMMIT_PENDING`; `CommitterEventHandler` on the AM
-   serializes commit (`OutputCommitter.commitTask`, typically a rename in
-   `FileOutputCommitter`), then `commitJob()` at the end; the job completes and the staging
+6. **Commit.** Each task signals `TA_COMMIT_PENDING`; the AM serializes which attempt may
+   commit, and the winning attempt's `Task.commit()` (in the container) waits on
+   `umbilical.canCommit()` then runs `OutputCommitter.commitTask` (typically a rename in
+   `FileOutputCommitter`); `CommitterEventHandler` on the AM runs the job-level
+   `commitJob()` at the end; the job completes and the staging
    dir is cleaned (§5).
 7. **History.** Throughout, `JobHistoryEventHandler` writes history events to the staging
    history file and moves it to the done dir at completion; the JHS parses it and serves the
@@ -444,6 +971,12 @@ block the dispatcher.**
   this single thread. A handler that blocks (RPC, FS I/O) stalls every state machine —
   long work must be handed to a dedicated pool (this is exactly what the committer and the
   allocator do, below).
+- Two registered handlers decouple themselves from the dispatcher thread: `JobHistoryEventHandler.handle()`
+  only enqueues into its own `LinkedBlockingQueue` `eventQueue`, drained by its dedicated
+  `"eventHandlingThread"` (§7.1), and `MRAppMaster.JobFinishEventHandler` runs `shutDownJob()`
+  on a fresh anonymous thread. `TaskAttemptListenerImpl` serves umbilical RPC on its own
+  RPC handler threads; `ContainerLauncherImpl` and `CommitterEventHandler` own executor
+  pools (§5.6, §5.7).
 
 ### 14.2 Job/Task/TaskAttemptImpl state-machine confinement
 
@@ -553,13 +1086,18 @@ block the dispatcher.**
 
 - `CommitterEventHandler` runs an `eventHandlingThread` (`CommitterEvent Handler`) that
   feeds a `launcherPool` (`HadoopThreadPoolExecutor(5, 5, ...)`) executing
-  `EventProcessor` runnables — so **task-level** commits (`commitTask`/`abortTask`) can run
-  concurrently, up to 5.
+  `EventProcessor` runnables — the pool runs job-level setup/commit/abort and
+  **task-level aborts** (`abortTask`), up to 5 concurrently. Task-level
+  `commitTask` is not AM-side: the winning attempt's `Task.commit()` polls
+  `umbilical.canCommit()` and then commits inside the container (§5.7), so
+  several task commits can be in flight across containers, each gated by the
+  AM's single commit decision.
 - **Job-level** commit is strictly single-threaded: `jobCommitStarted()`
   (`CommitterEventHandler.java:187`) refuses a second concurrent job commit
   (throws if `jobCommitThread != null`) and `cancelJobCommit()` can interrupt a running
-  `commitJob()` (bound by `mapreduce.job.committer.cancel-timers-on-jvm-exit`-style timeout
-  config, `commitThreadCancelTimeoutMs`).
+  `commitJob()` (bound by the cancel timeout config
+  `yarn.app.mapreduce.am.job.committer.cancel-timeout`, read into
+  `commitThreadCancelTimeoutMs`).
 - Trunk **does not** guarantee arbitrary `OutputCommitter` concurrency: the framework
   serializes commits only as above; `OutputCommitter.isCommitJobRepeatable(JobContext)`
   (`OutputCommitter.java:~215`) defaults to `false`, meaning a retried AM commit is only
@@ -701,9 +1239,11 @@ Enforcing classes named here are all in `hadoop-mapreduce-client-*` unless state
 
 - Every state-machine transition of interest is mirrored into a
   `HistoryEvent` (`org.apache.hadoop.mapreduce.jobhistory`) and posted to the dispatcher;
-  `JobHistoryEventHandler` (client-app) consumes them **on the dispatcher thread** and
-  appends them Avro-serialized with a JSON codec through `EventWriter` (client-core) into
-  the job's staging history directory.
+  `JobHistoryEventHandler` (client-app) **decouples** them: the dispatcher thread only
+  enqueues into the handler's own `LinkedBlockingQueue eventQueue`, and its dedicated
+  `"eventHandlingThread"` appends them Avro-serialized through `EventWriter` (client-core;
+  binary codec by default, JSON selectable via `mapreduce.jobhistory.jhist.format`, §7.1)
+  into the job's staging history directory.
 - At job completion the handler finalizes and moves the file to the JHS
   *intermediate-done* directory; `HistoryFileManager` later moves it to the canonical
   *done* dir (`mapreduce.jobhistory.done-dir`, `JHAdminConfig.MR_HISTORY_DONE_DIR`),
@@ -818,6 +1358,7 @@ All in `JHAdminConfig` (client-common), prefix `mapreduce.jobhistory.`:
 | `webapp.https.address` (`MR_HISTORY_WEBAPP_HTTPS_ADDRESS`) | `0.0.0.0:19890` |
 | admin (`JHS_ADMIN_ADDRESS`) | separate admin RPC for refresh/delete |
 | `done-dir` / `intermediate-done-dir` (`MR_HISTORY_DONE_DIR` / `MR_HISTORY_INTERMEDIATE_DONE_DIR`) | HDFS history roots |
+| `jhist.format` (`MR_HS_JHIST_FORMAT`) | `binary` (`json` for Avro-JSON history files) |
 | `bind-host`, `client.thread-count` (`MR_HISTORY_CLIENT_THREAD_COUNT`) | server sizing |
 
 - Client↔JHS protocol is `HSClientProtocol`/`MRClientProtocol`; the RM links to the JHS
