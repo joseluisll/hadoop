@@ -50,6 +50,24 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   `ZKSignerSecretProvider`); the ZK provider must share and roll the secret cluster-wide via ZooKeeper.
   (arch §3, SignerSecretProvider)
 
+- **FR-51 — SPNEGO handler keytab state and per-request GSS contexts.** `KerberosAuthenticationHandler.init`
+  must load the configured keytab into a `serverSubject` carrying the SPNEGO principals; each
+  `WWW-Authenticate: Negotiate` challenge must drive a per-request GSS context; and the filter must remain
+  stateless per request with the `SignerSecretProvider` as its only long-lived mutable state (created in
+  `init`, destroyed in `destroy`). (arch §3 "server/ — the filter and handlers",
+  KerberosAuthenticationHandler)
+
+- **FR-52 — Client-side authenticator pair.** HTTP clients must authenticate through `AuthenticatedURL`
+  plus an `Authenticator`: `KerberosAuthenticator` runs the SPNEGO dance directly over GSS-API,
+  `PseudoAuthenticator` appends `?user.name=`, and HTTPS tuning for these connections goes through
+  `ConnectionConfigurator`. (arch §3 "client/ — client-side authenticators", KerberosAuthenticator)
+
+- **FR-53 — Kerberos name-rule translation shared via `KerberosName`/`KerberosUtil`.** `auth_to_local`
+  name-rule translation must go through hadoop-auth's `KerberosName`/`KerberosUtil` (shared with
+  `hadoop-common`'s `HadoopKerberosName`), and certificate-chain parsing through `CertificateUtil` — a PR
+  touching name rules must not fork them per module. (arch §3 "util/ — signing and Kerberos helpers",
+  KerberosName)
+
 ### 1.3 hadoop-common/conf — Configuration (arch §5)
 
 - **FR-4 — Layered resource loading, last resource wins.** `Configuration.loadResources` must walk the
@@ -67,6 +85,19 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
 - **FR-7 — Hot reconfiguration restricted to the white-list.** `ReconfigurableBase` must re-evaluate only its
   changeable-property white-list and invoke `reconfigurePropertyImpl` on the owning service; the subclass
   decides whether the new value applies in place or requires restart. (arch §5 conf, ReconfigurableBase)
+
+- **FR-40 — Programmatic overlay survives reloads.** Values set via `set*` must be kept in the `overlay`
+  and re-applied last on every resource re-walk, so `reloadConfiguration()` or `addDefaultResource` must
+  not silently drop programmatic settings. (arch §5 conf "Resource loading", Configuration)
+
+- **FR-41 — `<final>` keys reject later sets.** A key declared `<final>` in any resource must be recorded
+  in `finalParameters`, and subsequent `set` calls on it must be rejected. (arch §5 conf "Resource
+  loading", Configuration)
+
+- **FR-42 — Hot-reload HTTP surface.** `ReconfigurationServlet` must expose `ReconfigurableBase`'s
+  white-listed property re-evaluation over HTTP, reporting progress via `ReconfigurationTaskStatus` and
+  failing with `ReconfigurationException`. (arch §5 conf "Typing, instantiation and tooling",
+  ReconfigurationServlet)
 
 ### 1.4 hadoop-common/fs — FileSystem API (arch §5)
 
@@ -91,6 +122,26 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   supported, with `FilterFs`/`FilterFileSystem` decorators and `FileSystemLinkResolver`/`FSLinkResolver`
   retry loops; `FSDataInputStream` must wrap `Seekable`, `PositionedReadable`, `CanSetReadahead`,
   `CanUnbuffer`, and `FSDataOutputStream` must be built via `FSDataOutputStreamBuilder`. (arch §5 fs)
+
+- **FR-43 — Missing checksum sidecar skips validation.** When the sibling `.checksum`/`.crc` sidecar
+  (`getChecksumFile`) does not exist, `ChecksumFileSystem`/`ChecksumFSInputChecker` must skip checksum
+  validation rather than fail the read. (arch §5 fs "Checksums", ChecksumFileSystem)
+
+- **FR-44 — AbstractFileSystem scheme resolution.** The `AbstractFileSystem`/`FileContext` stack must
+  resolve its implementation from `fs.AbstractFileSystem.<scheme>.impl` and instantiate it reflectively
+  (non-cached, scheme-explicit), with `FilterFs`/`FilterFileSystem` able to decorate either stack.
+  (arch §5 fs "The cache and the local stack", AbstractFileSystem)
+
+- **FR-45 — viewfs mount-table resolution.** `ViewFileSystem`/`ViewFs` must resolve URIs through an
+  `InodeTree` built from `fs.viewfs.mounttable.*` keys (`viewfs/Constants.CONFIG_VIEWFS_PREFIX`), with
+  internal links as `ChRootedFileSystem`/`ChRootedFs` views over the target filesystem, regex link
+  targets via `RegexMountPoint`, and `NflyFSystem` mirroring writes to several targets. (arch §5 fs
+  "viewfs — mount tables", ViewFileSystem)
+
+- **FR-46 — Per-thread IO statistics context.** `IOStatisticsContext` must resolve the calling thread's
+  aggregator via `IOStatisticsContextIntegration.getCurrentIOStatisticsContext()` from a
+  `WeakReferenceThreadMap` — not a `java.lang.ThreadLocal` — and contexts must merge into
+  `IOStatisticsSnapshot`s. (arch §5 fs "permission, shell, statistics", IOStatisticsContext)
 
 ### 1.5 hadoop-common/ipc — RPC framework (arch §5)
 
@@ -117,6 +168,29 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   `LightWeightGSet` so a retried RPC returns the first response instead of re-executing the call. (arch §5
   ipc, RetryCache)
 
+- **FR-47 — ONC-RPC/XDR runtime in hadoop-common.** The `oncrpc`/`portmap` packages must implement the
+  ONC-RPC wire format (`XDR`; the `RpcCall`/`RpcReply` message family; `RpcProgram` as dispatch surface;
+  Netty-based `SimpleTcpServer`/`SimpleUdpServer`), detect duplicate requests via `RpcCallCache`, and
+  register NFS service ports through `RpcProgramPortmap` — hadoop-nfs is a library over this, not its
+  home. (arch §5 ipc "oncrpc and portmap (used by hadoop-nfs)", RpcProgram)
+
+- **FR-48 — One Client per socket factory.** `Client` instances must be shared per `SocketFactory`
+  through `ClientCache` (a synchronized map), so one JVM holds one `Client` per socket factory however
+  many proxies are created. (arch §5 ipc "Client side — `Client`, `Connection`, `ConnectionId`",
+  ClientCache)
+
+- **FR-49 — Live refresh surfaces.** Runtime refreshes must be exposed as wire protocols —
+  `RefreshCallQueueProtocol` (queue swap) and `GenericRefreshProtocol` + `RefreshHandler`/
+  `RefreshResponse` — with their client/server translators in `protocolPB/`. (arch §5 ipc "Deduplication
+  and refresh hooks", GenericRefreshProtocol)
+
+- **FR-50 — Pluggable call scheduling and cost.** Call-queue scheduling must stay pluggable:
+  `RpcScheduler`/`DefaultRpcScheduler` (FairCallQueue's `DecayRpcScheduler`,
+  `WeightedRoundRobinMultiplexer`, `UserIdentityProvider`) plus `CostProvider`
+  (`DefaultCostProvider`/`WeightedTimeCostProvider`) computing per-call cost into `ProcessingDetails`,
+  with queue and processing latency flowing into the `metrics/` MXBeans. (arch §5 ipc "Scheduling and
+  the call queue", DecayRpcScheduler)
+
 ### 1.6 hadoop-common/security — UGI, Kerberos, authorization (arch §5)
 
 - **FR-18 — UGI login and auto-renewal.** `UserGroupInformation.getLoginUser()` must build a JAAS `Subject`
@@ -136,6 +210,28 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   `JniBasedUnixGroupsMapping(WithFallback)`, `LdapGroupsMapping`, `RuleBasedLdapGroupsMapping`,
   `CompositeGroupsMapping`, netgroups via `JniBasedUnixGroupsNetgroupMapping` + `NetgroupCache`). (arch §5
   security, Groups)
+
+- **FR-54 — QOP resolution per peer/port and cached SASL factories.** `hadoop.rpc.protection` QOP must
+  be resolved by `SaslPropertiesResolver`, replaceable per deployment (`WhitelistBasedResolver`) or per
+  ingress port (`IngressPortBasedResolver`); SASL mechanism lookup must go through
+  `FastSaslClientFactory`/`FastSaslServerFactory`, which cache the underlying factories; the PLAIN path
+  must be served by `SaslPlainServer` with `SaslMechanismFactory`/`CustomizedCallbackHandler`. (arch §5
+  security "SASL and RPC identity", SaslPropertiesResolver)
+
+- **FR-55 — Credential-provider API and keystore backends.** Secrets must be read through the `alias/`
+  credential-provider API (`CredentialProvider` + `CredentialProviderFactory` + `CredentialShell`) with
+  keystore backends `JavaKeyStoreProvider`, `LocalJavaKeyStoreProvider`,
+  `BouncyCastleFipsKeyStoreProvider`, `LocalBouncyCastleFipsKeyStoreProvider`, and `UserProvider`.
+  (arch §5 security "Authorization, credential providers, HTTP glue, SSL", CredentialProviderFactory)
+
+- **FR-56 — Delegation-token tooling.** Token fetch/renew/cancel must go through the shared stack
+  (`DelegationTokenIssuer`, `DtFetcher`, `DtUtilShell`, `DtFileOperations` — the `hadoop fetchdt`
+  machinery), not ad-hoc per-service code. (arch §5 security "Tokens (security/token/)", DtUtilShell)
+
+- **FR-57 — Expired-token reaper lifecycle.** `AbstractDelegationTokenSecretManager.startThreads` must
+  start the background `ExpiredTokenRemover` daemon thread (`tokenRemoverThread`) that periodically drops
+  expired tokens, and `stopThreads` must interrupt and join it. (arch §5 security "Tokens
+  (security/token/)", AbstractDelegationTokenSecretManager)
 
 ### 1.7 hadoop-common/io — Writable serialization (arch §5)
 
@@ -161,6 +257,29 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   `@Metric`-annotated fields must become in-place gauges/counters via
   `MetricsAnnotations`/`MetricsRegistry`. (arch §5 metrics2, MetricsSystemImpl)
 
+- **FR-58 — In-tree sink set.** Sinks must implement `MetricsSink`; the shipped set is `FileSink`,
+  `RollingFileSystemSink`, `GraphiteSink`, `StatsDSink`, `PrometheusMetricsSink` plus the legacy
+  `ganglia/` sinks. (arch §5 metrics2 "sink/ and source/", MetricsSink)
+
+- **FR-59 — JVM gauges for every daemon.** `source/JvmMetrics` must register JVM heap/GC/thread gauges
+  into the `jvm` context for every daemon. (arch §5 metrics2 "sink/ and source/", JvmMetrics)
+
+- **FR-60 — In-place mutable metric family.** Metrics must be updated in place through `MetricsRegistry`'s
+  `MutableMetric` family (`MutableCounter(Int/Long)`, `MutableGauge(Int/Long/Float)`, `MutableRate`,
+  `MutableStat`, `MutableQuantiles`, `MutableRollingAverages`, `MutableRates`/
+  `MutableRatesWithAggregation`), with `@Metric` beans adapted via `MetricsAnnotations`/
+  `MutableMetricsFactory`/`MetricsSourceBuilder`. (arch §5 metrics2 "lib/ — metric builders",
+  MetricsRegistry)
+
+- **FR-61 — Per-sink record filtering.** Each `MetricsSinkAdapter` must filter records (via `filter/`
+  `RegexFilter`/`GlobFilter`) before enqueueing into its bounded `SinkQueue`. (arch §5 metrics2
+  "impl/ — the sampling pipeline", MetricsSinkAdapter)
+
+- **FR-65 — Metrics configuration tree.** Sources and sinks must be configured through the
+  `*.sink.*`/`*.source.*`-prefixed tree parsed by `MetricsConfig` (`periodMillis` variants supported for
+  tests); a PR must not introduce a parallel metrics-configuration mechanism. (arch §5 metrics2
+  "impl/ — the sampling pipeline", MetricsConfig)
+
 ### 1.9 hadoop-common/service — lifecycle and launcher (arch §5)
 
 - **FR-26 — State machine.** Service state must follow the legal transitions `NOTINITED(0) → INITED(1) →
@@ -176,6 +295,11 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   the lifecycle, install `ServiceShutdownHook`, `InterruptEscalator` (SIGTERM escalation to exit),
   `IrqHandler` and `HadoopUncaughtExceptionHandler`, mapping failures to `LauncherExitCodes`. (arch §5
   service + §11.9)
+
+- **FR-62 — Launcher blocking and LaunchableService conventions.** `ServiceLauncher` must drive
+  `init`/`start` on the main thread and then block in `service.waitForServiceToStop(0)` — or run the
+  `LaunchableService`/`AbstractLaunchableService` `bindArgs`/`execute` conventions — not
+  `waitForCompletion`. (arch §5 service "launcher/ — process entrypoints", ServiceLauncher)
 
 ### 1.10 hadoop-common/net (arch §5)
 
@@ -237,6 +361,17 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   `CuratorService`'s retrying client; `RegistrySecurity` must set ZK SASL ACLs so only the owning principal
   writes its subtree; and the server-side DNS component must publish A/SRV records from registered records.
   (arch §9)
+
+- **FR-63 — Registry DNS publishing and embedded ZK.** A/SRV records must be published from
+  `ServiceRecord`s by `RegistryDNS`/`RegistryDNSServer` through the `ServiceRecordProcessor` family
+  (`ApplicationServiceRecordProcessor`, `ContainerServiceRecordProcessor`, `RecordCreatorFactory`,
+  `LookupTask`); the server side may embed an in-process ZooKeeper via `MicroZookeeperService`,
+  configured by `MicroZookeeperServiceKeys`. (arch §9 "server/ and cli/", RegistryDNS)
+
+- **FR-64 — Registry client binding and JSON records.** Clients must obtain operations via
+  `RegistryOperationsFactory`, use `RegistryUtils`' path conventions
+  (`/registry/users/<user>/<service>/…`), and (de)serialize `ServiceRecord`s through `JsonSerDeser`.
+  (arch §9 "client/ — API, types and the ZK implementation", RegistryUtils)
 
 ## 2. Non-functional requirements
 
@@ -327,6 +462,45 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   NameNode block management) must provide their own locking. A PR must not weaken these assumptions. (arch
   §11.5)
 
+- **NFR-C-18 — ClientFinalizer conditional registration.** The `ClientFinalizer` shutdown hook must be
+  registered with `ShutdownHookManager` only when the cache map transitions empty → non-empty and
+  shutdown is not already in progress, must run `closeAll()` only when `fs.automatic.close` is true
+  (default), and must respect the per-hook `SERVICE_SHUTDOWN_TIMEOUT`. (arch §11.2,
+  FileSystem.Cache/ClientFinalizer)
+
+- **NFR-C-19 — Handlers never block on slow clients.** A response that cannot be flushed immediately
+  must be deferred to the single `Responder` thread (its own NIO `Selector`) instead of blocking the
+  `Handler` thread, and each `Reader` thread must own a private NIO `readSelector` over its registered
+  connections. (arch §11.3, Server.Responder)
+
+- **NFR-C-20 — RetryCache entry-state synchronization.** `RetryCache` `CacheEntry` state transitions
+  (`completed`) must remain `synchronized` on the entry, so the retry-vs-first-execution race is resolved
+  per entry. (arch §11.3, RetryCache.CacheEntry)
+
+- **NFR-C-21 — UGI lock discipline.** `UserGroupInformation.initialize`/`getLoginUser` and
+  `Groups.getUserToGroupsMappingService` must remain `static synchronized` on
+  `UserGroupInformation.class`; the token accessors (`addToken`/`addTokenIdentifier`, credentials
+  accessors) must stay `synchronized` on the UGI instance or `synchronized(subject)`; and `User`'s
+  `authMethod`/`login`/`lastLogin` must remain volatile. (arch §11.4, UserGroupInformation)
+
+- **NFR-C-22 — TGT renewal executor.** Auto-renewal tasks (`KeytabRenewalRunnable`/
+  `TicketCacheRenewalRunnable`) must be submitted via `executeAutoRenewalTask` to the single-thread
+  daemon executor named "TGT Renewer for <user>" — never to a caller-owned pool or the calling thread.
+  (arch §11.4, UserGroupInformation)
+
+- **NFR-C-23 — Metrics shutdown joins sink threads.** `MetricsSystemImpl.stop` must cancel the sampling
+  `Timer` and interrupt and join the per-sink threads — a PR must not leave the timer or sink threads
+  alive after stop. (arch §11.6, MetricsSystemImpl)
+
+- **NFR-C-24 — Client call-table and close coordination.** `Client.Connection.calls` must remain a
+  `Hashtable` (safe for concurrent `put` from caller threads while the connection thread iterates); close
+  must be coordinated via `AtomicBoolean shouldCloseConnection` (`compareAndSet` in `markClosed`) and
+  `AtomicBoolean running`; and `Call.complete` must notify the parked caller. (arch §11.3,
+  Client.Connection)
+
+- **NFR-C-25 — Configuration reflection cache.** `CACHE_CLASSES` must remain a synchronized map, and
+  `getClassByName` must synchronize on `Configuration.class`. (arch §11.1, Configuration)
+
 ### 2.2 Security (arch §12)
 
 - **NFR-S-1 — RPC authentication selection.** `hadoop.security.authentication` (default `simple`) must select
@@ -407,6 +581,21 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   unavailable); shell mapping honours `hadoop.security.groups.shell.command.timeout` (default 0 = wait
   forever — an unbounded external dependency on the RPC handler path unless set). (arch §12.7)
 
+- **NFR-S-13 — Proxy-user bootstrap.** `createProxyUser`/`createRemoteUser` must build impersonation
+  identities carrying a `User` principal with `AuthenticationMethod.PROXY`; a JVM may also start as a
+  proxy only via the `HADOOP_PROXY_USER` environment variable or system property — a PR must not add
+  other implicit proxy-identity paths. (arch §12.6, UserGroupInformation.createProxyUser)
+
+- **NFR-S-14 — TLS reload and hostname verification surface.** Keystore/truststore reloading must go
+  through `ReloadingX509TrustManager`/`ReloadingX509KeystoreManager` with `FileMonitoringTimerTask`
+  watching the files, and hostname verification must go through `SSLHostnameVerifier` implementations —
+  never ad-hoc `HostnameVerifier` code. (arch §12.3, SSLFactory)
+
+- **NFR-S-15 — HTTP delegation-token filter plumbing.** HTTP delegation-token authentication must live
+  in `security/token/delegation/web/` (`DelegationTokenAuthenticationHandler`,
+  `DelegationTokenAuthenticatedURL` — used by `KMSClientProvider` and WebHDFS), with the token validated
+  against the configured `SignerSecretProvider`. (arch §12.2, DelegationTokenAuthenticationHandler)
+
 ### 2.3 Logging and auditability (arch §13)
 
 - **NFR-L-1 — SLF4J only.** All modules must log through the SLF4J API (`org.slf4j.Logger`/`LoggerFactory`);
@@ -442,6 +631,12 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
   audit-logged in `hadoop-common` (fs audit logging is the HDFS NameNode's job; the fs package provides only
   the `fs/store/audit/AuditSpanSource`/`AuditSpan` span machinery). A PR must not claim or add fs-operation
   audit logging in `hadoop-common` as if it were existing behaviour. (arch §13)
+
+- **NFR-L-8 — Per-thread IO statistics attribution.** The fs attribution surface for async IO is
+  `IOStatisticsContext`, resolved per thread via
+  `IOStatisticsContextIntegration.getCurrentIOStatisticsContext()` from a `WeakReferenceThreadMap` (not a
+  `java.lang.ThreadLocal`); a PR touching thread creation or stream wiring must not break that per-thread
+  resolution. (arch §13, IOStatisticsContext)
 
 ### 2.4 Integration points (arch §14)
 
@@ -500,26 +695,34 @@ diff must be able to state "this satisfies / violates FR-7" without further deri
 When a diff touches an area, check the listed requirements (and cite them in review).
 
 - **hadoop-annotations:** FR-1.
-- **hadoop-auth (filter, handlers, Signer, secret providers):** FR-2, FR-3, NFR-S-5, NFR-I-2, NFR-I-7.
-- **`org.apache.hadoop.conf`:** FR-4, FR-5, FR-6, FR-7, NFR-C-1, NFR-L-6.
-- **`org.apache.hadoop.fs`:** FR-8, FR-9, FR-10, FR-11, FR-12, NFR-C-2, NFR-C-3, NFR-C-4, NFR-L-7, NFR-I-4.
-- **`org.apache.hadoop.ipc` (Client, Server, call queues, RetryCache):** FR-13, FR-14, FR-15, FR-16, FR-17,
-  NFR-C-5, NFR-C-6, NFR-C-7, NFR-L-3, NFR-I-1, NFR-I-4, NFR-S-3.
-- **`org.apache.hadoop.security` (UGI, groups, SASL, authorize, tokens):** FR-18, FR-19, FR-20, FR-21,
-  NFR-C-8, NFR-C-9, NFR-S-1, NFR-S-2, NFR-S-3, NFR-S-4, NFR-S-7, NFR-S-8, NFR-S-9, NFR-S-10, NFR-S-12,
+- **hadoop-auth (filter, handlers, Signer, secret providers):** FR-2, FR-3, FR-51, FR-52, FR-53, NFR-S-5, NFR-I-2, NFR-I-7.
+- **`org.apache.hadoop.conf`:** FR-4, FR-5, FR-6, FR-7, FR-40, FR-41, FR-42, NFR-C-1, NFR-C-25, NFR-L-6.
+- **`org.apache.hadoop.fs`:** FR-8, FR-9, FR-10, FR-11, FR-12, FR-43, FR-44, FR-46, NFR-C-2, NFR-C-3, NFR-C-4,
+  NFR-C-18, NFR-L-7, NFR-I-4.
+- **`org.apache.hadoop.ipc` (Client, Server, call queues, RetryCache, oncrpc/portmap):** FR-13, FR-14,
+  FR-15, FR-16, FR-17, FR-47, FR-48, FR-49, FR-50, NFR-C-5, NFR-C-6, NFR-C-7, NFR-C-19, NFR-C-20,
+  NFR-C-24, NFR-L-3, NFR-I-1, NFR-I-4, NFR-S-3.
+- **`org.apache.hadoop.security` (UGI, groups, SASL, authorize, tokens, credential providers):** FR-18,
+  FR-19, FR-20, FR-21, FR-54, FR-55, FR-56, FR-57, NFR-C-8, NFR-C-9, NFR-C-21, NFR-C-22, NFR-S-1,
+  NFR-S-2, NFR-S-3, NFR-S-4, NFR-S-7, NFR-S-8, NFR-S-9, NFR-S-10, NFR-S-12, NFR-S-13, NFR-S-14, NFR-S-15,
   NFR-L-2.
 - **`org.apache.hadoop.io`:** FR-22, FR-23, FR-24, NFR-C-15.
-- **`org.apache.hadoop.metrics2`:** FR-25, NFR-C-11, NFR-L-5.
+- **`org.apache.hadoop.metrics2`:** FR-25, FR-58, FR-59, FR-60, FR-61, FR-65, NFR-C-11, NFR-C-23, NFR-L-5.
 - **`org.apache.hadoop.service` + launcher (`ServiceLauncher`, `ShutdownHookManager`, bin scripts,
-  `RunJar`):** FR-26, FR-27, FR-28, FR-32, FR-33, NFR-C-10, NFR-C-12, NFR-C-14.
+  `RunJar`):** FR-26, FR-27, FR-28, FR-32, FR-33, FR-62, NFR-C-10, NFR-C-12, NFR-C-14.
 - **`org.apache.hadoop.net`:** FR-29, FR-30.
 - **`org.apache.hadoop.util` (+functional):** FR-31, NFR-C-15, NFR-I-6.
 - **hadoop-kms (server or client):** FR-34, FR-35, NFR-C-13, NFR-S-6, NFR-S-11, NFR-L-2, NFR-L-4, NFR-I-5.
 - **hadoop-minikdc:** FR-36.
 - **hadoop-nfs:** FR-37, NFR-I-8.
-- **hadoop-registry:** FR-38, NFR-I-7.
-- **TLS/SSL anywhere in the tree:** NFR-S-6.
-- **Impersonation/proxy users:** NFR-S-9, NFR-S-10.
+- **hadoop-registry:** FR-38, FR-63, FR-64, NFR-I-7.
+- **TLS/SSL anywhere in the tree:** NFR-S-6, NFR-S-14.
+- **Impersonation/proxy users:** NFR-S-9, NFR-S-10, NFR-S-13.
+- **viewfs mount tables (`fs.viewfs.mounttable.*`):** FR-45.
+- **Credential providers (`alias/`, keystore backends):** FR-55.
+- **Delegation-token tooling and web filters (`hadoop fetchdt`, `security/token/delegation/web/`):**
+  FR-56, FR-57, NFR-S-15.
+- **fs IO statistics / async-IO attribution (`IOStatisticsContext`):** FR-46, NFR-L-8.
 - **Any default value or config key change:** NFR-I-4, NFR-I-3.
 
 ## References

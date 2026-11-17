@@ -63,6 +63,22 @@ plumbing, `ha`, `http` (HttpServer2), `crypto`, `tracing`, `log`, `jmx`, `tools`
 marker is documentation, not enforcement. Root of the dependency graph: everything
 imports it.
 
+#### Package contents
+
+One package, `org.apache.hadoop.classification`:
+
+- `InterfaceAudience` — `@Public`, `@Private`, `@LimitedPrivate("...")` markers used
+  by reviewers and release tooling to classify every public Java member.
+- `InterfaceStability` — `@Stable`, `@Evolving`, `@Unstable` markers.
+- `VisibleForTesting` — marks a declaration widened only for tests.
+- `tools/` — javadoc doclets (`ExcludePrivateAnnotationsStandardDoclet`,
+  `IncludePublicAnnotationsStandardDoclet`, `RootDocProcessor`,
+  `StabilityOptions`) that filter generated javadoc by the markers above; the
+  only executable code in the module.
+
+No threads, locks or configuration of its own: the module is vocabulary plus
+compile/javadoc-time tooling.
+
 ## 3. Module: hadoop-auth
 
 **Purpose:** pluggable HTTP (servlet-filter) authentication, independent of the RPC/SASL
@@ -90,10 +106,54 @@ runs the auth dance (SPNEGO `WWW-Authenticate: Negotiate` challenge, or JWT redi
 producing a token that is signed and set as a cookie. Wired into `HttpServer2` by
 `hadoop-common`'s `AuthenticationFilterInitializer`.
 
+#### server/ — the filter and handlers
+
+- `AuthenticationFilter.doFilter` is the per-request entry point: the cookie is
+  parsed into an `AuthenticationToken` (base `util/AuthToken`) and verified with
+  the configured `Signer`; a valid, unexpired token is published as the
+  `remoteUser` request attribute; anything else is delegated to the
+  `AuthenticationHandler` instantiated at filter `init` from the `type`
+  property. The handler's result is signed and written back as a cookie.
+- Handlers: `PseudoAuthenticationHandler` (trusts `?user.name=`),
+  `KerberosAuthenticationHandler` (SPNEGO — `init` loads the keytab into a
+  `serverSubject` carrying the SPNEGO principals, and each challenge drives a
+  per-request GSS context), `AltKerberosAuthenticationHandler`,
+  `JWTRedirectAuthenticationHandler`, `LdapAuthenticationHandler`,
+  `MultiSchemeAuthenticationHandler`, `CompositeAuthenticationHandler`;
+  `AuthenticationHandlerUtil` holds shared checks.
+- Threading: the filter is stateless per request; the only long-lived mutable
+  state is the `SignerSecretProvider` created in `init` and destroyed in
+  `destroy`.
+
+#### client/ — client-side authenticators
+
+`AuthenticatedURL` attaches a signed token to an `HttpURLConnection` through an
+`Authenticator`: `KerberosAuthenticator` runs the SPNEGO dance directly over
+GSS-API, `PseudoAuthenticator` appends `?user.name=`.
+`ConnectionConfigurator` centralizes HTTPS tuning (trust/keystore) for those
+connections.
+
+#### util/ — signing and Kerberos helpers
+
+`Signer` is the HMAC wrapper (`sign`/`verifyAndRestore`) over a
+`SignerSecretProvider`; `RolloverSignerSecretProvider` is the base for the
+providers that rotate secrets (`FileSignerSecretProvider`,
+`RandomSignerSecretProvider`, `ZKSignerSecretProvider` via `ZookeeperClient`).
+`KerberosName`/`KerberosUtil` implement `auth_to_local` name-rule translation;
+`SubjectUtil` and `JaasConfiguration` build JAAS subjects programmatically;
+`CertificateUtil` parses certificate chains.
+
 ## 4. Module: hadoop-auth-examples
 
 Runnable servlet examples demonstrating each `hadoop-auth` handler and its client
 counterpart. Documentation in code form; depends only on `hadoop-auth`.
+
+#### Contents
+
+Servlets under `org.apache.hadoop.security.authentication.examples`
+(`WhoServlet`, `WhoClient`, `RequestLoggerFilter`) pair each server handler
+with its client `Authenticator` behind an embedded web server. The module
+exists to be run manually; nothing in the tree depends on it.
 
 ## 5. Module: hadoop-common
 
@@ -115,6 +175,35 @@ unset keys, so *last resource wins*. Any `set*` or `reloadConfiguration` invalid
 values; the next get re-runs the walk. `getClass(..., Configuration)` wires the new
 instance back via `Configurable.setConf`. `ReconfigurableBase` re-evaluates a
 white-list of changeable properties and invokes `reconfigurePropertyImpl` on the owner.
+
+#### Resource loading
+
+- A `Configuration` holds `resources: ArrayList<Resource>` — the private static
+  class `Resource` wraps a name plus a file/URL/classpath object and the
+  modified time it was read at. `loadResources` walks the list in add order;
+  `loadResource` reads XML (or a plain/properties object resource) into a
+  temporary `Properties` and only fills keys still unset, so the last resource
+  wins and defaults added first are weakest.
+- Mutable state: `properties` (the materialized view), `overlay` (values set
+  programmatically, re-applied last on every re-walk so `set` survives
+  reloads), and `finalParameters` (keys declared `<final>` that later `set`s
+  must reject). `reloadConfiguration()` only clears `properties` and
+  `finalParameters`; the walk is repeated lazily on the next get.
+
+#### Typing, instantiation and tooling
+
+- Typed getters (`getInt`, `getLong`, `getTimeDuration`, `getStorageSize`,
+  `getClassByName`, `getInstances`) convert strings on read and cache resolved
+  classes in `CACHE_CLASSES`; `Configurable`/`Configured` pass the instance
+  into freshly created objects. `ConfigurationWithLogging` logs which resource
+  supplied a value.
+- `Reconfigurable`/`ReconfigurableBase` + `ReconfigurationException` +
+  `ReconfigurationTaskStatus` implement hot reload of a white-listed property
+  set; `ReconfigurationServlet` exposes it over HTTP; `ReconfigurationUtil`
+  helps tests drive it.
+- `ConfServlet` dumps configuration as JSON; `ConfigRedactor` redacts
+  password-like keys from those dumps; `StorageSize`/`StorageUnit` parse human
+  quantities.
 
 ### org.apache.hadoop.fs — abstract FileSystem API
 
@@ -149,6 +238,96 @@ walking the real tree via `listStatus`, so filtering is server-side. HDFS, S3A, 
 etc. all implement this SPI; `FileContext` is the non-cached, scheme-explicit
 alternative.
 
+#### Package layout
+
+Sub-packages are thin: `impl/` and `local/` carry concrete filesystem and
+shared helper implementations; `viewfs/` is the federation mount table;
+`permission/` the POSIX-style permission and ACL model; `shell/` the CLI
+command framework; `statistics/` and `store/` IO statistics and object-store
+support (including `store/audit/` spans); `ftp/`, `sftp/`, `http/` additional
+protocol clients; `protocolPB/` protobuf helpers; `crypto/` filesystem-level
+encryption helpers.
+
+#### The cache and the local stack
+
+- `FileSystem.get(URI, conf)` builds a `Cache.Key` (URI scheme+authority, UGI,
+  unique flag) and consults the static `CACHE`; concurrent creation is bounded
+  by the `fs.creation.parallel.count` semaphore and racing losers close their
+  duplicates (§11.2). Implementations are resolved from
+  `fs.<scheme>.impl`/`fs.abstract.<scheme>.impl` and instantiated by
+  reflection; `FilterFileSystem`/`FilterFs` decorate them.
+- `closeAll()`/`closeAll(UserGroupInformation)` provide bulk and per-user
+  teardown; the `ClientFinalizer` hook closes still-open filesystems at JVM
+  exit and a UGI logout closes that user's instances. `DelegationTokenRenewer`
+  (fs root) is a single renewal `Thread` for fs delegation tokens held by the
+  logged-in UGI (§12.4).
+- Local stack: `local/RawLocalFs` is the `AbstractFileSystem` view over
+  `RawLocalFileSystem`; `local/LocalFs` adds checksumming — the same split as
+  `RawLocalFileSystem` (uncached, unchecksummed) vs `LocalFileSystem` (a
+  `ChecksumFileSystem` wrapper) at package root.
+
+#### Checksums
+
+- Read path: `ChecksumFileSystem` opens the sibling `.<name>.crc` sidecar
+  (`getChecksumFile`), and `ChecksumFSInputChecker` verifies CRCs per chunk
+  (`FSInputChecker` machinery), throwing `ChecksumException` on mismatch; a
+  missing sidecar skips validation rather than failing.
+- Write path: `FSOutputSummer` computes CRCs per `bytesPerChecksum`-sized chunk
+  and `close` writes the sidecar. `BufferedFSInputStream`,
+  `FSInputStream`/`FSDataInputStream` layer seekability, readahead
+  (`CanSetReadahead`) and unbuffering (`CanUnbuffer`) on top.
+
+#### viewfs — mount tables
+
+`ViewFileSystem` (FileSystem API) and `ViewFs` (AbstractFileSystem API)
+resolve URIs through an `InodeTree` built from `fs.viewfs.mounttable.*` keys
+(`viewfs/Constants.CONFIG_VIEWFS_PREFIX`); internal nodes are
+`ChRootedFileSystem`/`ChRootedFs` views over the target filesystem at a
+sub-path; `RegexMountPoint` (with its interceptor chain) supports regex link
+targets and `NflyFSystem` mirrors writes to several targets. Mount tables are
+client configuration; `ConfigUtil` and `HCFSMountTableConfigLoader` load them.
+
+#### permission, shell, statistics
+
+- `permission/`: `FsPermission` (+`FsAction` bit sets, `FsCreateModes`), the
+  ACL model (`AclEntry`, `AclEntryScope`, `AclEntryType`, `AclStatus`,
+  `AclUtil`) and the CLI parsers (`ChmodParser`, `UmaskParser`,
+  `PermissionParser`, `RawParser`) behind `PermissionStatus`.
+- `shell/`: `Command` base class, `CommandFactory` registry of `FsCommand`
+  subclasses (`Ls`, `Count`, `Delete`, `CopyCommands`, `MoveCommands`,
+  `AclCommands`, `XAttrCommands`, `TouchCommands`, `SnapshotCommands`, the
+  `find` package), `CommandFormat` option parsing and `PathData` (a `Path`
+  plus its resolved `FileStatus`). `FsShell` dispatches user input through
+  this framework.
+- `statistics/`: `IOStatisticsContext` is a per-thread aggregator —
+  `IOStatisticsContextIntegration.getCurrentIOStatisticsContext()` resolves the
+  calling thread's context from a `WeakReferenceThreadMap` (not a
+  `java.lang.ThreadLocal`); contexts merge into `IOStatisticsSnapshot`s and
+  `IOStatisticsBinding` wires streams into them.
+
+#### impl/ — shared client helpers
+
+`impl/` carries machinery shared across filesystems: `FSBuilderSupport`
+(behind `FSBuilder`), `FileSystemMultipartUploader` (the `MultipartUploader`
+SPI with `PartHandle`/`UploadHandle`), `VectorIOBufferPool` (pooling for the
+vectored-read API), `LeakReporter`, and `impl/prefetch/` — a block prefetch
+cache (`BlockManager`, `CachingBlockManager`, `SingleFilePerBlockCache`,
+`ResourcePool`/`BoundedResourcePool`, `ExecutorServiceFuturePool`, `Retryer`)
+that performs background block fetches on its own executor pool for readers
+that enable it.
+
+#### Other clients and utilities
+
+`ftp/FTPFileSystem` (+`FTPInputStream`, `FtpConfigKeys`),
+`sftp/SFTPFileSystem` (+`SFTPConnectionPool`),
+`http/AbstractHttpFileSystem` with `HttpFileSystem`/`HttpsFileSystem`,
+archive `HarFileSystem`/`HarFs`, `Trash` + `TrashPolicy`/
+`TrashPolicyDefault` (delete-to-trash semantics), `LocalDirAllocator`
+(spread temp data over configured local dirs), `FileUtil`, `Stat`,
+`VectoredReadUtils`, `FutureDataInputStreamBuilder` (async `openFile`),
+`PathCapabilities`/`StreamCapabilities` feature probes, and
+`CommonConfigurationKeys(Public)` for the shared keys.
+
 ### org.apache.hadoop.ipc — RPC framework
 
 **Purpose:** the wire protocol + client/server machinery behind every inter-node call:
@@ -175,8 +354,9 @@ span, wraps the request (`constructRpcRequest`), then
 `client.call(rpcKind, request, remoteId, ...)` gets/creates a `Connection`
 (`setupIOstreams` negotiates connection header + SASL), writes the request, registers
 the `Call` and parks the caller until the connection's `run` loop (`waitForWork`)
-matches the response by call id — value or unwrapped `RemoteException`. `parallelCall`
-fans out to several datanodes at once.
+matches the response by call id — value or unwrapped `RemoteException`. Asynchronous
+calls (`ExternalCall`, `Client.isAsynchronousMode`) share the same connection and
+are bounded by `ipc.client.asyncCalls.max` (§11.3).
 
 **Behaviour — server:** `Listener` accepts; NIO `Reader` threads decode headers
 (`processConnectionContext`, `processOneRpc`) and build `Server.Call`s;
@@ -187,6 +367,84 @@ the target through the engine's server translator
 (`ProtobufRpcEngineCallback2`/`RpcWritable`), and `Responder` flushes replies.
 `RetryCache` (a `LightWeightGSet` in `util`) remembers recent retriable calls by
 client+call id so a retry returns the first response instead of re-executing.
+
+#### Package layout
+
+Root classes cover both endpoints (`Client`, `Server`, `RPC`); sub-packages
+are thin: `internal/` (shaded-protobuf helpers), `metrics/` (`RpcMetrics`,
+`RpcDetailedMetrics`, `RetryCacheMetrics`, `DecayRpcSchedulerDetailedMetrics`),
+`protocolPB/` (client/server-side translators for the refresh protocols), and —
+belonging to hadoop-common but consumed by hadoop-nfs — `oncrpc/` and
+`portmap/`.
+
+#### Client side — `Client`, `Connection`, `ConnectionId`
+
+- `Client` is shared per `SocketFactory` through `ClientCache`
+  (`Map<SocketFactory, Client>`).
+- `Connection extends Thread` (named
+  `IPC Client (<socketFactory.hashCode()>) connection to <addr>`) is created
+  per `ConnectionId` (address, protocol, ticket, timeout). The first call runs
+  `setupIOstreams` (synchronized: TCP connect, "hrpc" connection header,
+  protocol negotiation, optional SASL wrap via `SaslRpcClient`) and then the
+  connection thread owns the socket.
+- A caller registers its `Client.Call` in `Connection.calls` and
+  `sendRpcRequest` writes it to the socket; the connection `run` loop spins on
+  `waitForWork()` → `receiveRpcResponse()`, matching responses to calls by id
+  and completing the parked caller (§11.3 covers the concurrency model).
+- Asynchronous mode: `isAsynchronousMode()`/`ExternalCall` let a caller
+  collect the response later; `checkAsyncCall` bounds in-flight async calls at
+  `ipc.client.asyncCalls.max` and throws `AsyncCallLimitExceededException`.
+
+#### Server side — accept, process, respond
+
+- `Listener` (one thread, "IPC Server listener on <port>") accepts sockets and
+  hands them to `Reader` threads (count `ipc.server.read.threadpool.size`),
+  each owning a NIO `readSelector` and a bounded pending-connection queue;
+  readers decode the connection context and RPC headers (`processOneRpc`) and
+  build `Server.Call`s.
+- `CallQueueManager.put` is the single hand-off into the active queue;
+  `Handler` threads ("IPC Server handler N on <port>") `take()` a call, run
+  the engine's server-side translation (`ProtobufRpcEngineCallback2`,
+  `RpcWritable`) into the actual protocol implementation, and serialize the
+  response into a `ResponseBuffer`.
+- `Responder` ("IPC Server Responder") is one thread with a NIO `Selector`;
+  responses that do not flush immediately are deferred to it so `Handler`
+  threads never block on a slow client.
+- `ConnectionManager` tracks connections (idle scanner, per-user maps —
+  §11.3); `RpcCall` extends `Server.Call` with the RPC-kind payload.
+
+#### Scheduling and the call queue
+
+`CallQueueManager` delegates to a pluggable `BlockingQueue<Call>`: the default
+`LinkedBlockingQueue`, or `FairCallQueue` with `DecayRpcScheduler` (priority
+by recent call volume, `WeightedRoundRobinMultiplexer` between queues,
+`UserIdentityProvider` for identity) — swapped live via
+`RefreshCallQueueProtocol`/`RefreshRegistry`. `RpcScheduler`/
+`DefaultRpcScheduler`, `CostProvider`/`DefaultCostProvider`/
+`WeightedTimeCostProvider` and `ProcessingDetails` compute and report per-call
+cost; queue and processing latency flow into the `metrics/` MXBeans.
+
+#### Deduplication and refresh hooks
+
+- `RetryCache` stores `CacheEntry` in a `LightWeightGSet` keyed by clientId +
+  callId; a retried call finds the entry and returns the recorded response
+  instead of re-executing (entry state transitions synchronized, §11.3).
+- The live-refresh surfaces (`RefreshCallQueueProtocol`,
+  `GenericRefreshProtocol` + `RefreshHandler`/`RefreshResponse`) have their
+  wire translators in `protocolPB/`; `CallerContext`/`ClientId` carry
+  correlation data onto every call (§13).
+
+#### oncrpc and portmap (used by hadoop-nfs)
+
+`oncrpc/` implements the ONC-RPC wire format used by the NFS gateway: `XDR`
+(encoding/decoding), `RpcCall`/`RpcReply`/`RpcAcceptedReply`/
+`RpcDeniedReply`/`RpcMessage`/`RpcResponse`, `RpcProgram` (the dispatch
+surface), the Netty-based servers `SimpleTcpServer`/`SimpleUdpServer` with
+client counterparts (`SimpleTcpClient`, `SimpleUdpClient`), `RpcCallCache`
+for duplicate-request detection, and `oncrpc/security/` (`Credentials`/
+`CredentialsGSS`/`CredentialsSys`, the `Verifier` family, `SecurityHandler`).
+`portmap/` implements the portmapper protocol (`Portmap`, `PortmapMapping`,
+`RpcProgramPortmap`) so NFS services can register their ports.
 
 ### org.apache.hadoop.security — UGI, Kerberos, authorization
 
@@ -218,6 +476,91 @@ expensive operations. `doAs(PrivilegedExceptionAction)` runs inside
 `FileSystem` instances — per-user isolation. `Groups.getGroups(user)` consults a cached
 map, falling back to the configured mapping chain.
 
+#### Package layout
+
+Root classes: identity (`UserGroupInformation`, `User`, `Credentials`,
+`HadoopKerberosName`, `KerberosAuthException`), SASL (`SaslRpcClient`,
+`SaslRpcServer` and friends), groups (`Groups` + mapping providers), glue
+(`SecurityUtil`, `KDiag`, `KerberosInfo`/`SecurityInfo`/
+`AnnotatedSecurityInfo` for annotation-driven protocol security data,
+`AuthenticationFilterInitializer`, `HttpCrossOriginFilterInitializer`,
+`RefreshUserMappingsProtocol`). Sub-packages: `token/` (+`delegation/`,
+`web/`), `authorize/`, `authentication/server/`, `ssl/`, `alias/`,
+`protocolPB/`.
+
+#### UserGroupInformation and login
+
+- A UGI wraps a JAAS `Subject` holding a `User` principal (authentication
+  method, real user, volatile `lastLogin`) plus `Credentials` (token map) and
+  token identifiers. `getCurrentUser()`/`getLoginUser()` resolve the
+  thread-effective vs process-login identity; `doAs(PrivilegedExceptionAction)`
+  runs under the subject and unwraps `PrivilegedActionException` causes.
+- `loginUserFromKeytab` performs the JAAS login and
+  `spawnAutoRenewalThreadForKeytab` submits a `KeytabRenewalRunnable` to the
+  single-thread daemon executor ("TGT Renewer for <user>"); ticket-cache users
+  get `TicketCacheRenewalRunnable` (shelling out to `kinit`). Re-login is
+  serialized on `HadoopLoginContext.getSubjectLock()` and rate-limited by
+  `hadoop.kerberos.min.seconds.before.relogin` (§11.4);
+  `checkTGTAndReloginFromKeytab()`/`reloginFromKeytab()` are the hooks daemons
+  call before using credentials.
+- `createProxyUser`/`createRemoteUser` build the impersonation identities
+  checked by `authorize/ProxyUsers` (§12.6).
+
+#### Groups
+
+`Groups` wraps a `GroupMappingServiceProvider` chain in a Guava `LoadingCache`
+(expiry, negative cache and optional background-refresh pool — §11.4).
+Providers: `ShellBasedUnixGroupsMapping`,
+`JniBasedUnixGroupsMapping(WithFallback)`, `LdapGroupsMapping`,
+`RuleBasedLdapGroupsMapping`, `CompositeGroupsMapping`, `NullGroupsMapping`;
+netgroups via `JniBasedUnixGroupsNetgroupMapping` + `NetgroupCache`; ID
+translation helpers `ShellBasedIdMapping`/`IdMappingServiceProvider`.
+
+#### SASL and RPC identity
+
+`SaslRpcServer`/`SaslRpcClient` negotiate GSSAPI/DIGEST/PLAIN per the
+`hadoop.rpc.protection` QOP resolved by `SaslPropertiesResolver`
+(`WhitelistBasedResolver`, `IngressPortBasedResolver` override per peer or
+ingress port); `FastSaslClientFactory`/`FastSaslServerFactory` cache the
+underlying factory lookups; `SaslInputStream`/`SaslOutputStream` wrap
+negotiated streams; `SaslPlainServer`, `SaslMechanismFactory` and
+`CustomizedCallbackHandler` complete the PLAIN path.
+
+#### Tokens (security/token/)
+
+- `Token`, `TokenIdentifier`, `TokenSelector`, `TokenRenewer`, `SecretManager`
+  plus the fetch/renew CLI stack (`DtFetcher`, `DtUtilShell`,
+  `DtFileOperations`, `DelegationTokenIssuer`).
+- `delegation/` implements the standard delegation pattern:
+  `AbstractDelegationTokenIdentifier`, `AbstractDelegationTokenSecretManager`
+  (+`DelegationKey`), `AbstractDelegationTokenSelector`,
+  `DelegationTokenLoadingCache` (a small Guava-backed cache), and the shared
+  backends `ZKDelegationTokenSecretManager`/`SQLDelegationTokenSecretManager`.
+  `startThreads` starts the background `ExpiredTokenRemover` daemon thread
+  (`tokenRemoverThread`) that periodically drops expired tokens; `stopThreads`
+  interrupts and joins it. `web/` carries the HTTP delegation-token filter
+  plumbing (§12.2).
+
+#### Authorization, credential providers, HTTP glue, SSL
+
+- `authorize/`: `ServiceAuthorizationManager` (per-protocol ACLs + host lists
+  from `hadoop-policy.xml`, §12.5), `PolicyProvider`/`Service` registration,
+  `AccessControlList`, `ImpersonationProvider`/`DefaultImpersonationProvider` +
+  `ProxyUsers`/`ProxyServers` (§12.6), and the admin RPC
+  `RefreshAuthorizationPolicyProtocol` (translators in `protocolPB/`).
+- `alias/`: the credential-provider API (`CredentialProvider`,
+  `CredentialProviderFactory`, `CredentialShell`) with keystore backends
+  (`JavaKeyStoreProvider`, `LocalJavaKeyStoreProvider`,
+  `BouncyCastleFipsKeyStoreProvider`, `LocalBouncyCastleFipsKeyStoreProvider`,
+  `UserProvider`).
+- `authentication/server/`: `ProxyUserAuthenticationFilter` +
+  `ProxyUserAuthenticationFilterInitializer` extend the hadoop-auth chain with
+  proxy-user validation (§12.6).
+- `ssl/`: `SSLFactory`, `KeyStoresFactory`/`FileBasedKeyStoresFactory`,
+  `ReloadingX509TrustManager`/`ReloadingX509KeystoreManager`,
+  `FileMonitoringTimerTask`, `SSLHostnameVerifier`,
+  `DelegatingSSLSocketFactory` (§12.3).
+
 ### org.apache.hadoop.io — Writable serialization
 
 **Purpose:** Hadoop's compact serialization + IO utilities — still used for block
@@ -244,6 +587,60 @@ prefixes inside a byte array — the trick the MapReduce shuffle uses to sort wi
 deserializing. `SequenceFile.Writer.append` serializes key/value, computes checksums,
 writes sync markers every `SYNC_INTERVAL`; readers seek by those markers.
 
+#### Package layout
+
+Root: the `Writable` vocabulary and primitives, `Text`, buffers,
+`SequenceFile`/`MapFile`, `IOUtils`, `ReadaheadPool`. Sub-packages:
+`compress/`, `file/tfile/`, `erasurecode/`, `nativeio/`, `retry/`,
+`serializer/`, `wrappedio/`.
+
+#### Writable core
+
+- `Writable` (`write(DataOutput)` / `readFields(DataInput)`) is a hand-written
+  binary format; `WritableComparable`, `RawComparator`/`WritableComparator`
+  (cached, deserialization-free comparison of serialized bytes), and
+  `WritableFactories`/`WritableName` for reflective creation. Primitives
+  (`IntWritable`, `LongWritable`, `Text`, `BytesWritable`, ...), containers
+  (`ArrayWritable`, `MapWritable`, `SortedMapWritable`, `EnumSetWritable`),
+  varints (`VIntWritable`/`VLongWritable`), `MD5Hash`, `NullWritable`,
+  `ObjectWritable`/`GenericWritable` for runtime-typed values.
+- `Text extends BinaryComparable`: a mutable UTF-8 byte array with
+  `validateUTF8`; `DataOutputBuffer`/`DataInputBuffer` are the reusable
+  in-memory streams behind Writable IO.
+
+#### Files and codecs
+
+- `SequenceFile.Writer`/`Reader` — length-prefixed, checksummed,
+  sync-markered key/value records; `MapFile`/`BloomMapFile`/`ArrayFile`/
+  `SetFile` add sorted (and bloom-filtered) indexes on top;
+  `file/tfile/TFile` (+`BCFile`) is the block-compressed, comparator-indexed
+  variant (`TFileDumper` inspects it).
+- `compress/`: `CompressionCodec` implementations (`DefaultCodec`,
+  `GzipCodec`, `BZip2Codec`, `Lz4Codec`, `SnappyCodec`, `ZStandardCodec`,
+  `DeflateCodec`, `PassthroughCodec`), `CompressionCodecFactory` (codec
+  lookup by name/extension), splittable codecs (`SplitCompressionInputStream`),
+  direct decompression (`DirectDecompressionCodec`), and `CodecPool` leasing
+  pooled `Compressor`/`Decompressor`/checksum instances (`DoNotPool` opts
+  out). Stream plumbing: `CompressionInputStream`/`CompressionOutputStream`
+  and the block variants.
+
+#### erasurecode, nativeio, retry, serializer
+
+- `erasurecode/`: the raw-erasure coder framework — `ECSchema`, `ECBlock`/
+  `ECBlockGroup`/`ECChunk`, `CodecRegistry`, `ErasureCodeNative` (native
+  ISA-L loading) with `rawcoder/`, `coder/`, `grouper/` packages.
+- `nativeio/`: `NativeIO` (POSIX/Windows syscalls — fstat, posix_fadvise, file
+  ownership), `SecureIOUtils` (ownership-checked access), `Errno`,
+  `SharedFileDescriptorFactory`.
+- `retry/`: `RetryProxy` + `RetryInvocationHandler` wrap a protocol proxy with
+  `RetryPolicy`/`RetryPolicies` (failover via `FailoverProxyProvider`/
+  `DefaultFailoverProxyProvider`), honouring `Idempotent`/`AtMostOnce` method
+  annotations and `AsyncCallHandler`.
+- `serializer/`: `Serialization`/`SerializationFactory` +
+  `WritableSerialization` (and `avro/`) give SequenceFile pluggable record
+  formats; `wrappedio/WrappedIO` is the static facade over statistics-
+  instrumented IO.
+
 ### org.apache.hadoop.metrics2 — metrics
 
 **Purpose:** the "Metrics2" system — sources push records into a pluggable sink
@@ -265,6 +662,44 @@ calls `source.getMetrics(collector, all)`, filters, and enqueues into each sink'
 `SinkQueue`; a per-sink thread drains and calls `sink.putMetrics(record)` — slow sinks
 never block the sampling thread (cost is dropped records). `@Metric` fields become
 in-place gauges/counters.
+
+#### Package layout
+
+API (`MetricsSource`, `MetricsRecord`, `MetricsCollector`, `MetricsSink`,
+`MetricsSystem`, `MetricsTag`, `MetricsFilter`), `annotation/` (`@Metric`,
+`@Metrics`), `lib/` (mutable metric types + registry), `impl/` (the system),
+`sink/`, `source/` (`JvmMetrics`), `filter/` (`RegexFilter`, `GlobFilter`),
+`util/` (`MetricsCache`, `MBeans`, quantile estimators).
+
+#### lib/ — metric builders
+
+`MetricsRegistry` is the per-source registry of `MutableMetric`s;
+`MutableCounter(Int/Long)`, `MutableGauge(Int/Long/Float)`, `MutableRate`,
+`MutableStat`, `MutableQuantiles`, `MutableRollingAverages`,
+`MutableRates(WithAggregation)` are updated in place by the owning code;
+`MetricsAnnotations` + `MutableMetricsFactory` + `MetricsSourceBuilder` turn
+`@Metric`-annotated beans into sources; `DefaultMetricsSystem`/
+`DefaultMetricsFactory` are the static entry points daemons use.
+
+#### impl/ — the sampling pipeline
+
+- `MetricsSystemImpl` lifecycle (`init`/`start`/`stop`) parses `MetricsConfig`
+  (the `*.sink.*`/`*.source.*` tree), wraps each source in a
+  `MetricsSourceAdapter` (which may register an MBean via `util/MBeans`), and
+  starts the sampling `Timer` (§11.6).
+- Each sample: `MetricsCollectorImpl` collects records from all adapters into
+  a `MetricsBuffer`; each `MetricsSinkAdapter` filters records (via
+  `filter/` classes), enqueues into its bounded `SinkQueue` and drains it on
+  its dedicated thread; `MetricsRecordImpl`/`MetricsRecordFiltered` and the
+  `Metric*` classes are the immutable record types; `MBeanInfoBuilder`
+  supports the JMX view.
+
+#### sink/ and source/
+
+Sinks shipped in-tree: `FileSink`, `RollingFileSystemSink`, `GraphiteSink`,
+`StatsDSink`, `PrometheusMetricsSink`, plus the legacy `ganglia/` sinks.
+`source/JvmMetrics` registers JVM heap/GC/thread gauges into the `jvm` context
+for every daemon.
 
 ### org.apache.hadoop.service — lifecycle
 
@@ -289,6 +724,41 @@ requests; `ensureCurrentState` asserts before mutating. `stop` is idempotent;
 `CompositeService.addService` during `STARTED` starts the child immediately;
 `ServiceOperations.stopQuietly` swallows stop failures so shutdown cascades complete.
 
+#### State machine and hooks
+
+- `Service`/`AbstractService` hold a `ServiceStateModel` over a single volatile
+  state; subclasses implement the three hooks `serviceInit(Configuration)`,
+  `serviceStart()`, `serviceStop()`; `init`/`start`/`stop` synchronize on
+  `stateChangeLock`, and `stop` is idempotent (§11.7).
+- `ServiceStateModel.enterState` validates the transition (`NOTINITED →
+  INITED → STARTED → STOPPED`, terminal stop, `STOPPED → NOTINITED` for
+  reuse), fires `ServiceStateChangeListener`s with a `LifecycleEvent` and
+  throws `ServiceStateException` on illegal requests;
+  `LoggingStateChangeListener` logs transitions.
+
+#### Composition and operations
+
+- `CompositeService` keeps an ordered child list: `serviceInit`/`serviceStart`
+  walk children in add order, `serviceStop` stops them in reverse order;
+  `addService` on a STARTED composite starts the child immediately.
+- `ServiceOperations` provides the exception-safe statics (`stop`,
+  `stopQuietly`, `deploy`) used by both composite shutdown and the launcher,
+  and owns the listener-list plumbing that copies listeners outside the lock
+  (§11.7).
+
+#### launcher/ — process entrypoints
+
+`ServiceLauncher` is the `main()` daemons run: it parses arguments
+(`LauncherArguments`), instantiates the service (honouring
+`LaunchableService`/`AbstractLaunchableService` conventions such as
+`bindArgs`/`execute`), drives `init`/`start`, then blocks in
+`service.waitForServiceToStop(0)` (or runs `LaunchableService.execute()`) —
+not `waitForCompletion`. It installs `ServiceShutdownHook` (registered with
+the launcher's `SHUTDOWN_PRIORITY`), `InterruptEscalator` (escalates a second
+SIGTERM/SIGINT to immediate exit), `IrqHandler` (signal dispatch) and
+`HadoopUncaughtExceptionHandler` (any uncaught throwable terminates the
+process with a `LauncherExitCodes` status).
+
 ### org.apache.hadoop.net — topology and DNS
 
 **Purpose:** map hostnames/IPs to network racks for locality decisions, plus
@@ -310,6 +780,36 @@ by path; `getDistance(n1, n2)` walks to the common ancestor (same node = 0, same
 `chooseRandom(scope, excludedNodes)` picks a random leaf under a scope honouring the
 exclude set (placement fallbacks).
 
+#### Topology
+
+- `Node`/`NodeBase` name a node by `/dc/rack/host` path; `InnerNode`/
+  `InnerNodeImpl` are the internal tree nodes; `NetworkTopology` is the tree
+  with `add`/`remove`, `getDistance` (same node 0, same rack 2, different rack
+  same cluster 4) and `chooseRandom(scope, excludedNode)`;
+  `NetworkTopologyWithNodeGroup` adds a `/dc/rack/nodegroup/host` level.
+- `DNSToSwitchMapping` implementations resolve hostnames to racks:
+  `CachedDNSToSwitchMapping` caches the wrapped mapping's results;
+  `ScriptBasedMapping`(WithDependency) shells out to
+  `topology.script.file.name`; `TableMapping` reads a static table;
+  `AbstractDNSToSwitchMapping`/`DNSToSwitchMappingWithDependency` handle
+  configuration wiring; `DomainNameResolver`/`DomainNameResolverFactory`/
+  `DNSDomainNameResolver` resolve DNS names directly, and `DNS` exposes
+  low-level host/address queries.
+
+#### Sockets
+
+`NetUtils` (address parsing, `connect` with timeouts, socket factory
+instantiation), `StandardSocketFactory`, `SocksSocketFactory`,
+`SocketIOWithTimeout` + `SocketInputStream`/`SocketOutputStream`/
+`SocketInputWrapper` (selectable-timeout IO), `ConnectTimeoutException`, and
+`MachineList` (the `*.hosts` list semantics).
+
+#### net/unix
+
+`DomainSocket` wraps AF_UNIX sockets (short-circuit reads); its
+`DomainSocketWatcher` runs its own thread ("<path> DomainSocketWatcher")
+polling connected sockets for closure and cleaning up.
+
 ### org.apache.hadoop.util and util.functional
 
 **Purpose:** the toolbox: reflection, processes, disks, caching, sorting, shutdown
@@ -328,6 +828,56 @@ runtime info: `SysInfoLinux`/`SysInfoWindows`, `GcTimeMonitor`, `JvmPauseMonitor
 `TaskPool`, `CloseableTaskPoolSubmitter`, `RemoteIterators`, `LazyAtomicReference`, and
 the `*RaisingIOE` interfaces wrapping checked exceptions for lambda-based fs code.
 
+#### CLI, reflection, processes
+
+- `GenericOptionsParser` + `Tool`/`ToolRunner` pre-process `-D`/`-conf`/
+  `--files`-style options for every CLI; `ProgramDriver` dispatches
+  sub-commands; `FindClass`/`ClassUtil`/`ReflectionUtils` locate and
+  instantiate classes.
+- `Shell` runs external commands (`Shell.ShellCommandExecutor`, timeout
+  handling, Windows `WinUtils` checks); `RunJar` is the `hadoop jar` main
+  (unjar, `URLClassLoader`, manifest `Main-Class`); `ExitUtil`/`SignalLogger`/
+  `ShutdownHookManager` (ordered, single-executor hooks — §11.7)/
+  `ShutdownThreadsHelper` cover process lifecycle; `Daemon`/`Timer` are the
+  daemon-thread/timeout bases used across the tree.
+
+#### Disks and space
+
+`DiskChecker` (mkdir-with-permissions + verify), the pluggable
+`DiskValidator`/`DiskValidatorFactory` (`BasicDiskValidator`,
+`ReadWriteDiskValidator` with `ReadWriteDiskValidatorMetrics`),
+`AsyncDiskService` (per-volume executor pools for async deletes/renames), and
+`DF`/`DU`/`GetSpaceUsed`/`CachingGetSpaceUsed`/`DUHelper` for space
+accounting; `HostsFileReader`/`MachineList` for host lists.
+
+#### Data structures and hashing
+
+`LightWeightGSet`/`LightWeightCache`/`LightWeightResizableGSet`/
+`GSetByHashMap` (open-addressed maps behind NameNode block management and
+`ipc.RetryCache`), `IdentityHashStore`, `DirectBufferPool`,
+`ChunkedArrayList`, `IntrusiveCollection`, `WeakReferenceMap`; `bloom/`
+(`BloomFilter`, `CountingBloomFilter`, `DynamicBloomFilter`,
+`RetouchedBloomFilter`); `hash/` (`Hash`, `JenkinsHash`, `MurmurHash`);
+`QuickSort`/`HeapSort`/`IndexedSorter`; CRC implementations (`PureJavaCrc32`,
+`PureJavaCrc32C`, `NativeCrc32`, `CrcUtil`, `CrcComposer`), `DataChecksum`,
+`LineReader`, `StringInterner`.
+
+#### JVM/runtime and sub-packages
+
+- Runtime: `GcTimeMonitor`, `JvmPauseMonitor`, `SysInfoLinux`/`SysInfoWindows`,
+  `Time`/`StopWatch`, `NativeCodeLoader`/`NativeLibraryChecker`,
+  `VersionInfo`, the `InstrumentedLock` family (locks that log slow
+  acquisition), `SemaphoredDelegatingExecutor`, `AutoCloseableLock`.
+- `concurrent/`: `HadoopExecutors`, `HadoopThreadPoolExecutor`,
+  `HadoopScheduledThreadPoolExecutor`, `BlockingThreadPoolExecutorService`,
+  `ExecutorHelper`, `AsyncGet`/`AsyncGetFuture`.
+- `dynamic/`: `DynConstructors`/`DynMethods`/`BindingUtils` (reflection with
+  better error reporting). `curator/`: `ZKCuratorManager`, the ZooKeeper
+  client wrapper shared with hadoop-registry and the ZK token managers.
+- `functional/`: `TaskPool`/`CloseableTaskPoolSubmitter`, `FutureIO`/
+  `FunctionalIO`, `RemoteIterators`, `LazyAtomicReference`, and the
+  `*RaisingIOE` functional interfaces wrapping checked exceptions.
+
 ### Shell/daemon launcher
 
 `hadoop-common/src/main/bin/hadoop` (bash) sources `hadoop-config.sh` +
@@ -339,6 +889,19 @@ invokes the manifest `Main-Class`. `ServiceLauncher` parses `LauncherArguments`,
 creates the service, drives the `service` lifecycle, installs `ServiceShutdownHook`,
 `InterruptEscalator` (SIGTERM escalation to exit), `IrqHandler` and
 `HadoopUncaughtExceptionHandler`, mapping failures to `LauncherExitCodes`.
+
+#### bin/ scripts
+
+`bin/hadoop` sources `hadoop-common/src/main/bin/hadoop-config.sh` and
+`hadoop-functions.sh` (env expansion, `HADOOP_OPTS` assembly, native library
+path, classpath construction, daemon PID/log/secure-dir management) and then
+either runs a class (`hadoop jar` sets `HADOOP_CLASSNAME=RunJar`) or execs the
+daemon JVM.
+
+#### ServiceLauncher
+
+`ServiceLauncher` owns the main thread: launch → `init`/`start` → block until
+stop (§11.9) → `System.exit` with a `LauncherExitCodes` status.
 
 ## 6. Module: hadoop-kms
 
@@ -359,6 +922,24 @@ hadoop-auth) → `KMSMDCFilter` binds user/request to logs → `KMS` dispatches 
 `KMSAudit` record. Clients use `KMSClientProvider` from `hadoop-common`'s
 `crypto/key/kms/client`.
 
+#### Package contents (org.apache.hadoop.crypto.key.kms.server)
+
+- Boot: `KMSWebApp` (a `ServletContextListener` building the shared
+  `Configuration`, `KeyProvider`, `KMSACLs`, `KMSAudit`) and `KMSWebServer`
+  (the HTTP listener on `hadoop.kms.http.port`, TLS via `SSLFactory`).
+- Request path: `KMSAuthenticationFilter` (hadoop-auth) → `KMSMDCFilter`
+  (user + request id into SLF4J MDC) → `KMS` (the single JAX-RS resource) →
+  `KeyAuthorizationKeyProvider` (per-operation `KMSACLs` checks, §12.8) →
+  underlying `KeyProvider`; failures translate through
+  `KMSExceptionsProvider`; JSON plumbing via `KMSJSONReader`/`KMSJSONWriter`/
+  `KMSServerJSONUtils`.
+- Audit: `KMSAudit` (asynchronous single-thread scheduler with an aggregation
+  window) writing through the pluggable `KMSAuditLogger` (default
+  `SimpleKMSAuditLogger`).
+- Key generation: `EagerKeyGeneratorKeyProviderCryptoExtension` pre-generates
+  encrypted-key material through a `ValueQueue`; `KMSConfiguration` locates
+  `kms-site.xml`.
+
 ## 7. Module: hadoop-minikdc
 
 **Purpose:** an embedded MIT Kerberos KDC for tests — a real KDC inside the JVM so
@@ -368,6 +949,15 @@ Kerberized integration tests need no external KDC. `MiniKdc` starts an embedded 
 call `new MiniKdc(conf, workdir).start()`, then
 `createPrincipal(keytab, "user", "nn/localhost")...`; keytabs feed
 `UserGroupInformation.loginUserFromKeytab`. Test-only; no production code depends on it.
+
+#### Contents
+
+`MiniKdc` starts an embedded ApacheDS-backed KDC inside the test JVM (working
+directory created under the supplied work dir, deleted on `stop`), allocates a
+port, and `createPrincipal` writes real keytabs for generated principals;
+`KerberosSecurityTestcase` is the JUnit base that starts/stops a `MiniKdc` per
+test. The KDC runs its own network threads in-process; no production code
+depends on the module.
 
 ## 8. Module: hadoop-nfs
 
@@ -384,6 +974,34 @@ against `NfsExports` and returns a `FileHandle`; subsequent NFSv3 calls arrive o
 `Nfs3Base`'s port, are XDR-decoded into `request.*` objects, dispatched through
 `Nfs3Interface` to the backend filesystem, and the `response.*` is encoded back.
 Stateless by design; the filesystem-specific implementation lives in
+`hadoop-hdfs-nfs`.
+
+#### Package layout and the oncrpc dependency
+
+Three packages: `mount/`, `nfs/`, `nfs3/` (with `request/` + `response/`
+message trees under `nfs3`). The ONC-RPC runtime they build on — `XDR`,
+`RpcCall`, `RpcProgram`, `SimpleTcpServer`/`SimpleUdpServer`, `RpcCallCache` —
+lives in `hadoop-common`'s `oncrpc`/`portmap` packages (§5); hadoop-nfs is a
+library over it, not its home.
+
+#### mount/ and nfs/
+
+`MountdBase` starts the TCP and UDP listeners (`SimpleTcpServer`/
+`SimpleUdpServer`) over its `RpcProgram`, registers with the portmapper
+(`PortmapMapping`), validates mount requests against `NfsExports` (host/
+`AccessPrivilege` rules) and answers through `MountInterface`/
+`MountResponse` with `MountEntry` results. `nfs/` holds the shared NFS data
+model (`NfsTime`, `NfsFileType`, `AccessPrivilege`).
+
+#### nfs3/
+
+`Nfs3Base` starts the NFSv3 program on its port: `XDR` is decoded into
+`nfs3/request/*` objects, dispatched through `Nfs3Interface` to the backend,
+and `nfs3/response/*` encoded back. `FileHandle`, `Nfs3FileAttributes`,
+`Nfs3Constant`, `Nfs3Status` are the protocol data types. The service
+registers a `ShutdownHookManager` hook to stop the listeners and calls
+`ExitUtil.terminate` on startup failure. All NFS state is per-request — the
+gateway stays stateless; the filesystem implementation lives in
 `hadoop-hdfs-nfs`.
 
 ## 9. Module: hadoop-registry
@@ -405,6 +1023,32 @@ management), `JsonSerDeser`; plus `server/` and `cli/` (`RegistryCli`).
 consumers `resolve(path)`/`list(path)` through `CuratorService`'s retrying client.
 `RegistrySecurity` sets ZK SASL ACLs so only the owning principal writes its subtree;
 the server-side DNS component publishes A/SRV records from those records.
+
+#### client/ — API, types and the ZK implementation
+
+- `api/`: `RegistryOperations` (mknode/bind/list/resolve/delete),
+  `RegistryOperationsFactory`, `RegistryPathStatus`; `types/`:
+  `ServiceRecord` (+ `Endpoint`/`ProtocolTypes`).
+- `binding/`: `RegistryUtils` (path conventions `/registry/users/<user>/...`),
+  `RegistryTypeUtils`, `RegistryPathUtils`, `JsonSerDeser` (JSON
+  (de)serialization of records).
+- `impl/`: `RegistryOperationsClient`/`FSRegistryOperationsService` front the
+  real implementation in `impl/zk/`: `RegistryOperationsService` (a
+  `CompositeService`), `CuratorService` (Curator client wrapper with retry
+  policy and a `PathListener` for watch callbacks), `RegistrySecurity` (ZK
+  SASL/ACL management), `BindingInformation`, `ZKPathDumper`.
+
+#### server/ and cli/
+
+`server/services/`: `MicroZookeeperService` (an in-process
+`ZooKeeperServer`, configured via `MicroZookeeperServiceKeys`),
+`RegistryAdminService`, `AddingCompositeService`. `server/dns/`:
+`RegistryDNS` + `RegistryDNSServer` publish A/SRV records derived from
+`ServiceRecord`s via the `ServiceRecordProcessor` family
+(`ApplicationServiceRecordProcessor`, `ContainerServiceRecordProcessor`,
+`RecordCreatorFactory`, `LookupTask`); `server/integration/` holds
+`SelectByYarnPersistence`. `cli/`: `RegistryCli`, the `hadoop registry`
+command line.
 
 ## 10. Inter-module dependencies
 
@@ -555,6 +1199,13 @@ against the named class.
   entry state transitions (`completed`) are `synchronized` on the entry, so the
   retry-vs-first-execution race is resolved per entry.
 
+- `Responder` is a single thread with its own NIO `Selector` (`Server.java`):
+  when a response cannot be flushed to a client immediately, the handler
+  defers the write to the responder instead of blocking; each `Reader` thread
+  similarly owns a private `readSelector` over its registered connections.
+  `Client`'s async-call accounting lives in the `AtomicInteger
+  asyncCallCounter`, enforced in `checkAsyncCall`.
+
 ### 11.4 security — UGI, groups, SASL
 
 - `UserGroupInformation` static initialization and login caching synchronize on
@@ -655,7 +1306,7 @@ against the named class.
 ### 11.9 launcher and bin
 
 - `ServiceLauncher` runs the service start on the main thread and blocks in
-  `waitForCompletion`; `HadoopUncaughtExceptionHandler` and `InterruptEscalator`
+  `service.waitForServiceToStop(0)`; `HadoopUncaughtExceptionHandler` and `InterruptEscalator`
   guarantee process exit (`LauncherExitCodes`) even when the lifecycle fails
   mid-stop.
 - `RunJar` builds a `URLClassLoader` per `hadoop jar` invocation; classloader state
@@ -859,6 +1510,13 @@ against the named class.
 - What is *not* audited in this tree (checkable negative): `FileSystem` operations
   themselves are not audit-logged in `hadoop-common` (fs audit logging is the
   HDFS NameNode's job); the common fs package only provides the span machinery.
+
+Per-thread IO statistics add an fs attribution surface: `IOStatisticsContext`
+(`fs/statistics/`, resolved via
+`IOStatisticsContextIntegration.getCurrentIOStatisticsContext()` from a
+`WeakReferenceThreadMap`, not a `java.lang.ThreadLocal`) attaches stream
+counters to whichever thread performs the IO, complementing the span machinery
+above.
 
 ## 14. Integration points
 
