@@ -173,12 +173,6 @@ ID conventions: `FR-x` functional, `NFR-C-x` concurrency, `NFR-S-x` security,
 - **FR-31 — Incremental reports.** Block-received/deleted messages must be
   batched by `IncrementalBlockReportManager` and shipped opportunistically,
   not one RPC per block. (arch §2.7, `IncrementalBlockReportManager`)
-- **FR-49 — Async command processing.** `DatanodeCommand`s returned by the
-  NameNode (heartbeat/block-report/cache report) must be executed
-  asynchronously on the per-actor `CommandProcessingThread`, strictly
-  serially off a `LinkedBlockingDeque`, with `KeyUpdateCommand` placed first
-  via `enqueueFirst`; the thread must be interrupted (not leaked) by
-  `BPServiceActor.stop()`. (arch §2.7, §9.4, `BPServiceActor.CommandProcessingThread`)
 - **FR-32 — Block recovery on DN.** When the NameNode requests `recoverBlock`,
   `BlockRecoveryWorker` must perform lease recovery
   (`RecoveryInProgress`/RUR handling) via `InterDatanodeProtocol`. (arch §2.7, §12.2, `BlockRecoveryWorker`)
@@ -422,14 +416,6 @@ ID conventions: `FR-x` functional, `NFR-C-x` concurrency, `NFR-S-x` security,
   DataNode path — a PR must not claim block-read auditability beyond
   DataNode INFO/WARN logs and metrics, and must not silently remove this
   verification. (arch §11.4, §10.3, `DataXceiver`)
-- **NFR-L-7 — Per-actor thread distinguishability.** Every per-actor thread
-  on the DataNode (heartbeat, lifeline, command processor) must be named via
-  `BPServiceActor#formatThreadName` (`<bpId|nameserviceId> <action> to
-  <nnAddr>`), so that on a multi-namespace DataNode a jstack attributes each
-  thread to its block pool and NameNode; the command-processor thread must
-  additionally carry the NameNode address in the slow-command warning
-  (`Took ... ms to process ... commands from NN <addr>`). (arch §9.4,
-  `BPServiceActor.formatThreadName`, `CommandProcessingThread`)
 
 ### 2.4 Integration (arch §12)
 
@@ -518,7 +504,6 @@ NFR-L-6 (arch §11.4), NFR-I-4…NFR-I-6 (arch §12.1–12.3).
 - [ ] Dataset locks at correct `LockLevel`, `AutoCloseableLock` (NFR-C-5)
 - [ ] One `PacketResponder` per pipeline write; recovery stops receiver + responder (NFR-C-7)
 - [ ] Scanner findings reported to NN, not just logged (FR-29, NFR-L-5)
-- [ ] NN commands processed asynchronously on the per-actor `CommandProcessingThread`, serially, `KeyUpdateCommand` first; per-actor thread naming via `formatThreadName` kept (FR-49, NFR-L-7)
 - [ ] `shutdown()` still only from offerService thread (NFR-C-11d)
 
 ### 3.5 Write / read path

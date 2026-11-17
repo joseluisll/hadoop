@@ -245,11 +245,7 @@ standby).
 - `scheduler/fair/FairScheduler` — `FSQueue`/`FSLeafQueue`/`FSParentQueue`,
   queues loaded from an allocations XML by `AllocationFileLoaderService`,
   `FSSchedulerNode`/`FSAppAttempt`, starvation-driven preemption
-  (`FSStarvedApps`, `FSPreemptionThread`). Fair shares are recomputed by a
-  dedicated `SchedulerUpdateThread` (inherited `AbstractYarnScheduler.UpdateThread`)
-  that takes the scheduler-wide write lock for each `update()`; reservation
-  queues are created and re-entitled cross-thread by the reservation plan
-  follower (threading model in §17.2).
+  (`FSStarvedApps`, `FSPreemptionThread`).
 - Allocation results are handed to the AM as `Allocation` objects wrapped in
   `AllocateResponse` by `ApplicationMasterService` (with
   `DefaultAMSProcessor` and the optional
@@ -652,38 +648,6 @@ types observed in source):
   - each `AsyncScheduleThread` installs `RMCriticalThreadUncaughtExceptionHandler`
     — an uncaught exception turns into `RMFatalEvent`, i.e. fail-fast, not
     silent thread death.
-- **FairScheduler** (extends `AbstractYarnScheduler`) uses the opposite model: one
-  scheduler-wide `ReentrantReadWriteLock` declared in `AbstractYarnScheduler`
-  (`readLock`/`writeLock`, lines ~177–206). The daemon thread
-  `SchedulerUpdateThread` (`AbstractYarnScheduler.UpdateThread`, installed with
-  `RMCriticalThreadUncaughtExceptionHandler`) calls `FairScheduler#update()` every
-  `yarn.scheduler.fair.update-interval-ms` and holds the write lock across the
-  whole fair-share computation (`FSParentQueue#updateInternal` →
-  `ComputeFairShares`); `allocate()`, app/node add-remove and the other mutators
-  take the same write lock (~20 `writeLock.lock()` sites). `FSParentQueue`
-  additionally has a per-queue `ReentrantReadWriteLock` guarding `childQueues`
-  add/remove (write) and `updateInternal` (read, held across
-  `ComputeFairShares`); queue construction sets weights before the queue is
-  linked into its parent (`FSQueue` constructor →
-  `AllocationConfiguration#initFSQueue`), so a new queue is never visible with a
-  partially initialised weight.
-- **Reservation plan follower** (`AbstractSchedulerPlanFollower#synchronizePlan`,
-  run on the reservation system's plan-follower schedule) is the one cross-thread
-  mutator outside the dispatcher contract: it creates reservation queues
-  (`QueueManager#getLeafQueue(create=true)`), sets entitlements
-  (`FairScheduler#setEntitlement` → `FSLeafQueue#setWeights`) and removes expired
-  queues. Weight mutation is the hazard: `ComputeFairShares#computeSharesInternal`
-  reads `getWeight()` once in the fixed-share scan
-  (`handleFixedFairShares`/`getFairShareIfFixed`) and then again on every
-  iteration of the rMax-doubling loop (`computeShare`) — a weight dropping to 0
-  mid-computation makes every share 0 (`0 * rMax` → `(long)NaN = 0`), so the
-  doubling never terminates and the update thread spins while holding both the
-  scheduler write lock and the plan queue's read lock (YARN-12063:
-  `TestFairSchedulerPlanFollower` hangs in CI; the fix holds the scheduler write
-  lock in `setEntitlement` and bounds the doubling loop by
-  `MAX_WEIGHT_TO_RESOURCE_RATIO`). A PR touching this path must keep weight
-  mutations under the scheduler write lock and keep `ComputeFairShares`
-  terminating for any weight value it can observe mid-computation.
 - Note: there is **no `rmAsyncScheduler` flag in trunk**; the async-scheduler
   switch is the capacity-scheduler `schedule-asynchronously.*` key family
   above. (The name `rmAsyncScheduler` appears nowhere in the source tree.)

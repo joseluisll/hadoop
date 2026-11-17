@@ -408,14 +408,6 @@ cover explicitly.
   `synchronized(writer)`), retry failures with `writeRetryInterval`, and preserve the
   `DiscardOldestPolicy` semantics — a stalled writer means data loss, not unbounded queue growth
   (arch §17.5, `TimelineCollector`). *(supersedes R-NFR-13)*
-- **NFR-C-14 — FairScheduler share-computation stability.**
-  FairScheduler runs fair-share computation on the daemon `SchedulerUpdateThread` holding the
-  scheduler-wide write lock (inherited from `AbstractYarnScheduler`) for the whole
-  `update()`, and `ComputeFairShares#computeSharesInternal` re-reads `getWeight()` on every
-  iteration of its rMax-doubling loop; therefore every cross-thread weight mutation — the
-  reservation plan follower's `FairScheduler#setEntitlement` in particular — must hold that
-  write lock, and `ComputeFairShares` must terminate for any weight value it can observe
-  mid-computation (arch §17.2, `FairScheduler`, `ComputeFairShares`, `FSParentQueue`).
 
 ### 2.2 Security (NFR-S)
 
@@ -553,7 +545,6 @@ requirement IDs that decide it.
 ### 3.2 ResourceManager / scheduler
 
 - [ ] Does scheduler state get mutated only on the dispatcher thread — no internal locks, no RPC-thread mutation? (NFR-C-1, NFR-C-2, NFR-C-6)
-- [ ] For FairScheduler: do cross-thread mutations (plan follower `setEntitlement`/`removeQueue`, queue creation) respect the scheduler-wide write lock, and does `ComputeFairShares` see stable weights? (NFR-C-14)
 - [ ] Do multi-node placements go through the commit protocol with reservations? (FR-19)
 - [ ] Are app/attempt/container state machines extended without breaking documented states? (FR-11–FR-13, FR-26, FR-34)
 - [ ] Do liveness/expiry paths act only via events, and does thread death fail fast? (NFR-C-4, NFR-C-11, FR-27–FR-29)

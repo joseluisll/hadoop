@@ -280,9 +280,7 @@ streams edits and keeps a full in-memory replica.
   registration loop, heartbeat loop (sends `sendHeartbeat`, executes returned
   commands: replication, invalidation, cache, `DNA_ERASURE_CODING_RECONSTRUCTION`),
   and periodic full block reports (with lease-gated throttling from
-  `BlockReportLeaseManager` on the NN side). Commands returned by the NN are
-  not executed inline: the actor hands them to its dedicated
-  `CommandProcessingThread` (§9.4). `BlockPoolManager` manages the
+  `BlockReportLeaseManager` on the NN side). `BlockPoolManager` manages the
   set across namespace changes.
 - `DataXceiver` — the streaming-protocol handler (implements the
   `DataTransferProtocol` receiver): `OP_READ_BLOCK` → `BlockSender`,
@@ -674,18 +672,6 @@ given. Each subsection states the concurrency contract a PR must preserve.
   independently. `IncrementalBlockReportManager` batches
   received/deleted events and flushes them opportunistically on the same
   actor thread.
-- **`CommandProcessingThread`**: each `BPServiceActor` owns exactly one
-  dedicated daemon thread that processes `DatanodeCommand`s asynchronously
-  off the actor thread. Commands returned by heartbeat/block-report/cache
-  report are enqueued on a `LinkedBlockingDeque` and run strictly serially;
-  `KeyUpdateCommand` is placed first via `enqueueFirst` so new block-pool
-  keys are applied before other work. The actor's `stop()` interrupts the
-  thread, which exits its queue loop (`processQueue`) without discarding
-  earlier behaviour guarantees. Thread naming follows
-  `BPServiceActor#formatThreadName`: `<bpId|nameserviceId> <action> to
-  <nnAddr>` (block-pool id once known, nameservice id before the handshake)
-  — on a multi-namespace DataNode every per-actor thread (heartbeat,
-  lifeline, command processor) is distinguishable in a jstack.
 - **Scanners**: `DirectoryScanner` runs on a schedule of
   `dfs.datanode.directoryscan.interval` (default 21600 s) with
   `dfs.datanode.directoryscan.threads` (default 1) worker threads, batching
