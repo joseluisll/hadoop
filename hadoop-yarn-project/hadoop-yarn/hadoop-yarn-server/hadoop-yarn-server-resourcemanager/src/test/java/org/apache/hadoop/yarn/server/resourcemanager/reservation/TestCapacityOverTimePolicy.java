@@ -259,6 +259,104 @@ public class TestCapacityOverTimePolicy extends BaseSharingPolicyTest {
         createReservation(id, t0, t0 + 9 * ONEHOUR, 0.7, null)));
   }
 
+  /**
+   * An allocation of the same user starting after the end of the merge
+   * bound used by the policy (the end of the checked window + 24h) must
+   * not affect the validation of an update within the checked window:
+   * the update below is accepted with the later reservation in place.
+   */
+  @Test
+  public void testUpdateReservationWithAllocationBeyondTheCheckedWindowBound()
+      throws PlanningException {
+    InMemoryPlan plan = createPlan();
+    // an arbitrary fixed start time
+    long t0 = 1791808200000L;
+    ReservationId id = ReservationSystemTestUtil.getNewReservationId();
+
+    // 10% of the cluster for 10h, in progress at t0 + 32h, the end of the
+    // window checked for the reservation being updated (its end + 24h)
+    assertTrue(plan.addReservation(
+        createReservation(t0 + 30 * ONEHOUR, t0 + 40 * ONEHOUR, 0.1, null),
+        false));
+    // 10% of the cluster for 2h, starting beyond t0 + 56h, the merge bound
+    // for the update below (the end of its checked window + 24h)
+    assertTrue(plan.addReservation(
+        createReservation(t0 + 60 * ONEHOUR, t0 + 62 * ONEHOUR, 0.1, null),
+        false));
+    // 10% of the cluster for 7h, 2.9% on average over a 24h window
+    assertTrue(plan.addReservation(
+        createReservation(id, t0, t0 + 7 * ONEHOUR, 0.1, null), false));
+    // 10% of the cluster for 8h, 3.3% on average, within the quota
+    assertTrue(plan.updateReservation(
+        createReservation(id, t0, t0 + 8 * ONEHOUR, 0.1, null)));
+  }
+
+  /**
+   * A shrinking update must be accepted when the old version of the
+   * reservation is still in progress at the end of the checked window
+   * (the new end + 24h): the subtraction merge has to clip the old
+   * allocation, which extends beyond the checked window, and the updates
+   * below stay within the limits.
+   */
+  @Test
+  public void testShrinkingUpdateWithOldAllocationInProgressAtCheckedWindowEnd()
+      throws PlanningException {
+    InMemoryPlan plan = createPlan();
+    // an arbitrary fixed start time
+    long t0 = 1791808200000L;
+    ReservationId id = ReservationSystemTestUtil.getNewReservationId();
+
+    // 10% of the cluster for 10h, in progress at t0 + 31h and t0 + 33h,
+    // the ends of the windows checked for the updates below
+    assertTrue(plan.addReservation(
+        createReservation(t0 + 30 * ONEHOUR, t0 + 40 * ONEHOUR, 0.1, null),
+        false));
+    // 10% of the cluster for 40h, 16.7% on average over a 24h window
+    assertTrue(plan.addReservation(
+        createReservation(id, t0, t0 + 40 * ONEHOUR, 0.1, null), false));
+    // shrink to 10% of the cluster for 7h: the old version is still in
+    // progress at the end of the checked window, t0 + 31h
+    assertTrue(plan.updateReservation(
+        createReservation(id, t0, t0 + 7 * ONEHOUR, 0.1, null)));
+    // 70% of the cluster for 9h, 26.25% on average, exceeds the limit
+    assertThrows(PlanningQuotaException.class, () -> plan.updateReservation(
+        createReservation(id, t0, t0 + 9 * ONEHOUR, 0.7, null)));
+  }
+
+  /**
+   * An update within the quota on its own must still be rejected when the
+   * consumption it adds on top of another reservation of the same user
+   * exceeds the average limit: 40% of the cluster for 10h plus the
+   * concurrent 10% for 10h below give 20.8% on average over a 24h window
+   * and are accepted, while 55% for 10h would be 22.9% alone but 27.1%
+   * combined, and is rejected.
+   */
+  @Test
+  public void testUpdateReservationRejectedByCombinedConsumption()
+      throws PlanningException {
+    InMemoryPlan plan = createPlan();
+    // an arbitrary fixed start time
+    long t0 = 1791808200000L;
+    ReservationId id = ReservationSystemTestUtil.getNewReservationId();
+
+    // 10% of the cluster for 10h, 4.2% on average
+    assertTrue(plan.addReservation(
+        createReservation(id, t0, t0 + 10 * ONEHOUR, 0.1, null), false));
+    // 10% of the cluster for 10h, 4.2% on average, within a 24h window of
+    // the reservation being updated
+    assertTrue(plan.addReservation(
+        createReservation(t0 + 14 * ONEHOUR, t0 + 24 * ONEHOUR, 0.1, null),
+        false));
+    // 40% of the cluster for 10h, 16.7% alone and 20.8% combined with the
+    // concurrent reservation, within the limit
+    assertTrue(plan.updateReservation(
+        createReservation(id, t0, t0 + 10 * ONEHOUR, 0.4, null)));
+    // 55% of the cluster for 10h, 22.9% alone but 27.1% combined, exceeds
+    // the limit
+    assertThrows(PlanningQuotaException.class, () -> plan.updateReservation(
+        createReservation(id, t0, t0 + 10 * ONEHOUR, 0.55, null)));
+  }
+
   private InMemoryPlan createPlan() {
     return new InMemoryPlan(mock(QueueMetrics.class), getInitializedPolicy(),
         mock(ReservationAgent.class),
