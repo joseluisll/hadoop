@@ -260,10 +260,11 @@ public class TestCapacityOverTimePolicy extends BaseSharingPolicyTest {
   }
 
   /**
-   * An allocation of the same user starting after the end of the merge
-   * bound used by the policy (the end of the checked window + 24h) must
-   * not affect the validation of an update within the checked window:
-   * the update below is accepted with the later reservation in place.
+   * An allocation of the same user starting after the end of the window
+   * checked by the policy (the reservation end + 24h) must not affect
+   * the validation of an update within that window: the consumption
+   * views end at the checked window end, so the update below is
+   * accepted with the later reservation in place.
    */
   @Test
   public void testUpdateReservationWithAllocationBeyondTheCheckedWindowBound()
@@ -278,8 +279,8 @@ public class TestCapacityOverTimePolicy extends BaseSharingPolicyTest {
     assertTrue(plan.addReservation(
         createReservation(t0 + 30 * ONEHOUR, t0 + 40 * ONEHOUR, 0.1, null),
         false));
-    // 10% of the cluster for 2h, starting beyond t0 + 56h, the merge bound
-    // for the update below (the end of its checked window + 24h)
+    // 10% of the cluster for 2h, starting beyond t0 + 32h, the end of the
+    // window checked for the reservation being updated (its end + 24h)
     assertTrue(plan.addReservation(
         createReservation(t0 + 60 * ONEHOUR, t0 + 62 * ONEHOUR, 0.1, null),
         false));
