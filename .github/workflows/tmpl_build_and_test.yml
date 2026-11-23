@@ -58,6 +58,10 @@ concurrency:
   cancel-in-progress: true
 
 env:
+  # Fork build: -DenableProcessChecker=all so a hung or dead surefire test fork
+  # fails loudly with a dump within the 900s fork timeout instead of sitting
+  # silent until the 6h job timeout (SUREFIRE-1722 blind spot; the checker is
+  # off by default since surefire 3.0.0-M4).
   MAVEN_ARGS:
     --batch-mode
     --no-transfer-progress
@@ -70,6 +74,7 @@ env:
     -Drequire.valgrind
     -Dmaven.test.failure.ignore=false
     -Dsurefire.rerunFailingTestsCount=2
+    -DenableProcessChecker=all
 
 jobs:
   # TODO: use common composite actions in .github/actions/
@@ -118,28 +123,22 @@ jobs:
         with:
           fetch-depth: 0
       - name: Login to GitHub Container Registry
-        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
+        uses: docker/login-action@06fb636fac595d6fb4b28a5dfcb21a6f5091859c # v4.5.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
-      - name: Build and push ${{ inputs.os }} base build image for ${{ inputs.branch }}
-        id: docker_build_base
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
-        with:
-          context: ./dev-support/docker/
-          file: ./dev-support/docker/Dockerfile_${{ inputs.os }}
-          push: true
-          tags: ${{ needs.precondition.outputs.build_image_url }}-base
-          cache-from: type=registry,ref=ghcr.io/apache/hadoop/gha-build-${{ inputs.os }}-image-cache:${{ inputs.branch }}
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+      # The base image is not built here: it is the one apache/hadoop's
+      # "Image Cache" workflow publishes from dev-support/docker. Only the
+      # small user-specific layer below is built and pushed on each run.
       - name: User-specific Dockerfile
         run: |
           USER_ID=$(id -u "${USER}")
           GROUP_ID=$(id -g "${USER}")
           cat > /tmp/Dockerfile.gha <<UserSpecificDocker
-          FROM ${{ needs.precondition.outputs.build_image_url }}-base
+          FROM ghcr.io/apache/hadoop/gha-build-${{ inputs.os }}-image-cache:${{ inputs.branch }}-static
           RUN rm -f /var/log/faillog /var/log/lastlog
           RUN groupadd --non-unique -g ${GROUP_ID} ${USER}
           RUN useradd -g ${GROUP_ID} -u ${USER_ID} -k /root -m ${USER}
@@ -147,7 +146,7 @@ jobs:
           UserSpecificDocker
       - name: Build and push ${{ inputs.os }} build image for ${{ inputs.branch }}
         id: docker_build_gha
-        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ./dev-support/docker/
           file: /tmp/Dockerfile.gha

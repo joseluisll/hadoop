@@ -20,18 +20,14 @@
 name: "Build"
 
 # Security: write privileges are safe since this is triggered
-# only by `push` or `workflow_dispatch` (both imply user has write access).
+# only by `workflow_dispatch` (implying user has write access).
 #
-# fork_ci_status.yml mirrors this workflow's runs in a contributor's fork as
-# the "Build" check on their upstream PR. `workflow_dispatch` lets the
-# contributor rerun it on the PR branch without pushing a new commit. GitHub
-# only offers the dispatch once the fork's default branch contains this
-# version of the workflow, so the contributor must sync their fork's trunk
-# first. See .github/pr-build-check.md.
+# Fork-only: never started by a push. The Build run that apache/hadoop's
+# "Build" check looks for runs on the <name> branch it is opened from (e.g.
+# HADOOP-12345, or <name>-upstream for older pull requests), from apache/hadoop's own
+# build_and_test.yml on that branch, when "Build upstream branch"
+# (build_upstream.yml) publishes it on request.
 on:
-  push:
-    branches:
-      - "**"
   workflow_dispatch:
 
 jobs:

@@ -1,0 +1,110 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Builds one side for checks 1, 2 and 5, or reuses a saved build of the same
+# code: the distribution under its ci/build-key.sh dist key (what the
+# template's build job saves) and the installed artifacts under the install
+# key (what its unit job saves). Afterwards the side's distribution is
+# unpacked under WORKDIR/<side>/dist, its installed artifacts are in
+# WORKDIR/m2/installed-<side>, its source tree is at WORKDIR/<side>/src, and
+# the packed build is in RUNNER_TEMP/build-<side>. The job sets BUILD_NATIVE
+# and BUILD_IMAGE as the template's build job does, so the keys match.
+
+name: "Jetty 12 phase A: build a side or reuse a saved build"
+description: "Build a side of dev-support/jetty12-phase-a, or restore a saved build"
+inputs:
+  side:
+    description: "baseline or candidate"
+    required: true
+  src-dir:
+    description: "Where the distribution is built (BUILD_SRC_DIR of the template's build job)"
+    default: /home/runner/jetty12-work/src
+runs:
+  using: composite
+  steps:
+    - name: Look for saved builds of the same code
+      id: saved
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        BUILD_SRC_DIR: ${{ inputs.src-dir }}
+      run: |
+        for kind in dist install; do
+          key=$(${HARNESS}/ci/build-key.sh ${{ inputs.side }} ${kind})
+          echo "${kind}-key=${key}" >> "${GITHUB_OUTPUT}"
+          echo "${kind}-run=$(${HARNESS}/ci/find-build.sh "${{ github.repository }}" "${key}")" >> "${GITHUB_OUTPUT}"
+        done
+    - uses: actions/download-artifact@v4
+      if: steps.saved.outputs.dist-run != ''
+      with:
+        name: ${{ steps.saved.outputs.dist-key }}
+        path: ${{ runner.temp }}/build-${{ inputs.side }}
+        run-id: ${{ steps.saved.outputs.dist-run }}
+        github-token: ${{ github.token }}
+    - uses: actions/download-artifact@v4
+      if: steps.saved.outputs.dist-run != '' && steps.saved.outputs.install-run != ''
+      with:
+        name: ${{ steps.saved.outputs.install-key }}
+        path: ${{ env.WORKDIR }}/m2/installed-${{ inputs.side }}
+        run-id: ${{ steps.saved.outputs.install-run }}
+        github-token: ${{ github.token }}
+    - name: Build what was not saved
+      id: build
+      shell: bash
+      env:
+        DIST_RUN: ${{ steps.saved.outputs.dist-run }}
+        INSTALL_RUN: ${{ steps.saved.outputs.install-run }}
+        SRC_DIR: ${{ inputs.src-dir }}
+      run: |
+        side=${{ inputs.side }}
+        out="${RUNNER_TEMP}/build-${side}"
+        if [[ -z "${DIST_RUN}" ]]; then
+          # The distribution build installs the artifacts too.
+          BUILD_SRC_DIR="${SRC_DIR}" ${HARNESS}/build.sh "${side}"
+          BUILD_SRC_DIR="${SRC_DIR}" ${HARNESS}/ci/artifacts.sh pack-build "${side}" "${out}"
+          echo "save-dist=true" >> "${GITHUB_OUTPUT}"
+        else
+          ${HARNESS}/ci/artifacts.sh reuse-build "${side}" "${out}"
+          if [[ -z "${INSTALL_RUN}" ]]; then
+            ${HARNESS}/build.sh "${side}" install
+            echo "save-install=true" >> "${GITHUB_OUTPUT}"
+          fi
+        fi
+        ${HARNESS}/ci/artifacts.sh unpack-build "${side}" "${out}"
+        # downstream-deps.sh reads the side's source tree.
+        ${HARNESS}/build.sh "${side}" worktree
+    # Saving only speeds up later runs; a failed upload must not fail this one.
+    - name: Save the distribution for later runs
+      if: steps.build.outputs.save-dist == 'true'
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.saved.outputs.dist-key }}
+        path: ${{ runner.temp }}/build-${{ inputs.side }}
+        retention-days: 7
+        compression-level: 0
+    - name: Save the installed artifacts for later runs
+      if: steps.build.outputs.save-install == 'true'
+      continue-on-error: true
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.saved.outputs.install-key }}
+        path: ${{ env.WORKDIR }}/m2/installed-${{ inputs.side }}
+        retention-days: 7
+        overwrite: true

@@ -1,0 +1,684 @@
+#!/usr/bin/env python3
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+"""Compare what the baseline and candidate builds ship.
+
+Usage:
+  artifact_diff.py --expected expected-differences.txt --out DIR \\
+      BASELINE_RESULTS CANDIDATE_RESULTS
+
+Each *_RESULTS directory is a side's results directory holding
+build/dist-path.txt, build/dependencies.tsv and classpath/<command>.txt
+(written by artifact-diff.sh).
+
+Four comparisons, each difference matched against the allowlist:
+  dist-file-removed / dist-file-added   files in the binary distribution
+  jar-entry-removed / -added / -changed entries of jars present on both sides
+                                        (by CRC; build metadata ignored)
+  class-removed / class-added           classes visible on each command's
+                                        classpath (hadoop, hdfs, yarn, mapred)
+  class-source-changed                  the jar a class is first loaded from
+  dep-removed / dep-added               every module's resolved dependencies
+
+Writes DIR/artifact-diff.json and DIR/artifact-diff.md. Exits 1 when any
+difference is not in the allowlist.
+"""
+
+import argparse
+import collections
+import hashlib
+import io
+import json
+import os
+import re
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+import zipfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from allowlist import Allowlist  # noqa: E402
+
+# Entries that differ between any two builds of the same source.
+VOLATILE_ENTRY = re.compile(
+    r"(^META-INF/MANIFEST\.MF$"
+    r"|^META-INF/maven/.*/pom\.(xml|properties)$"
+    r"|^META-INF/DEPENDENCIES$"
+    r"|-version-info\.properties$"
+    r"|^httpfs\.properties$"  # build time, user and revision
+    r"|^META-INF/.*\.SF$|^META-INF/.*\.RSA$|^META-INF/.*\.DSA$)")
+# Files in the distribution that differ between any two builds.
+VOLATILE_FILE = re.compile(r"(\.pid$|/logs/|-version-info\.properties$)")
+ARCHIVE = (".jar", ".war")
+
+
+def file_digest(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def dist_files(root):
+    files = {}
+    for dirpath, _, filenames in os.walk(root):
+        for name in filenames:
+            full = os.path.join(dirpath, name)
+            rel = os.path.relpath(full, root)
+            if not VOLATILE_FILE.search("/" + rel) and not os.path.islink(full):
+                files[rel] = full
+    return files
+
+
+def jar_entries(path):
+    """{entry name: crc} for non-directory, non-volatile entries. A jar nested
+    in the archive (a WAR's WEB-INF/lib) is summed over its own non-volatile
+    entries, so its build metadata does not count as a change."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            out = {}
+            for i in z.infolist():
+                if i.is_dir() or VOLATILE_ENTRY.search(i.filename):
+                    continue
+                out[i.filename] = i.CRC
+                if i.filename.endswith(".jar"):
+                    try:
+                        with zipfile.ZipFile(io.BytesIO(z.read(i))) as nested:
+                            h = hashlib.sha256()
+                            for n in sorted(nested.infolist(), key=lambda e: e.filename):
+                                if not n.is_dir() and not VOLATILE_ENTRY.search(n.filename):
+                                    h.update(f"{n.filename}\0{n.CRC}\n".encode())
+                            out[i.filename] = h.hexdigest()
+                    except zipfile.BadZipFile:
+                        pass
+            return out
+    except zipfile.BadZipFile:
+        return None
+
+
+def jar_classes(path):
+    try:
+        with zipfile.ZipFile(path) as z:
+            return [n[:-6].replace("/", ".") for n in z.namelist()
+                    if n.endswith(".class") and not n.startswith("META-INF/")
+                    and n != "module-info.class"]
+    except (zipfile.BadZipFile, FileNotFoundError, IsADirectoryError):
+        return []
+
+
+def classpath_view(cp_file, dist_root):
+    """{class: first jar providing it (path relative to the dist)}"""
+    first = {}
+    with open(cp_file, encoding="utf-8") as f:
+        entries = [e for e in f.read().strip().split(":") if e]
+    for e in entries:
+        if not e.endswith(ARCHIVE) or not os.path.isfile(e):
+            continue
+        rel = os.path.relpath(e, dist_root)
+        for c in jar_classes(e):
+            first.setdefault(c, rel)
+    return first
+
+
+def read_deps(path):
+    with open(path, encoding="utf-8") as f:
+        return {line.rstrip("\n") for line in f if line.strip()}
+
+
+# --- T12: published POMs ---------------------------------------------------
+
+def _strip_ns(tag):
+    return tag.split("}")[-1] if "}" in tag else tag
+
+
+def _find(el, tag):
+    for child in el:
+        if _strip_ns(child.tag) == tag:
+            return child
+    return None
+
+
+def _findall(el, tag):
+    return [child for child in el if _strip_ns(child.tag) == tag]
+
+
+def _text(el):
+    return el.text.strip() if el is not None and el.text else ""
+
+
+def _git_show(repo, ref, path):
+    r = subprocess.run(["git", "-C", repo, "show", f"{ref}:{path}"],
+                       capture_output=True, text=True)
+    return r.stdout if r.returncode == 0 else None
+
+
+def _git_ls_tree(repo, ref):
+    r = subprocess.run(["git", "-C", repo, "ls-tree", "-r", "--name-only", ref],
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        return []
+    return [p for p in r.stdout.splitlines()
+            if p.endswith("pom.xml") and not p.startswith("dev-support/jetty12-phase-a/")]
+
+
+def _pom_dep(el, props):
+    """(key, scope, optional, version, exclusions) for a <dependency> element.
+    The declared version is resolved from the POM's properties; a dependency
+    with none (managed elsewhere) keeps None."""
+    g = _text(_find(el, "groupId"))
+    a = _text(_find(el, "artifactId"))
+    t = _text(_find(el, "type"))
+    c = _text(_find(el, "classifier"))
+    key = f"{g}:{a}"
+    if t or c:
+        key += f":{t}" + (f":{c}" if c else "")
+    scope = _text(_find(el, "scope")) or "compile"
+    optional = _text(_find(el, "optional")) or "false"
+    version = _text(_find(el, "version"))
+    version = _resolve_version(version, props) if version else None
+    exclusions = set()
+    ex = _find(el, "exclusions")
+    if ex is not None:
+        for e in _findall(ex, "exclusion"):
+            exclusions.add(f"{_text(_find(e, 'groupId'))}:{_text(_find(e, 'artifactId'))}")
+    return key, scope, optional, version, frozenset(exclusions)
+
+
+def _pom_deps(root, section):
+    """{key: (scope, optional, version, exclusions)} for a dependencies section."""
+    out = {}
+    d = _find(root, section)
+    if d is None:
+        return out
+    props = _pom_props(root)
+    for dep in _findall(d, "dependency"):
+        key, scope, optional, version, exclusions = _pom_dep(dep, props)
+        out[key] = (scope, optional, version, exclusions)
+    return out
+
+
+def _dep_detail(dep):
+    """A dependency's comparison fields, in a stable order: a frozenset's repr
+    order depends on the hash seed, so exclusions are sorted (T41)."""
+    scope, optional, version, exclusions = dep
+    detail = f"scope={scope} optional={optional} version={version or '-'}"
+    if exclusions:
+        detail += " exclusions=[" + ", ".join(sorted(exclusions)) + "]"
+    return detail
+
+
+def _pom_managed(root):
+    """{key: version} for <dependencyManagement>."""
+    out = {}
+    dm = _find(root, "dependencyManagement")
+    if dm is None:
+        return out
+    deps = _find(dm, "dependencies")
+    if deps is None:
+        return out
+    for dep in _findall(deps, "dependency"):
+        g = _text(_find(dep, "groupId"))
+        a = _text(_find(dep, "artifactId"))
+        t = _text(_find(dep, "type"))
+        c = _text(_find(dep, "classifier"))
+        key = f"{g}:{a}"
+        if t or c:
+            key += f":{t}" + (f":{c}" if c else "")
+        out[key] = _text(_find(dep, "version"))
+    return out
+
+
+def _pom_props(root):
+    out = {}
+    p = _find(root, "properties")
+    if p is not None:
+        for child in p:
+            out[_strip_ns(child.tag)] = _text(child)
+    return out
+
+
+def _pom_parent(root):
+    p = _find(root, "parent")
+    if p is None:
+        return None
+    return (_text(_find(p, "groupId")), _text(_find(p, "artifactId")),
+            _text(_find(p, "version")))
+
+
+def _resolve_version(version, props):
+    if version.startswith("${") and version.endswith("}"):
+        return props.get(version[2:-1], version)
+    return version
+
+
+def _pom_module(root):
+    parent = _pom_parent(root)
+    g = _text(_find(root, "groupId"))
+    if not g and parent:
+        g = parent[0]
+    a = _text(_find(root, "artifactId"))
+    return f"{g}:{a}"
+
+
+def compare_poms(repo, b_ref, c_ref, record):
+    """T12: compare every POM outside the harness between two git refs."""
+    b_paths = set(_git_ls_tree(repo, b_ref))
+    c_paths = set(_git_ls_tree(repo, c_ref))
+    for path in sorted(b_paths | c_paths):
+        b_content = _git_show(repo, b_ref, path) if path in b_paths else None
+        c_content = _git_show(repo, c_ref, path) if path in c_paths else None
+        try:
+            b_root = ET.fromstring(b_content) if b_content else None
+            c_root = ET.fromstring(c_content) if c_content else None
+        except ET.ParseError as e:
+            # A POM the check cannot read would hide its differences.
+            record("pom-unparseable", path, str(e))
+            continue
+        b_module = _pom_module(b_root) if b_root is not None else None
+        c_module = _pom_module(c_root) if c_root is not None else None
+        module = c_module or b_module
+        b_deps = _pom_deps(b_root, "dependencies") if b_root is not None else {}
+        c_deps = _pom_deps(c_root, "dependencies") if c_root is not None else {}
+        for key in sorted(b_deps.keys() - c_deps.keys()):
+            record("pom-dependency-removed", f"{module}|{key}")
+        for key in sorted(c_deps.keys() - b_deps.keys()):
+            record("pom-dependency-added", f"{module}|{key}")
+        for key in sorted(b_deps.keys() & c_deps.keys()):
+            if b_deps[key] != c_deps[key]:
+                record("pom-dependency-changed", f"{module}|{key}",
+                       f"{_dep_detail(b_deps[key])} -> {_dep_detail(c_deps[key])}")
+        b_managed = _pom_managed(b_root) if b_root is not None else {}
+        c_managed = _pom_managed(c_root) if c_root is not None else {}
+        b_props = _pom_props(b_root) if b_root is not None else {}
+        c_props = _pom_props(c_root) if c_root is not None else {}
+        for key in sorted(b_managed.keys() - c_managed.keys()):
+            record("pom-managed-removed", f"{module}|{key}")
+        for key in sorted(c_managed.keys() - b_managed.keys()):
+            record("pom-managed-added", f"{module}|{key}")
+        for key in sorted(b_managed.keys() & c_managed.keys()):
+            b_ver = _resolve_version(b_managed[key], b_props)
+            c_ver = _resolve_version(c_managed[key], c_props)
+            if b_ver != c_ver:
+                record("pom-managed-changed", f"{module}|{key}", f"{b_ver} -> {c_ver}")
+        b_parent = _pom_parent(b_root) if b_root is not None else None
+        c_parent = _pom_parent(c_root) if c_root is not None else None
+        if b_parent != c_parent:
+            record("pom-parent-changed", f"{module}|parent", f"{b_parent} -> {c_parent}")
+
+
+# --- T15: LICENSE-binary and NOTICE-binary consistency ---------------------
+
+def _jar_coordinate(path):
+    """g:a:v from META-INF/maven/*/*/pom.properties, else the file name."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            for n in z.namelist():
+                if n.startswith("META-INF/maven/") and n.endswith("/pom.properties"):
+                    props = {}
+                    for line in z.read(n).decode("utf-8", "replace").splitlines():
+                        if "=" in line and not line.lstrip().startswith("#"):
+                            k, v = line.split("=", 1)
+                            props[k.strip()] = v.strip()
+                    g, a, v = props.get("groupId"), props.get("artifactId"), props.get("version")
+                    if g and a and v:
+                        return f"{g}:{a}:{v}"
+    except (zipfile.BadZipFile, OSError):
+        pass
+    return os.path.basename(path)
+
+
+def _jar_notice(path):
+    """A jar's own META-INF/NOTICE* text, or None when it ships none."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            for n in z.namelist():
+                if n.startswith("META-INF/NOTICE"):
+                    return z.read(n).decode("utf-8", "replace")
+    except (zipfile.BadZipFile, OSError):
+        pass
+    return None
+
+
+def _jar_names(coord, name):
+    """Names NOTICE-binary may use for a jar: its file name and artifactId."""
+    base = name[:-4] if name.endswith(".jar") else name
+    names = {base}
+    parts = coord.split(":")
+    if len(parts) >= 2:
+        names.add(parts[1])
+        names.add(parts[0] + ":" + parts[1])
+    return names
+
+
+def _notice_mentions(names, text):
+    """True when NOTICE-binary text names the jar by artifactId or project.
+
+    NOTICE-binary writes projects in prose ("Jetty Web Container"), so the
+    artifactId's first token counts as a name when it is distinctive.
+    """
+    low = text.lower()
+    for n in names:
+        if n.lower() in low:
+            return True
+        token = re.split(r"[-:.]", n)[0].lower()
+        if len(token) >= 4 and re.search(r"\b" + re.escape(token) + r"\b", low):
+            return True
+    return False
+
+
+def _third_party_jars(dist):
+    """{coordinate or file name: path} for jars under share/, not Hadoop's."""
+    jars = {}
+    share = os.path.join(dist, "share")
+    for dirpath, _, filenames in os.walk(share):
+        for name in filenames:
+            if not name.endswith(".jar"):
+                continue
+            full = os.path.join(dirpath, name)
+            coord = _jar_coordinate(full)
+            if coord.startswith("org.apache.hadoop:"):
+                continue
+            jars[coord] = full
+    return jars
+
+
+def _jar_bundled_artifacts(path):
+    """{coordinate: file name} for the artifacts a shaded jar bundles.
+
+    A shaded jar keeps each bundled artifact's
+    META-INF/maven/<groupId>/<artifactId>/pom.properties, so an artifact
+    shipped inside it is as shipped as a jar file for the LICENSE check (T50).
+    Hadoop's own artifacts are left out, as _third_party_jars() leaves out
+    Hadoop's jars."""
+    out = {}
+    try:
+        with zipfile.ZipFile(path) as z:
+            for n in z.namelist():
+                if not (n.startswith("META-INF/maven/") and n.endswith("/pom.properties")):
+                    continue
+                props = {}
+                for line in z.read(n).decode("utf-8", "replace").splitlines():
+                    if "=" in line and not line.lstrip().startswith("#"):
+                        k, v = line.split("=", 1)
+                        props[k.strip()] = v.strip()
+                g, a, v = props.get("groupId"), props.get("artifactId"), props.get("version")
+                if g and a and v and not f"{g}:{a}:{v}".startswith("org.apache.hadoop:"):
+                    out[f"{g}:{a}:{v}"] = f"{a}-{v}.jar"
+    except (zipfile.BadZipFile, OSError):
+        pass
+    return out
+
+
+def _bundled_artifacts(dist):
+    """{coordinate: file name} for artifacts bundled in the shaded client jars."""
+    out = {}
+    client = os.path.join(dist, "share", "hadoop", "client")
+    if not os.path.isdir(client):
+        return out
+    for name in sorted(os.listdir(client)):
+        if name.startswith("hadoop-client-") and name.endswith(".jar"):
+            out.update(_jar_bundled_artifacts(os.path.join(client, name)))
+    return out
+
+
+def _license_entries(path):
+    """Jar-like lines of a LICENSE-binary or NOTICE-binary file."""
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            text = f.read()
+    except OSError:
+        return set()
+    entries = set()
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.endswith(".jar") or re.match(
+                r"^[A-Za-z0-9_.-]+(:[A-Za-z0-9_.-]+)+$", line):
+            entries.add(line)
+    return entries
+
+
+def _jar_listed(coord, name, entries):
+    base = name[:-4] if name.endswith(".jar") else name
+    for e in entries:
+        if e == coord or e == name or e.endswith("/" + name) or name in e or coord in e:
+            return True
+        # LICENSE-binary lists many jars as g:a:v or g:a:type:v while the jar
+        # file is a-v.jar; translate the entry to the file name.
+        parts = e.split(":")
+        if len(parts) >= 2 and parts[1] and parts[-1]:
+            artifact, version = parts[1], parts[-1]
+            candidates = {f"{artifact}-{version}"}
+            # g:a:type:v: the jar file is a-v-type.jar (g:a:v has no type part)
+            if len(parts) >= 4:
+                candidates.add(f"{artifact}-{version}-{parts[2]}")
+            if base in candidates:
+                return True
+    return False
+
+
+def _license_mismatches(dist):
+    """(jars missing a licence entry, entries with no jar) for one side.
+
+    A jar shipped as a file and an artifact bundled in a shaded client jar
+    both count as shipped (T50)."""
+    shipped = {coord: os.path.basename(full)
+               for coord, full in _third_party_jars(dist).items()}
+    shipped.update(_bundled_artifacts(dist))
+    lic = _license_entries(os.path.join(dist, "LICENSE-binary"))
+    notice = _license_entries(os.path.join(dist, "NOTICE-binary"))
+    missing = set()
+    for coord, name in shipped.items():
+        if not _jar_listed(coord, name, lic) and not _jar_listed(coord, name, notice):
+            missing.add(coord)
+    stale = set()
+    for e in lic | notice:
+        if not any(_jar_listed(coord, name, {e}) for coord, name in shipped.items()):
+            stale.add(e)
+    return missing, stale
+
+
+def compare_license(b_dist, c_dist, record):
+    """T15: a candidate-only licence mismatch fails; a shared one is pre-existing."""
+    b_missing, b_stale = _license_mismatches(b_dist)
+    c_missing, c_stale = _license_mismatches(c_dist)
+    for coord in sorted(c_missing - b_missing):
+        record("license-jar-missing", coord, "not in LICENSE-binary or NOTICE-binary")
+    for entry in sorted(c_stale - b_stale):
+        record("license-entry-stale", entry, "no jar in the distribution")
+    for coord in sorted(c_missing & b_missing):
+        record("license-jar-missing", coord, "not in LICENSE-binary or NOTICE-binary",
+               expected_reason="pre-existing (both sides)")
+    for entry in sorted(c_stale & b_stale):
+        record("license-entry-stale", entry, "no jar in the distribution",
+               expected_reason="pre-existing (both sides)")
+
+    # A jar new on the candidate that ships its own META-INF/NOTICE* must be
+    # named in NOTICE-binary by artifactId or project name. The jar's own
+    # NOTICE text names the project; NOTICE-binary writes it in prose.
+    b_jars, c_jars = _third_party_jars(b_dist), _third_party_jars(c_dist)
+    try:
+        with open(os.path.join(c_dist, "NOTICE-binary"), encoding="utf-8",
+                  errors="replace") as f:
+            notice_text = f.read()
+    except OSError:
+        notice_text = ""
+    for coord in sorted(c_jars.keys() - b_jars.keys()):
+        path = c_jars[coord]
+        if _jar_notice(path) is None:
+            continue
+        if not _notice_mentions(_jar_names(coord, os.path.basename(path)), notice_text):
+            record("notice-missing", coord, "ships META-INF/NOTICE but is not in NOTICE-binary")
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--expected", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--repo", help="git repository holding the two refs (T12)")
+    ap.add_argument("--baseline-ref", help="baseline git ref for T12")
+    ap.add_argument("--candidate-ref", help="candidate git ref for T12")
+    ap.add_argument("baseline")
+    ap.add_argument("candidate")
+    args = ap.parse_args()
+
+    allow = Allowlist(args.expected)
+    diffs = []
+
+    def record(kind, subject, detail=None, severity="runtime", expected_reason=None):
+        if expected_reason is not None:
+            rule = {"reason": expected_reason, "line": None}
+        else:
+            rule = allow.match(kind, subject)
+        diffs.append({
+            "kind": kind, "subject": subject, "detail": detail, "severity": severity,
+            "status": "EXPECTED" if rule else "UNEXPECTED",
+            "reason": rule["reason"] if rule else None,
+            "rule_line": rule["line"] if rule else None,
+        })
+
+    def side(path):
+        with open(os.path.join(path, "build", "dist-path.txt"), encoding="utf-8") as f:
+            return f.read().strip()
+
+    b_dist, c_dist = side(args.baseline), side(args.candidate)
+
+    # 1. Files in the distribution, and the contents of those on both sides.
+    bf, cf = dist_files(b_dist), dist_files(c_dist)
+    for rel in sorted(bf.keys() - cf.keys()):
+        record("dist-file-removed", rel)
+    for rel in sorted(cf.keys() - bf.keys()):
+        record("dist-file-added", rel)
+    identical_jars = 0
+    compared_files = 0
+    for rel in sorted(bf.keys() & cf.keys()):
+        compared_files += 1
+        b, c = bf[rel], cf[rel]
+        if os.path.getsize(b) == os.path.getsize(c) and file_digest(b) == file_digest(c):
+            if rel.endswith(ARCHIVE):
+                identical_jars += 1
+            continue
+        if rel.endswith(ARCHIVE):
+            be, ce = jar_entries(b), jar_entries(c)
+            if be is not None and ce is not None:
+                for e in sorted(be.keys() - ce.keys()):
+                    record("jar-entry-removed", f"{rel}!{e}")
+                for e in sorted(ce.keys() - be.keys()):
+                    record("jar-entry-added", f"{rel}!{e}")
+                for e in sorted(be.keys() & ce.keys()):
+                    if be[e] != ce[e]:
+                        record("jar-entry-changed", f"{rel}!{e}")
+                if be == ce:
+                    identical_jars += 1   # only build metadata differs
+                continue
+        record("dist-file-changed", rel)
+
+    # 2. Classes visible to each launcher command, and where they load from.
+    cp_dir_b = os.path.join(args.baseline, "classpath")
+    cp_dir_c = os.path.join(args.candidate, "classpath")
+    class_counts = {}
+    for name in sorted(os.listdir(cp_dir_b)):
+        if not name.endswith(".txt") or not os.path.exists(os.path.join(cp_dir_c, name)):
+            continue
+        cmd = name[:-4]
+        bv = classpath_view(os.path.join(cp_dir_b, name), b_dist)
+        cv = classpath_view(os.path.join(cp_dir_c, name), c_dist)
+        class_counts[cmd] = {"baseline": len(bv), "candidate": len(cv)}
+        for c in sorted(bv.keys() - cv.keys()):
+            record("class-removed", f"{cmd}:{c}", bv[c])
+        for c in sorted(cv.keys() - bv.keys()):
+            record("class-added", f"{cmd}:{c}", cv[c])
+        for c in sorted(bv.keys() & cv.keys()):
+            if bv[c] != cv[c]:
+                record("class-source-changed", f"{cmd}:{c}", f"{bv[c]} -> {cv[c]}")
+
+    # 3. Resolved dependencies of every module.
+    bd = read_deps(os.path.join(args.baseline, "build", "dependencies.tsv"))
+    cd = read_deps(os.path.join(args.candidate, "build", "dependencies.tsv"))
+    for kind, rows in (("dep-removed", bd - cd), ("dep-added", cd - bd)):
+        for row in sorted(rows):
+            module, coord = row.split("\t")
+            sev = "test" if coord.endswith(":test") else "runtime"
+            record(kind, f"{module}|{coord}", severity=sev)
+
+    # 4. Published POMs, when the comparison refs are given (T12).
+    if args.repo and args.baseline_ref and args.candidate_ref:
+        compare_poms(args.repo, args.baseline_ref, args.candidate_ref, record)
+
+    # 5. LICENSE-binary and NOTICE-binary consistency (T15).
+    compare_license(b_dist, c_dist, record)
+
+    unexpected = [d for d in diffs if d["status"] == "UNEXPECTED"]
+    summary = {
+        "baseline_dist": b_dist, "candidate_dist": c_dist,
+        "dist_files_compared": compared_files,
+        "jars_identical_apart_from_build_metadata": identical_jars,
+        "classes_visible": class_counts,
+        "modules_compared": len({r.split("\t")[0] for r in bd | cd}),
+        "differences": len(diffs), "unexpected": len(unexpected),
+        "unused_rules": [f"line {r['line']}: {r['kind']} {r['pattern']}"
+                         for r in allow.rules if r["hits"] == 0],
+    }
+    os.makedirs(args.out, exist_ok=True)
+    with open(os.path.join(args.out, "artifact-diff.json"), "w", encoding="utf-8") as f:
+        json.dump({"summary": summary, "differences": diffs}, f, indent=1)
+    write_markdown(os.path.join(args.out, "artifact-diff.md"), summary, diffs)
+    print(f"artifact diff: {len(diffs)} differences, {len(unexpected)} unexpected")
+    return 1 if unexpected else 0
+
+
+def write_markdown(path, summary, diffs):
+    by_kind = collections.defaultdict(list)
+    for d in diffs:
+        by_kind[(d["status"], d["kind"])].append(d)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("## Artifacts and dependencies\n\n")
+        f.write(f"- Distribution files compared: {summary['dist_files_compared']}\n")
+        f.write(f"- Jars identical apart from build metadata: "
+                f"{summary['jars_identical_apart_from_build_metadata']}\n")
+        f.write(f"- Modules whose dependencies were compared: {summary['modules_compared']}\n")
+        for cmd, n in summary["classes_visible"].items():
+            f.write(f"- Classes on the `{cmd}` classpath: baseline {n['baseline']}, "
+                    f"candidate {n['candidate']}\n")
+        f.write(f"- Differences: {summary['differences']}, "
+                f"**unexpected: {summary['unexpected']}**\n\n")
+        if summary["unused_rules"]:
+            f.write("Allowlist rules that matched nothing (expected change did not "
+                    "happen; check why):\n\n")
+            for r in summary["unused_rules"]:
+                f.write(f"- `{r}`\n")
+            f.write("\n")
+        for status in ("UNEXPECTED", "EXPECTED"):
+            kinds = sorted(k for s, k in by_kind if s == status)
+            if not kinds:
+                continue
+            f.write(f"### {status.title()} differences\n\n")
+            for kind in kinds:
+                items = by_kind[(status, kind)]
+                f.write(f"<details><summary>{kind}: {len(items)}</summary>\n\n")
+                f.write("| Subject | Detail | Severity | Reason |\n|---|---|---|---|\n")
+                for d in items[:2000]:
+                    f.write(f"| `{d['subject']}` | {d['detail'] or ''} | {d['severity']} "
+                            f"| {d['reason'] or ''} |\n")
+                if len(items) > 2000:
+                    f.write(f"| ... {len(items) - 2000} more in artifact-diff.json | | | |\n")
+                f.write("\n</details>\n\n")
+
+
+if __name__ == "__main__":
+    sys.exit(main())

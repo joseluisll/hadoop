@@ -1,0 +1,95 @@
+# Licensed to the Apache Software Foundation (ASF) under one or more
+# contributor license agreements.  See the NOTICE file distributed with
+# this work for additional information regarding copyright ownership.
+# The ASF licenses this file to You under the Apache License, Version 2.0
+# (the "License"); you may not use this file except in compliance with
+# the License.  You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
+# End-to-end differences between baseline and candidate that phase A is
+# meant to cause. lib/compare_e2e.py fails on every other one.
+#
+# Format: <kind> <regex>  # reason   (the regex must match the whole subject)
+#   obs       <component>:<observation id>
+#   obsdiff   <component>:<observation id>   excuses a DIFF only, never a REGRESSION
+#   obsfield  <component>:<observation id><json path>   excuses a DIFF when every
+#             field that differs (e.g. /headers/vary) matches such a rule
+#   classjar  <daemon>:<class>       class loaded from a different jar
+#   classonly <daemon>:<class>       class loaded on one side only
+#   logscan   <source>:<message>     error message only the candidate logs
+#
+# A rule may end with '@arch=<arch>[,<arch>...]' after its reason (simple,
+# secure, ha, mixed, federated): it then applies only in those architectures,
+# does not match elsewhere, and is not reported as unused there (T37).
+
+# HADOOP-20013 drops the duplicate javax.annotation-api jar, but the
+# javax.annotation classes were already loaded from jakarta.annotation-api on
+# both sides, so no observation or loaded class differs (none in CI).
+
+# Not caused by phase A: the timeline server (ApplicationHistoryServer) registers
+# both JettisonFeature and YarnJacksonJaxbJsonProvider, and Jersey picks one of
+# them for these responses afresh at each start, so the same build answers in
+# either JSON shape (Jettison collapses one-element lists and writes empty ones
+# as ""). Seen restarting one build several times; YARN-12030.
+# Only the shape may differ: a check that fails on the candidate still fails.
+obsdiff yarn-timeline:(put-entity|get-events|domain|ahs-app|ahs-apps|ahs-attempts)  # timeline server JSON provider chosen at startup (YARN-12030, pre-existing) @arch=simple,secure
+
+# Not caused by phase A: Jetty's DefaultServlet (precompressed "gzip" on in
+# HttpServer2) adds "Vary: Accept-Encoding" to a static file only when it
+# finds a precompressed variant, and the same build sends it in one run and
+# not in the next (the candidate sent it on yarn.css in CI runs 3 and 4 of
+# simple, not in run 5; the Jetty jars are identical on both sides). Only
+# that header may differ; any other difference in the observation still fails.
+obsfield [a-z0-9:-]+/headers/vary  # Vary on static files varies between runs of one build (pre-existing; no issue filed; announced: no)
+
+# Not caused by phase A: the counters of the sleep job, read from its
+# application master while it runs, have groups only once a task has been
+# counted, so whether a group exists yet is timing, in every architecture:
+# secure runs 2 and 3 had none on either side, run 4 had one on the baseline
+# only, and ha-run-5 differed too, without Kerberos. Only the presence of the
+# groups may differ; the response itself is still compared.
+obsfield mapreduce-am:am-job-counters/body/json/jobCounters/counterGroup  # job counters read mid-run depend on timing (pre-existing; no issue filed; announced: no) @arch=simple,secure,ha
+
+# HADOOP-19970: the launchers load the servlet API from jetty-servlet-api 4.0.9.
+obsdiff common-cli:load\.(hadoop|hdfs|mapred|yarn)\.javax\.servlet\.(Filter|http\.HttpServlet)  # HADOOP-19970; announced: HADOOP-19970 release note
+# HADOOP-19970: the probe's classpath has the Servlet 4.0 API jar while Jetty
+# 9.4 serves Servlet 3.1, so the jar name, the mapping (absent on the baseline,
+# a mapping with empty values on the candidate) and newPushBuilder (absent vs
+# null) differ. Only these three fields of probe-base may differ.
+obsfield probe:probe-base/body/json/(http_servlet_jar|mapping(/.*)?|new_push_builder)  # HADOOP-19970: the servlet API jar is Servlet 4.0 while Jetty 9.4 serves 3.1; announced: HADOOP-19970 release note
+# HADOOP-19970: every daemon (jn1, nn1, ... in the multi-instance architectures) loads
+# the javax.servlet classes from jetty-servlet-api 4.0.9
+# instead of javax.servlet-api 3.1.0.
+classjar [A-Za-z0-9_.-]+:javax\.servlet\..*  # HADOOP-19970; announced: HADOOP-19970 release note
+# Not caused by phase A: both sides ship jakarta.activation-api-1.2.1 and
+# jakarta.activation-1.2.2, so only which of the two the JVM finds first
+# differs (mixed-run-9: 30 moves of javax.activation classes on ten daemons).
+classjar [A-Za-z0-9_.-]+:javax\.activation\..*  # pre-existing: two jars ship javax.activation on both sides; no issue filed; announced: no
+
+# T10: the timeline server's JSON writer is chosen afresh at each start, so the
+# classes it loads on one side only flip between runs (YARN-12030, pre-existing).
+# The packages are named here; the org.apache.hadoop.yarn classes are named one
+# by one because a package-wide pattern would hide a real change there.
+classonly timelineserver:com\.fasterxml\.jackson\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+classonly timelineserver:com\.sun\.xml\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+classonly timelineserver:com\.sun\.istack\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+classonly timelineserver:javax\.xml\.bind\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+classonly timelineserver:org\.codehaus\.jettison\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+classonly timelineserver:org\.glassfish\.jersey\..*  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+classonly timelineserver:org\.apache\.hadoop\.yarn\.api\.records\.timeline\.TimelineEvents\$EventsOfOneEntity  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+classonly timelineserver:org\.apache\.hadoop\.yarn\.server\.applicationhistoryservice\.webapp\.ContextFactory  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+classonly timelineserver:org\.apache\.hadoop\.yarn\.webapp\.RemoteExceptionData  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+classonly timelineserver:org\.apache\.hadoop\.yarn\.webapp\.package-info  # timeline server JSON writer chosen at start (YARN-12030, pre-existing) @arch=simple,secure
+
+# HADOOP-19970: the servlet 4.0 types the bytecode verifier loads while linking
+# the 4.0 HttpServletRequest and HttpServletRequestWrapper appear on the
+# candidate only.
+classonly [A-Za-z0-9_.-]+:javax\.servlet\.http\.HttpServletMapping  # HADOOP-19970; announced: HADOOP-19970 release note
+classonly [A-Za-z0-9_.-]+:javax\.servlet\.http\.PushBuilder  # HADOOP-19970; announced: HADOOP-19970 release note

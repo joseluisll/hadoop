@@ -1,0 +1,266 @@
+#
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#   http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+#
+
+# Fork-only: per-ticket and merge-order runs of the Jetty 12 phase A harness
+# (R89). A push to jetty12-phase-a-attribution-run-* starts it. Every tree is
+# the baseline plus one PR branch (ticket-<n>) or a prefix of the merge order
+# (prefix-<n>); the branches and order come from PR_ORDER in
+# lib/compare_plan.py. One job builds the baseline, or reuses the build a
+# normal run saved; each tree then runs checks 1, 2 and 5 in its own matrix
+# job, building only its candidate (or reusing a saved build of the same
+# code), and a final job reads every tree's comparisons and writes
+# attribution.md.
+
+name: "Jetty 12 phase A: attribution runs"
+
+on:
+  push:
+    branches: ["jetty12-phase-a-attribution-run-*"]
+
+permissions:
+  contents: read
+
+env:
+  WORKDIR: /home/runner/jetty12-work
+  HARNESS: dev-support/jetty12-phase-a
+  BASELINE: PREPARATION
+  # As the template's build job, so the saved builds' keys match
+  # (ci/build-key.sh).
+  BUILD_NATIVE: "true"
+  BUILD_IMAGE: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
+
+jobs:
+  queue:
+    name: Wait for earlier harness runs
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      turn: ${{ steps.wait.outputs.turn }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: dev-support/jetty12-phase-a
+          fetch-depth: 0
+          fetch-tags: false
+          filter: blob:none
+      # A broken comparator would cost a whole run to find out (R81).
+      - name: Check the comparison scripts
+        shell: bash
+        run: python3 -I "${HARNESS}/lib/test_comparators.py"
+      - name: Wait for the runs started before this one
+        id: wait
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rc=0
+          ${HARNESS}/ci/wait-turn.sh "${{ github.repository }}" "${{ github.run_id }}" --budget 340 || rc=$?
+          case "${rc}" in
+            0) echo "turn=true" >> "${GITHUB_OUTPUT}" ;;
+            3) echo "turn=false" >> "${GITHUB_OUTPUT}" ;;
+            *) exit "${rc}" ;;
+          esac
+
+  queue-2:
+    name: Wait for earlier harness runs (continued)
+    needs: queue
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: Already our turn
+        if: needs.queue.outputs.turn == 'true'
+        shell: bash
+        run: echo "the first waiting job got the turn"
+      - uses: actions/checkout@v6
+        if: needs.queue.outputs.turn != 'true'
+        with:
+          sparse-checkout: dev-support/jetty12-phase-a/ci
+      - name: Keep waiting for the runs started before this one
+        if: needs.queue.outputs.turn != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          rc=0
+          ${HARNESS}/ci/wait-turn.sh "${{ github.repository }}" "${{ github.run_id }}" --budget 340 || rc=$?
+          if (( rc == 3 )); then
+            echo "::error::still not this run's turn after about 11 hours of waiting; start it again later"
+          fi
+          exit "${rc}"
+
+  list:
+    name: List the trees
+    needs: queue-2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      trees: ${{ steps.list.outputs.trees }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: dev-support/jetty12-phase-a
+          fetch-depth: 1
+      - name: List the trees
+        id: list
+        shell: bash
+        run: |
+          trees=$(${HARNESS}/attribution.sh list \
+            | python3 -I -c 'import json,sys; print(json.dumps([l.strip() for l in sys.stdin if l.strip()]))')
+          echo "trees=${trees}" >> "${GITHUB_OUTPUT}"
+          echo "trees: ${trees}"
+
+  baseline:
+    name: Baseline build
+    needs: queue-2
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+    container:
+      image: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: false
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ env.BASELINE }}
+          candidate: ${{ github.sha }}
+          free-disk: "false"
+      - uses: ./.github/actions/jetty12-phase-a-build-side
+        with:
+          side: baseline
+      - uses: actions/upload-artifact@v4
+        with:
+          name: attribution-build-baseline
+          path: ${{ runner.temp }}/build-baseline
+          retention-days: 1
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: attribution-m2-baseline
+          path: ${{ env.WORKDIR }}/m2/installed-baseline
+          retention-days: 1
+
+  tree:
+    name: Tree ${{ matrix.tree }}
+    needs: [list, baseline]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+    permissions:
+      actions: read
+      contents: read
+    # The candidate is built here; it needs the build image's toolchain and
+    # native libraries, as the template's build job does.
+    container:
+      image: ghcr.io/apache/hadoop/gha-build-ubuntu_24-image-cache:trunk-static
+    strategy:
+      fail-fast: false
+      matrix:
+        tree: ${{ fromJSON(needs.list.outputs.trees) }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          fetch-tags: false
+      - uses: ./.github/actions/jetty12-phase-a-setup
+        with:
+          baseline: ${{ env.BASELINE }}
+          candidate: ${{ github.sha }}
+          free-disk: "true"
+      - uses: actions/download-artifact@v4
+        with:
+          name: attribution-build-baseline
+          path: ${{ runner.temp }}/build-baseline
+      - uses: actions/download-artifact@v4
+        with:
+          name: attribution-m2-baseline
+          path: ${{ env.WORKDIR }}/m2/installed-baseline
+      - name: Unpack the baseline
+        shell: bash
+        run: |
+          ${HARNESS}/ci/artifacts.sh unpack-build baseline "${RUNNER_TEMP}/build-baseline"
+          ${HARNESS}/build.sh baseline worktree
+      # Sets CANDIDATE_REF to the tree's merge commit for the later steps.
+      - name: Create the tree
+        shell: bash
+        run: ${HARNESS}/attribution.sh merge ${{ matrix.tree }}
+      - uses: ./.github/actions/jetty12-phase-a-build-side
+        with:
+          side: candidate
+      - name: Compare the tree
+        shell: bash
+        run: ${HARNESS}/attribution.sh compare ${{ matrix.tree }}
+      - name: Upload the comparisons
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.tree }}
+          path: ${{ env.WORKDIR }}/results/attribution/${{ matrix.tree }}
+          retention-days: 14
+
+  report:
+    name: Attribute the differences
+    needs: tree
+    if: (!cancelled())
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          sparse-checkout: dev-support/jetty12-phase-a
+          fetch-depth: 1
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: "{ticket,prefix}-*"
+          path: ${{ runner.temp }}/trees
+      - name: Attribute the differences
+        shell: bash
+        run: python3 -I "${HARNESS}/lib/attribution.py" "${RUNNER_TEMP}/trees"
+      - name: Summary
+        if: always()
+        shell: bash
+        run: |
+          report="${RUNNER_TEMP}/trees/attribution.md"
+          if [[ -f "${report}" ]]; then
+            cat "${report}" >> "${GITHUB_STEP_SUMMARY}"
+          else
+            echo "No attribution report was produced; see the step log." >> "${GITHUB_STEP_SUMMARY}"
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: attribution-report
+          path: |
+            ${{ runner.temp }}/trees/attribution.json
+            ${{ runner.temp }}/trees/attribution.md
+          retention-days: 30
