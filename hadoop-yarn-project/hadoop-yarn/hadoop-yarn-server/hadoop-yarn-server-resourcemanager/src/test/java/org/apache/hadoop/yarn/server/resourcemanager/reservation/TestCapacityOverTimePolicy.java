@@ -227,6 +227,38 @@ public class TestCapacityOverTimePolicy extends BaseSharingPolicyTest {
         createReservation(id, t0, t0 + 21 * ONEHOUR, 0.3, null)));
   }
 
+  /**
+   * Updating a reservation must also be accepted when another reservation
+   * of the same user is in progress at the end of the window checked by
+   * the policy (the reservation end + 24h): the subtraction merge of the
+   * old version inserts an end marker there. Both reservations below are
+   * far within the 25% average and 75% instantaneous limits, while an
+   * update exceeding the average limit is still rejected.
+   */
+  @Test
+  public void testUpdateReservationWithAllocationInProgressAtCheckedWindowEnd()
+      throws PlanningException {
+    InMemoryPlan plan = createPlan();
+    // an arbitrary fixed start time
+    long t0 = 1791808200000L;
+    ReservationId id = ReservationSystemTestUtil.getNewReservationId();
+
+    // 10% of the cluster for 10h, in progress at t0 + 32h, the end of the
+    // window checked for the reservation being updated (its end + 24h)
+    assertTrue(plan.addReservation(
+        createReservation(t0 + 30 * ONEHOUR, t0 + 40 * ONEHOUR, 0.1, null),
+        false));
+    // 10% of the cluster for 7h, 2.9% on average over a 24h window
+    assertTrue(plan.addReservation(
+        createReservation(id, t0, t0 + 7 * ONEHOUR, 0.1, null), false));
+    // 10% of the cluster for 8h, 3.3% on average, within the quota
+    assertTrue(plan.updateReservation(
+        createReservation(id, t0, t0 + 8 * ONEHOUR, 0.1, null)));
+    // 70% of the cluster for 9h, 26.25% on average, exceeds the limit
+    assertThrows(PlanningQuotaException.class, () -> plan.updateReservation(
+        createReservation(id, t0, t0 + 9 * ONEHOUR, 0.7, null)));
+  }
+
   private InMemoryPlan createPlan() {
     return new InMemoryPlan(mock(QueueMetrics.class), getInitializedPolicy(),
         mock(ReservationAgent.class),
